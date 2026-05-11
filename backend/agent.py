@@ -217,7 +217,6 @@ class ConversationStorage:
             db.close()
 
 
-
 def create_agent_instance():
     model = init_chat_model(
         model=MODEL,
