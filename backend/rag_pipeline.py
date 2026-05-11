@@ -5,8 +5,8 @@ from langchain.chat_models import init_chat_model
 from langgraph.graph import StateGraph, END
 from pydantic import BaseModel, Field
 
-from rag_utils import retrieve_documents, step_back_expand, generate_hypothetical_document
-from tools import emit_rag_step
+from backend.rag_utils import retrieve_documents, step_back_expand, generate_hypothetical_document
+from backend.tools import emit_rag_step
 
 load_dotenv()
 
@@ -170,10 +170,9 @@ def grade_documents_node(state: RAGState) -> RAGState:
     question = state["question"]
     context = state.get("context", "")
     prompt = GRADE_PROMPT.format(question=question, context=context)
-    response = grader.with_structured_output(GradeDocuments).invoke(
-        [{"role": "user", "content": prompt}]
-    )
-    score = (response.binary_score or "").strip().lower()
+    response = grader.invoke(prompt)
+    response_text = (response.content or "").strip().lower()
+    score = "yes" if "yes" in response_text else "no"
     route = "generate_answer" if score == "yes" else "rewrite_question"
     if route == "generate_answer":
         emit_rag_step("✅", "文档相关性评估通过", f"评分: {score}")
@@ -203,10 +202,16 @@ def rewrite_question_node(state: RAGState) -> RAGState:
             f"用户问题：{question}"
         )
         try:
-            decision = router.with_structured_output(RewriteStrategy).invoke(
-                [{"role": "user", "content": prompt}]
-            )
-            strategy = decision.strategy
+            decision = router.invoke(prompt)
+            decision_text = (decision.content or "").strip().lower()
+            if "step_back" in decision_text:
+                strategy = "step_back"
+            elif "hyde" in decision_text:
+                strategy = "hyde"
+            elif "complex" in decision_text:
+                strategy = "complex"
+            else:
+                strategy = "step_back"
         except Exception:
             strategy = "step_back"
 

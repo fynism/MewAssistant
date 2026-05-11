@@ -361,7 +361,7 @@
 
             <div class="input-area-wrapper">
                 <div class="input-area">
-                    <button class="attach-btn"><i class="fas fa-paperclip"></i></button>
+                    <button class="attach-btn" @click="handleUploadClick" title="上传文档"><i class="fas fa-paperclip"></i></button>
                     <textarea 
                         v-model="userInput" 
                         @keydown="handleKeyDown"

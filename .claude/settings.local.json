@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run *)",
+      "Bash(curl -s http://127.0.0.1:8000/docs)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8000/)",
+      "Bash(HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 uv run uvicorn backend.app:app --host 0.0.0.0 --port 8000 --reload)",
+      "Bash(python -c \"from backend.langchain_patches import apply_patches; apply_patches\\(\\); import langchain_openai.chat_models.base as b; print\\('Patch applied, _convert_dict_to_message:', b._convert_dict_to_message.__name__\\); print\\('_convert_message_to_dict:', b._convert_message_to_dict.__name__\\); print\\('_convert_delta_to_message_chunk:', b._convert_delta_to_message_chunk.__name__\\)\")",
+      "Bash(curl -s http://localhost:8000/)",
+      "Bash(python -c \"from backend.rag_pipeline import run_rag_graph; print\\('Import OK'\\)\")",
+      "Bash(curl -s -o NUL -w \"%{http_code}\" http://localhost:8000/)"
+    ]
+  }
+}

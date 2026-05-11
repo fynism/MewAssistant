@@ -8,9 +8,10 @@ from collections import Counter
 from pathlib import Path
 
 from dotenv import load_dotenv
-from langchain_huggingface import HuggingFaceEmbeddings
 
 load_dotenv()
+
+from langchain_huggingface import HuggingFaceEmbeddings
 
 _DEFAULT_STATE_PATH = Path(__file__).resolve().parent.parent / "data" / "bm25_state.json"
 
@@ -131,6 +132,7 @@ class EmbeddingService:
             self._persist_unlocked()
 
     def get_embeddings(self, texts: list[str]) -> list[list[float]]:
+        """调用本地文本嵌入模型获取文本的稠密向量,返回一个二维列表,每个内层列表是一个1024维的稠密向量。"""
         if not texts:
             return []
         try:
@@ -139,6 +141,7 @@ class EmbeddingService:
             raise Exception(f"本地嵌入模型调用失败: {str(e)}") from e
 
     def tokenize(self, text: str) -> list[str]:
+        """简单的中英文分词器，中文单字，英文连续字母序列，忽略其他字符"""
         text = text.lower()
         tokens = []
         chinese_pattern = re.compile(r"[\u4e00-\u9fff]")
@@ -159,20 +162,27 @@ class EmbeddingService:
         return tokens
 
     def _sparse_vector_for_text_unlocked(self, text: str) -> tuple[dict, bool]:
+        """计算单文本的 BM25 稀疏向量，返回稀疏向量和词表是否发生变化的标志。"""
         tokens = self.tokenize(text)
         doc_len = len(tokens)
-        tf = Counter(tokens)
+        tf = Counter(tokens) # 词频统计,返回一个字典,形如 {"token1": freq1, "token2": freq2, ...}
         sparse_vector: dict[int, float] = {}
         vocab_changed = False
-        n = max(self._total_docs, 0)
-        avg = max(self._avg_doc_len, 1.0)
+        n = max(self._total_docs, 0) # 文档总数
+        avg = max(self._avg_doc_len, 1.0) # 平均文档长度
 
+
+        
         for token, freq in tf.items():
+
+            #词表注册，给每个token分配一个唯一索引
+            #_vocab 词表是一个字典，是token和索引的映射
             if token not in self._vocab:
                 self._vocab[token] = self._vocab_counter
                 self._vocab_counter += 1
                 vocab_changed = True
 
+            # 计算 BM25 权重
             idx = self._vocab[token]
             df = self._doc_freq.get(token, 0)
             if df == 0:

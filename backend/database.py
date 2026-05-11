@@ -17,6 +17,11 @@ Base = declarative_base()
 
 def init_db() -> None:
     # Delayed import to avoid circular dependency.
-    import models  # noqa: F401
+    from backend import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        conn.execute(text("ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reasoning_content TEXT"))
+        conn.commit()

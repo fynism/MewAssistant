@@ -5,13 +5,16 @@ import asyncio
 from langchain.chat_models import init_chat_model
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, AIMessage, AIMessageChunk, SystemMessage
-from tools import get_current_weather, search_knowledge_base, get_last_rag_context, reset_tool_call_guards, set_rag_step_queue
+from backend.tools import get_current_weather, search_knowledge_base, get_last_rag_context, reset_tool_call_guards, set_rag_step_queue
 from datetime import datetime
-from cache import cache
-from database import SessionLocal
-from models import User, ChatSession, ChatMessage
+from backend.cache import cache
+from backend.database import SessionLocal
+from backend.models import User, ChatSession, ChatMessage
 
 load_dotenv()
+
+from backend.langchain_patches import apply_patches
+apply_patches()
 
 API_KEY = os.getenv("ARK_API_KEY")
 MODEL = os.getenv("MODEL")
@@ -34,10 +37,14 @@ class ConversationStorage:
         for msg_data in records:
             msg_type = msg_data.get("type")
             content = msg_data.get("content", "")
+            reasoning = msg_data.get("reasoning_content")
             if msg_type == "human":
                 messages.append(HumanMessage(content=content))
             elif msg_type == "ai":
-                messages.append(AIMessage(content=content))
+                additional_kwargs = {}
+                if reasoning:
+                    additional_kwargs["reasoning_content"] = reasoning
+                messages.append(AIMessage(content=content, additional_kwargs=additional_kwargs))
             elif msg_type == "system":
                 messages.append(SystemMessage(content=content))
         return messages
@@ -72,11 +79,13 @@ class ConversationStorage:
                     extra = extra_message_data[idx] or {}
                     rag_trace = extra.get("rag_trace")
 
+                reasoning = msg.additional_kwargs.get("reasoning_content") if hasattr(msg, "additional_kwargs") else None
                 db.add(
                     ChatMessage(
                         session_ref_id=session.id,
                         message_type=msg.type,
                         content=str(msg.content),
+                        reasoning_content=reasoning,
                         timestamp=now,
                         rag_trace=rag_trace,
                     )
@@ -85,6 +94,7 @@ class ConversationStorage:
                     {
                         "type": msg.type,
                         "content": str(msg.content),
+                        "reasoning_content": reasoning,
                         "timestamp": now.isoformat(),
                         "rag_trace": rag_trace,
                     }
@@ -172,6 +182,7 @@ class ConversationStorage:
                 {
                     "type": row.message_type,
                     "content": row.content,
+                    "reasoning_content": row.reasoning_content,
                     "timestamp": row.timestamp.isoformat(),
                     "rag_trace": row.rag_trace,
                 }

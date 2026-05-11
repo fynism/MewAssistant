@@ -389,6 +389,14 @@ createApp({
             }
         },
 
+        handleUploadClick() {
+            if (!this.isAdmin) {
+                alert('仅管理员可上传和管理文档');
+                return;
+            }
+            this.handleSettings();
+        },
+
         handleSettings() {
             if (!this.isAdmin) {
                 alert('仅管理员可访问文档管理');
