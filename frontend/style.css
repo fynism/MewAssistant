@@ -1,16 +1,16 @@
 :root {
-    --primary-color: #ff9e99;
-    --primary-light: #ffb7b2;
-    --secondary-color: #ffdac1;
-    --accent-color: #e2f0cb;
-    --bg-color: #fff5f5;
-    --text-color: #6d6875;
-    --text-light: #a5a5a5;
+    --primary-color: #6b8aab;
+    --primary-light: #dce6f0;
+    --secondary-color: #e8e5df;
+    --accent-color: #b0bfa3;
+    --bg-color: #fafaf8;
+    --text-color: #3c3c3a;
+    --text-light: #9a9a95;
     --white: #ffffff;
-    --sidebar-bg: #fff0f0;
-    --bot-msg-bg: #f0f8ff;
-    --user-msg-bg: #ffb7b2;
-    --shadow: 0 8px 24px rgba(255, 183, 178, 0.2);
+    --sidebar-bg: #f5f4f1;
+    --bot-msg-bg: #f7f7f5;
+    --user-msg-bg: #eaf0f6;
+    --shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
     --border-radius: 20px;
     --transition: all 0.3s ease;
 }
@@ -29,9 +29,9 @@ body {
     display: flex;
     justify-content: center;
     align-items: center;
-    background-image: 
-        radial-gradient(#ffdac1 2px, transparent 2px),
-        radial-gradient(#e2f0cb 2px, transparent 2px);
+    background-image:
+        radial-gradient(#e8e5df 2px, transparent 2px),
+        radial-gradient(#b0bfa3 2px, transparent 2px);
     background-size: 30px 30px;
     background-position: 0 0, 15px 15px;
     overflow: hidden;
@@ -46,7 +46,7 @@ body {
     box-shadow: var(--shadow);
     display: flex;
     overflow: hidden;
-    border: 4px solid var(--white);
+    border: 1px solid var(--secondary-color);
 }
 
 /* Sidebar */
@@ -82,9 +82,10 @@ body {
 }
 
 .sidebar-header h2 {
-    font-family: 'Zcool KuaiLe', cursive;
+    font-family: 'Nunito', 'Microsoft YaHei', sans-serif;
     color: var(--primary-color);
     font-size: 1.5rem;
+    font-weight: 700;
 }
 
 .sidebar-nav {
@@ -135,8 +136,8 @@ body {
     width: 100%;
     padding: 12px;
     border: none;
-    background-color: #ffe5e5;
-    color: #ff6b6b;
+    background-color: #fce8e8;
+    color: #e05555;
     border-radius: 15px;
     cursor: pointer;
     font-weight: 600;
@@ -148,7 +149,7 @@ body {
 }
 
 .danger-btn:hover {
-    background-color: #ffcccc;
+    background-color: #f5c8c8;
 }
 
 .logout-btn {
@@ -492,7 +493,7 @@ body {
 .input-area:focus-within {
     border-color: var(--primary-light);
     background-color: var(--white);
-    box-shadow: 0 4px 15px rgba(255, 183, 178, 0.15);
+    box-shadow: 0 4px 15px rgba(107, 138, 171, 0.12);
 }
 
 .attach-btn {
@@ -534,12 +535,12 @@ textarea {
     justify-content: center;
     cursor: pointer;
     transition: var(--transition);
-    box-shadow: 0 4px 10px rgba(255, 158, 153, 0.3);
+    box-shadow: 0 4px 10px rgba(107, 138, 171, 0.25);
 }
 
 .send-btn:hover {
     transform: scale(1.1) rotate(-10deg);
-    background-color: #ff8e89;
+    background-color: #5a7d9e;
 }
 
 .footer-text {
@@ -707,7 +708,7 @@ textarea {
 }
 
 .history-item:hover {
-    background-color: #fff0f0;
+    background-color: var(--secondary-color);
     border-color: var(--primary-light);
     transform: translateX(-3px);
 }
@@ -758,8 +759,8 @@ textarea {
 }
 
 .history-delete-btn:hover {
-    background-color: rgba(255, 107, 107, 0.1);
-    color: #ff6b6b;
+    background-color: rgba(224, 85, 85, 0.1);
+    color: #e05555;
 }
 
 .history-item.active .history-delete-btn {
@@ -839,7 +840,7 @@ textarea {
 
 .upload-btn:hover {
     transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(255, 158, 153, 0.3);
+    box-shadow: 0 6px 20px rgba(107, 138, 171, 0.3);
 }
 
 .selected-file {
@@ -875,7 +876,7 @@ textarea {
 .btn-primary:hover:not(:disabled) {
     background-color: var(--primary-light);
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(255, 158, 153, 0.3);
+    box-shadow: 0 4px 12px rgba(107, 138, 171, 0.3);
 }
 
 .btn-primary:disabled {
@@ -900,12 +901,12 @@ textarea {
 }
 
 .btn-secondary:hover {
-    background-color: #ffcda3;
+    background-color: #d9d5ce;
     transform: translateY(-2px);
 }
 
 .btn-danger {
-    background-color: #ff6b6b;
+    background-color: #e05555;
     color: var(--white);
     border: none;
     padding: 8px 15px;
@@ -919,9 +920,9 @@ textarea {
 }
 
 .btn-danger:hover {
-    background-color: #ff5252;
+    background-color: #c94a4a;
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(255, 107, 107, 0.3);
+    box-shadow: 0 4px 12px rgba(224, 85, 85, 0.3);
 }
 
 .upload-progress {
@@ -1160,11 +1161,11 @@ textarea {
 
 /* Stop button */
 .stop-btn {
-    background-color: #ff6b6b !important;
-    box-shadow: 0 4px 10px rgba(255, 107, 107, 0.3) !important;
+    background-color: #e05555 !important;
+    box-shadow: 0 4px 10px rgba(224, 85, 85, 0.3) !important;
 }
 
 .stop-btn:hover {
-    background-color: #ee5a5a !important;
+    background-color: #c94a4a !important;
     transform: scale(1.1) !important;
 }
