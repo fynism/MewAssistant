@@ -12,7 +12,7 @@ FRONTEND_DIR = BASE_DIR / "frontend"
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="SuperMew Knowledge Base API")
+    app = FastAPI(title="呆猫助手 API")
 
     @app.on_event("startup")
     async def _startup_init_db():
