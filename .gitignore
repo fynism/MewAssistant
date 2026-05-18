@@ -16,4 +16,6 @@ volumes/
 # OS files
 .DS_Store
 data/
+
+# 辅助分析文档
 docs/
