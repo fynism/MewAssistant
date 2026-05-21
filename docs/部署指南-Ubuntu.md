@@ -93,10 +93,12 @@ python3.12 --version
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-source ~/.cargo/env
+```
 
-# 写入 ~/.bashrc 永久生效
-echo 'source $HOME/.cargo/env' >> ~/.bashrc
+安装完成后直接可用。新版 uv 装到 `~/.local/bin` 或 `~/.cargo/bin`，均在 `PATH` 中，不需要额外 source。验证：
+
+```bash
+uv --version
 ```
 
 ### 2.5 安装 Nginx
@@ -324,8 +326,8 @@ Requires=docker.service
 Type=simple
 User=root
 WorkingDirectory=/opt/supermew
-Environment=PATH=/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
-ExecStart=/root/.cargo/bin/uv run uvicorn backend.app:app --host 127.0.0.1 --port 8000 --workers 1
+Environment=PATH=/root/.local/bin:/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+ExecStart=uv run uvicorn backend.app:app --host 127.0.0.1 --port 8000 --workers 1
 Restart=always
 RestartSec=5
 

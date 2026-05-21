@@ -13,7 +13,13 @@ wheels/
 #docker files
 volumes/
 
+# IDE / editor
+.idea/
+.claude/
+
 # OS files
 .DS_Store
 data/
 
+#文档
+/docs
