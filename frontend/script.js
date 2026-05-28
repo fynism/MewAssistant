@@ -26,7 +26,8 @@ createApp({
                 role: 'user',
                 admin_code: ''
             },
-            authLoading: false
+            authLoading: false,
+            showNotice: true
         };
     },
     computed: {
@@ -152,6 +153,7 @@ createApp({
             this.documents = [];
             this.activeNav = 'newChat';
             this.showHistorySidebar = false;
+            this.showNotice = true;
             localStorage.removeItem('accessToken');
         },
 

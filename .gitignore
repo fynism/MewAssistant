@@ -12,6 +12,7 @@ wheels/
 
 #docker files
 volumes/
+CLAUDE.md
 
 # IDE / editor
 .idea/

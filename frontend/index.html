@@ -71,6 +71,18 @@
                         {{ authMode === 'login' ? '没有账号？去注册' : '已有账号？去登录' }}
                     </button>
                 </div>
+
+                <div v-if="showNotice" class="notice-overlay" @click.self="showNotice = false">
+                    <div class="notice-modal">
+                        <h3>使用须知</h3>
+                        <ul>
+                            <li>注册管理员账号时，邀请码为 <code>fengye-admin-2026</code>，在角色选择"管理员"后填写即可。</li>
+                            <li>本应用支持上传 Word、PDF、Excel 文档用于功能测试。但请注意，所有已上传的文件对每位管理员均可见，普通用户的会话也可能检索到其中的内容，<strong>请勿上传涉及隐私或敏感信息的文件</strong>。</li>
+                            <li>当前版本尚在早期阶段，功能和使用体验会持续打磨，感谢你的耐心与反馈。</li>
+                        </ul>
+                        <button class="notice-confirm-btn" @click="showNotice = false">我知道了</button>
+                    </div>
+                </div>
             </div>
 
             <!-- Settings Panel -->

@@ -1,6 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException as FastAPIHTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pathlib import Path
 import os
 
@@ -37,11 +37,31 @@ def create_app() -> FastAPI:
             response.headers["Expires"] = "0"
         return response
 
+    # API routes must be registered first so they take priority over the
+    # frontend catch-all below.
     app.include_router(api_module.router)
 
-    # serve frontend static files at root
+    # Serve frontend via a GET-only catch-all route. Using a Route (not a
+    # Mount) ensures only GET requests are matched — POST /auth/register and
+    # other API calls pass through to the API router registered above.
     if FRONTEND_DIR.exists():
-        app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="static")
+        @app.get("/", include_in_schema=False)
+        async def serve_index():
+            return FileResponse(str(FRONTEND_DIR / "index.html"))
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def serve_frontend(full_path: str):
+            file_path = FRONTEND_DIR / full_path
+            if file_path.is_file():
+                try:
+                    file_path.resolve().relative_to(FRONTEND_DIR.resolve())
+                except ValueError:
+                    raise FastAPIHTTPException(status_code=404)
+                return FileResponse(str(file_path))
+            index_path = FRONTEND_DIR / "index.html"
+            if index_path.exists():
+                return FileResponse(str(index_path))
+            raise FastAPIHTTPException(status_code=404)
 
     return app
 
