@@ -52,6 +52,13 @@ class BackendContractTests(unittest.TestCase):
         self.assertIn("router.include_router(chat.router)", source)
         self.assertIn("router.include_router(documents.router)", source)
 
+    def test_rag_retrieval_uses_shared_dependencies(self):
+        source = read_backend_file("backend/rag_utils.py")
+
+        self.assertIn("from backend.dependencies import", source)
+        self.assertNotIn("_milvus_manager = MilvusManager()", source)
+        self.assertNotIn("_parent_chunk_store = ParentChunkStore()", source)
+
 
 if __name__ == "__main__":
     unittest.main()

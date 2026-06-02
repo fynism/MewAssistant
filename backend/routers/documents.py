@@ -1,12 +1,11 @@
 from fastapi import APIRouter, Depends, File, UploadFile
 
 from backend.auth import require_admin
+from backend.dependencies import document_service
 from backend.models import User
 from backend.schemas import DocumentDeleteResponse, DocumentListResponse, DocumentUploadResponse
-from backend.services.document_service import DocumentService
 
 
-document_service = DocumentService()
 router = APIRouter()
 
 
