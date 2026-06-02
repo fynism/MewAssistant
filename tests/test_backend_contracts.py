@@ -20,7 +20,7 @@ class BackendContractTests(unittest.TestCase):
         self.assertLess(include_router_pos, catch_all_pos)
 
     def test_streaming_endpoint_preserves_sse_error_shape(self):
-        source = read_backend_file("backend/api.py")
+        source = read_backend_file("backend/routers/chat.py")
 
         self.assertIn('@router.post("/chat/stream")', source)
         self.assertIn('media_type="text/event-stream"', source)
@@ -29,7 +29,7 @@ class BackendContractTests(unittest.TestCase):
         self.assertIn('yield f"data: {json.dumps(error_data)}\\n\\n"', source)
 
     def test_document_delete_removes_bm25_before_milvus_delete(self):
-        source = read_backend_file("backend/api.py")
+        source = read_backend_file("backend/routers/documents.py")
         match = re.search(
             r"async def delete_document\(.*?(?=\n\n@router|\Z)",
             source,
@@ -42,6 +42,15 @@ class BackendContractTests(unittest.TestCase):
             body.index("_remove_bm25_stats_for_filename(filename)"),
             body.index("milvus_manager.delete(delete_expr)"),
         )
+
+    def test_api_module_aggregates_all_route_modules(self):
+        source = read_backend_file("backend/api.py")
+
+        self.assertIn("from backend.routers import auth, chat, documents, sessions", source)
+        self.assertIn("router.include_router(auth.router)", source)
+        self.assertIn("router.include_router(sessions.router)", source)
+        self.assertIn("router.include_router(chat.router)", source)
+        self.assertIn("router.include_router(documents.router)", source)
 
 
 if __name__ == "__main__":
