@@ -1,15 +1,16 @@
 import json
-import os
 from typing import Any, Optional
 
 import redis
 
+from backend.core.config import settings
+
 
 class RedisCache:
     def __init__(self):
-        self.redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-        self.key_prefix = os.getenv("REDIS_KEY_PREFIX", "supermew")
-        self.default_ttl = int(os.getenv("REDIS_CACHE_TTL_SECONDS", "300"))
+        self.redis_url = settings.redis_url
+        self.key_prefix = settings.redis_key_prefix
+        self.default_ttl = settings.redis_cache_ttl_seconds
         self._client = None
 
     def _get_client(self):

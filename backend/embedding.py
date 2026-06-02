@@ -1,27 +1,21 @@
 """文本向量化服务 - 支持密集向量和稀疏向量（BM25），词表与 df 持久化 + 增量更新"""
 import json
 import math
-import os
 import re
 import threading
 from collections import Counter
 from pathlib import Path
 
-from dotenv import load_dotenv
-
-load_dotenv()
-
+from backend.core.config import settings
 from langchain_huggingface import HuggingFaceEmbeddings
 
-_DEFAULT_STATE_PATH = Path(__file__).resolve().parent.parent / "data" / "bm25_state.json"
+_DEFAULT_STATE_PATH = settings.bm25_state_path
 
 
 def _create_dense_embedder() -> HuggingFaceEmbeddings:
-    model_name = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
-    device = os.getenv("EMBEDDING_DEVICE", "cpu")
     return HuggingFaceEmbeddings(
-        model_name=model_name,
-        model_kwargs={"device": device},
+        model_name=settings.embedding_model,
+        model_kwargs={"device": settings.embedding_device},
         encode_kwargs={"normalize_embeddings": True},
     )
 
@@ -31,7 +25,7 @@ class EmbeddingService:
 
     def __init__(self, state_path: Path | str | None = None):
         self._embedder = _create_dense_embedder()
-        self._state_path = Path(state_path or os.getenv("BM25_STATE_PATH", _DEFAULT_STATE_PATH))
+        self._state_path = Path(state_path or _DEFAULT_STATE_PATH)
         self._lock = threading.Lock()
 
         # BM25 参数

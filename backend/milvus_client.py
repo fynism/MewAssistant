@@ -1,9 +1,7 @@
 """Milvus 客户端 - 支持密集向量+稀疏向量混合检索"""
-import os
-from dotenv import load_dotenv
 from pymilvus import MilvusClient, DataType, AnnSearchRequest, RRFRanker, MilvusException
 
-load_dotenv()
+from backend.core.config import settings
 
 # Milvus 单次 query 的 limit 上限（超出会报 invalid max query result window）
 QUERY_MAX_LIMIT = 16384
@@ -13,9 +11,9 @@ class MilvusManager:
     """Milvus 连接和集合管理 - 支持混合检索"""
 
     def __init__(self):
-        self.host = os.getenv("MILVUS_HOST", "localhost")
-        self.port = os.getenv("MILVUS_PORT", "19530")
-        self.collection_name = os.getenv("MILVUS_COLLECTION", "embeddings_collection")
+        self.host = settings.milvus_host
+        self.port = settings.milvus_port
+        self.collection_name = settings.milvus_collection
         self.uri = f"http://{self.host}:{self.port}"
         self.client = None
 
@@ -51,7 +49,7 @@ class MilvusManager:
         def _do_init():
             nonlocal dense_dim
             if dense_dim is None:
-                dense_dim = int(os.getenv("DENSE_EMBEDDING_DIM", "1024"))
+                dense_dim = settings.dense_embedding_dim
             client = self._get_client()
             if not client.has_collection(self.collection_name):
                 schema = client.create_schema(auto_id=True, enable_dynamic_field=True)
