@@ -1,21 +1,18 @@
-from dotenv import load_dotenv
-import os
 import json
 import asyncio
 from langchain.chat_models import init_chat_model
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, AIMessage, AIMessageChunk, SystemMessage
+from backend.core.config import settings
 from backend.tools import get_current_weather, search_knowledge_base, get_last_rag_context, reset_tool_call_guards, set_rag_step_queue
 from backend.services.conversation_storage import conversation_storage as storage
-
-load_dotenv()
 
 from backend.langchain_patches import apply_patches
 apply_patches()
 
-API_KEY = os.getenv("ARK_API_KEY")
-MODEL = os.getenv("MODEL")
-BASE_URL = os.getenv("BASE_URL")
+API_KEY = settings.ark_api_key
+MODEL = settings.model
+BASE_URL = settings.base_url
 
 def create_agent_instance():
     model = init_chat_model(

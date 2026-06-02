@@ -2,9 +2,9 @@ from fastapi import FastAPI, HTTPException as FastAPIHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pathlib import Path
-import os
 
 from backend import api as api_module
+from backend.core.config import settings
 from backend.database import init_db
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -71,4 +71,4 @@ app = create_app()
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host=os.getenv("HOST", "0.0.0.0"), port=int(os.getenv("PORT", 8000)))
+    uvicorn.run(app, host=settings.host, port=settings.port)

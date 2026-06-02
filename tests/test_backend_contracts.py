@@ -65,6 +65,18 @@ class BackendContractTests(unittest.TestCase):
         self.assertIn("from backend.services.conversation_storage import conversation_storage as storage", source)
         self.assertNotIn("from backend.agent import storage", source)
 
+    def test_environment_reads_are_centralized_in_config(self):
+        offenders = []
+        for path in (ROOT / "backend").rglob("*.py"):
+            relative_path = path.relative_to(ROOT).as_posix()
+            if relative_path == "backend/core/config.py":
+                continue
+            source = path.read_text(encoding="utf-8")
+            if "os.getenv" in source or "load_dotenv" in source:
+                offenders.append(relative_path)
+
+        self.assertEqual([], offenders)
+
 
 if __name__ == "__main__":
     unittest.main()

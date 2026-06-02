@@ -1,4 +1,3 @@
-import os
 import base64
 import hashlib
 import hmac
@@ -9,14 +8,15 @@ from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
+from backend.core.config import settings
 from backend.database import SessionLocal
 from backend.models import User
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-this-secret")
-ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "1440"))
-ADMIN_INVITE_CODE = os.getenv("ADMIN_INVITE_CODE", "")
-PBKDF2_ROUNDS = int(os.getenv("PASSWORD_PBKDF2_ROUNDS", "310000"))
+SECRET_KEY = settings.jwt_secret_key
+ALGORITHM = settings.jwt_algorithm
+ACCESS_TOKEN_EXPIRE_MINUTES = settings.jwt_expire_minutes
+ADMIN_INVITE_CODE = settings.admin_invite_code
+PBKDF2_ROUNDS = settings.password_pbkdf2_rounds
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 

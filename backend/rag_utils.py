@@ -1,10 +1,9 @@
 from collections import defaultdict
 from typing import List, Tuple, Dict, Any
-import os
 import json
 import requests
-from dotenv import load_dotenv
 
+from backend.core.config import settings
 from backend.dependencies import (
     embedding_service as _embedding_service,
     milvus_manager as _milvus_manager,
@@ -12,17 +11,15 @@ from backend.dependencies import (
 )
 from langchain.chat_models import init_chat_model
 
-load_dotenv()
-
-ARK_API_KEY = os.getenv("ARK_API_KEY")
-MODEL = os.getenv("MODEL")
-BASE_URL = os.getenv("BASE_URL")
-RERANK_MODEL = os.getenv("RERANK_MODEL")
-RERANK_BINDING_HOST = os.getenv("RERANK_BINDING_HOST")
-RERANK_API_KEY = os.getenv("RERANK_API_KEY")
-AUTO_MERGE_ENABLED = os.getenv("AUTO_MERGE_ENABLED", "true").lower() != "false"
-AUTO_MERGE_THRESHOLD = int(os.getenv("AUTO_MERGE_THRESHOLD", "2"))
-LEAF_RETRIEVE_LEVEL = int(os.getenv("LEAF_RETRIEVE_LEVEL", "3"))
+ARK_API_KEY = settings.ark_api_key
+MODEL = settings.model
+BASE_URL = settings.base_url
+RERANK_MODEL = settings.rerank_model
+RERANK_BINDING_HOST = settings.rerank_binding_host
+RERANK_API_KEY = settings.rerank_api_key
+AUTO_MERGE_ENABLED = settings.auto_merge_enabled
+AUTO_MERGE_THRESHOLD = settings.auto_merge_threshold
+LEAF_RETRIEVE_LEVEL = settings.leaf_retrieve_level
 
 _stepback_model = None
 
