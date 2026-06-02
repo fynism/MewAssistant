@@ -4,8 +4,8 @@ from langgraph.graph import StateGraph, END
 from pydantic import BaseModel, Field
 
 from backend.core.config import settings
+from backend.rag.events import emit_rag_step
 from backend.rag_utils import retrieve_documents, step_back_expand, generate_hypothetical_document
-from backend.tools import emit_rag_step
 
 API_KEY = settings.ark_api_key
 MODEL = settings.model

@@ -77,6 +77,12 @@ class BackendContractTests(unittest.TestCase):
 
         self.assertEqual([], offenders)
 
+    def test_rag_pipeline_uses_dedicated_event_module(self):
+        source = read_backend_file("backend/rag_pipeline.py")
+
+        self.assertIn("from backend.rag.events import emit_rag_step", source)
+        self.assertNotIn("from backend.tools import emit_rag_step", source)
+
 
 if __name__ == "__main__":
     unittest.main()
