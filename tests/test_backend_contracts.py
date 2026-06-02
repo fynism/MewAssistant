@@ -53,7 +53,7 @@ class BackendContractTests(unittest.TestCase):
         self.assertIn("router.include_router(documents.router)", source)
 
     def test_rag_retrieval_uses_shared_dependencies(self):
-        source = read_backend_file("backend/rag_utils.py")
+        source = read_backend_file("backend/rag/retrieval.py")
 
         self.assertIn("from backend.dependencies import", source)
         self.assertNotIn("_milvus_manager = MilvusManager()", source)
@@ -82,6 +82,13 @@ class BackendContractTests(unittest.TestCase):
 
         self.assertIn("from backend.rag.events import emit_rag_step", source)
         self.assertNotIn("from backend.tools import emit_rag_step", source)
+
+    def test_rag_pipeline_uses_split_rag_modules(self):
+        source = read_backend_file("backend/rag_pipeline.py")
+
+        self.assertIn("from backend.rag.expansion import generate_hypothetical_document, step_back_expand", source)
+        self.assertIn("from backend.rag.retrieval import retrieve_documents", source)
+        self.assertNotIn("from backend.rag_utils import", source)
 
 
 if __name__ == "__main__":

@@ -5,7 +5,8 @@ from pydantic import BaseModel, Field
 
 from backend.core.config import settings
 from backend.rag.events import emit_rag_step
-from backend.rag_utils import retrieve_documents, step_back_expand, generate_hypothetical_document
+from backend.rag.expansion import generate_hypothetical_document, step_back_expand
+from backend.rag.retrieval import retrieve_documents
 
 API_KEY = settings.ark_api_key
 MODEL = settings.model
