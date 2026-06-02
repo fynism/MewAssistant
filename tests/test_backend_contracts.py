@@ -29,9 +29,9 @@ class BackendContractTests(unittest.TestCase):
         self.assertIn('yield f"data: {json.dumps(error_data)}\\n\\n"', source)
 
     def test_document_delete_removes_bm25_before_milvus_delete(self):
-        source = read_backend_file("backend/routers/documents.py")
+        source = read_backend_file("backend/services/document_service.py")
         match = re.search(
-            r"async def delete_document\(.*?(?=\n\n@router|\Z)",
+            r"def delete_document\(.*?(?=\n    def |\Z)",
             source,
             flags=re.DOTALL,
         )
@@ -39,8 +39,8 @@ class BackendContractTests(unittest.TestCase):
         self.assertIsNotNone(match)
         body = match.group(0)
         self.assertLess(
-            body.index("_remove_bm25_stats_for_filename(filename)"),
-            body.index("milvus_manager.delete(delete_expr)"),
+            body.index("self.remove_bm25_stats_for_filename(filename)"),
+            body.index("self.milvus_manager.delete(delete_expr)"),
         )
 
     def test_api_module_aggregates_all_route_modules(self):
