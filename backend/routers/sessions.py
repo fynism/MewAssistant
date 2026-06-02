@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
 
-from backend.agent import storage
 from backend.auth import get_current_user
 from backend.models import User
 from backend.schemas import (
@@ -10,6 +9,7 @@ from backend.schemas import (
     SessionListResponse,
     SessionMessagesResponse,
 )
+from backend.services.conversation_storage import conversation_storage as storage
 
 
 router = APIRouter()

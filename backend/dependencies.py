@@ -10,6 +10,7 @@ from backend.embedding import embedding_service
 from backend.milvus_client import MilvusManager
 from backend.milvus_writer import MilvusWriter
 from backend.parent_chunk_store import ParentChunkStore
+from backend.services.conversation_storage import conversation_storage
 from backend.services.document_service import DocumentService
 
 

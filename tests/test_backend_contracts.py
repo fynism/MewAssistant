@@ -59,6 +59,12 @@ class BackendContractTests(unittest.TestCase):
         self.assertNotIn("_milvus_manager = MilvusManager()", source)
         self.assertNotIn("_parent_chunk_store = ParentChunkStore()", source)
 
+    def test_session_routes_do_not_import_agent_storage(self):
+        source = read_backend_file("backend/routers/sessions.py")
+
+        self.assertIn("from backend.services.conversation_storage import conversation_storage as storage", source)
+        self.assertNotIn("from backend.agent import storage", source)
+
 
 if __name__ == "__main__":
     unittest.main()
