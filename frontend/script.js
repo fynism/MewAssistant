@@ -361,7 +361,9 @@ createApp({
         },
 
         async deleteSession(sessionId) {
-            if (!confirm(`确定要删除会话 "${sessionId}" 吗？`)) {
+            const session = this.sessions.find(s => s.session_id === sessionId);
+            const label = session?.title || sessionId;
+            if (!confirm(`确定要删除会话 "${label}" 吗？`)) {
                 return;
             }
 
