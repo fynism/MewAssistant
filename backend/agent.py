@@ -66,6 +66,22 @@ def summarize_old_messages(model, messages: list) -> str:
     return summary
 
 
+def generate_session_title(model, user_message: str, ai_response: str) -> str:
+    """根据首轮对话生成简洁会话标题（不超过20字）"""
+    prompt = f"""请用不超过20个字总结以下对话的主题，直接输出标题，不要加引号或额外解释：
+
+用户：{user_message[:300]}
+AI：{ai_response[:300]}
+
+标题："""
+    try:
+        title = model.invoke(prompt).content.strip()
+        title = title.strip('"\'""''\n\r 。.，,')
+        return title[:50]
+    except Exception:
+        return ""
+
+
 def chat_with_agent(user_text: str, user_id: str = "default_user", session_id: str = "default_session"):
     """使用 Agent 处理用户消息并返回响应"""
     messages = storage.load(user_id, session_id)
@@ -108,6 +124,12 @@ def chat_with_agent(user_text: str, user_id: str = "default_user", session_id: s
 
     extra_message_data = [None] * (len(messages) - 1) + [{"rag_trace": rag_trace}]
     storage.save(user_id, session_id, messages, extra_message_data=extra_message_data)
+
+    # 首次对话完成后自动生成标题
+    if len(messages) <= 2:
+        title = generate_session_title(model, user_text, response_content)
+        if title:
+            storage.update_title(user_id, session_id, title)
 
     return {
         "response": response_content,
@@ -221,3 +243,9 @@ async def chat_with_agent_stream(user_text: str, user_id: str = "default_user", 
     messages.append(AIMessage(content=full_response))
     extra_message_data = [None] * (len(messages) - 1) + [{"rag_trace": rag_trace}]
     storage.save(user_id, session_id, messages, extra_message_data=extra_message_data)
+
+    # 首次对话完成后自动生成标题
+    if len(messages) <= 2:
+        title = generate_session_title(model, user_text, full_response)
+        if title:
+            storage.update_title(user_id, session_id, title)
