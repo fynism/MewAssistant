@@ -134,6 +134,7 @@ class ConversationStorage:
                         "session_id": s.session_id,
                         "updated_at": s.updated_at.isoformat(),
                         "message_count": count,
+                        "title": s.title,
                     }
                 )
             cache.set_json(self._sessions_cache_key(user_id), result)
@@ -200,6 +201,25 @@ class ConversationStorage:
             cache.delete(self._messages_cache_key(user_id, session_id))
             cache.delete(self._sessions_cache_key(user_id))
             return True
+        finally:
+            db.close()
+
+    def update_title(self, user_id: str, session_id: str, title: str):
+        """更新会话标题，同时刷新 Redis 会话列表缓存"""
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter(User.username == user_id).first()
+            if not user:
+                return
+            session = (
+                db.query(ChatSession)
+                .filter(ChatSession.user_id == user.id, ChatSession.session_id == session_id)
+                .first()
+            )
+            if session:
+                session.title = title
+                db.commit()
+                cache.delete(self._sessions_cache_key(user_id))
         finally:
             db.close()
 
