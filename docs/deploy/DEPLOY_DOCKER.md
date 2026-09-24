@@ -13,9 +13,9 @@ docker buildx build --platform linux/amd64 \
   --push .
 ```
 
-应用镜像包含代码和 CPU 版 PyTorch，不包含 `.env`、上传文件、数据库数据或下载后的 BGE 模型。后者首次启动时下载并缓存到持久化目录。Docker 官方支持用 `buildx --push` 将指定平台的构建结果直接推送到镜像仓库。
+应用镜像包含代码和 CPU 版 PyTorch，不包含 `.env`、上传文件、数据库数据或下载后的 BGE 模型。模型在首次启动时下载到 ECS 的 `volumes/huggingface`；后续重建容器或更新应用镜像会复用该目录，无须重复下载。Docker 官方支持用 `buildx --push` 将指定平台的构建结果直接推送到镜像仓库。
 
-PostgreSQL、Redis、MinIO、Milvus 和 Attu 本身已有可直接拉取的 Docker Hub 镜像，无须重新 `docker build`；当前 etcd 镜像来自 Quay。若要求**所有镜像都存放在你自己的 Docker Hub 命名空间**，可以将第三方镜像逐个 `docker pull`、`docker tag`、`docker push` 后，通过 `.env` 中的 `POSTGRES_IMAGE` 等变量覆盖来源。镜像版本和后续安全更新将由你负责。示例（etcd）：
+PostgreSQL、Redis、Milvus 和 Attu 使用 Docker Hub 镜像，etcd 镜像来自 Quay。`minio/minio` 原仓库已无法拉取，Compose 暂用 JumpServer 发布的同版本 MinIO 镜像，并固定 digest。部署生产环境前，请确认你接受该第三方镜像来源；也可以自行构建、推送 MinIO 镜像，通过 `.env` 中的 `MINIO_IMAGE` 覆盖。若要求**所有镜像都存放在你自己的 Docker Hub 命名空间**，可以将第三方镜像逐个 `docker pull`、`docker tag`、`docker push` 后，通过 `.env` 中的 `POSTGRES_IMAGE` 等变量覆盖来源。镜像版本和后续安全更新将由你负责。示例（etcd）：
 
 ```bash
 docker pull quay.io/coreos/etcd:v3.5.18
@@ -49,7 +49,7 @@ curl -f http://127.0.0.1:8000/docs
 
 已有 Milvus 数据的部署升级时，MinIO 凭证应与原服务一致；如果同时修改 MinIO 凭证，确保 `MINIO_ROOT_USER` 和 `MINIO_ROOT_PASSWORD` 与 Milvus 端同步，并先做好备份。
 
-第一次启动时，`app` 下载 `BAAI/bge-m3` 到 `volumes/huggingface`，会比后续重启慢。依赖锁文件使用 CPU 版 PyTorch；服务器不需要 GPU、CUDA 驱动或 CUDA Toolkit。`SUPERMEW_APP_IMAGE` 应填写确实已推送的镜像及标签；更新代码后需先构建推送新标签，再修改 ECS 的 `.env` 并重新拉取。
+第一次启动时，`app` 下载 `BAAI/bge-m3` 到 `volumes/huggingface`，会比后续重启慢。请保留该目录；删除缓存、更换模型或服务器时可能需要重新下载。依赖锁文件使用 CPU 版 PyTorch；服务器不需要 GPU、CUDA 驱动或 CUDA Toolkit。`SUPERMEW_APP_IMAGE` 应填写确实已推送的镜像及标签；更新代码后需先构建推送新标签，再修改 ECS 的 `.env` 并重新拉取。
 
 数据在 `volumes/postgres`、`volumes/redis`、`volumes/etcd`、`volumes/minio`、`volumes/milvus`、`volumes/huggingface` 和 `data`。升级镜像时保留这些目录。备份时请同时覆盖数据库、Milvus 依赖数据以及 `data` 下的上传文件和 BM25 状态。
 
