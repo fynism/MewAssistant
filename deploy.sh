@@ -10,7 +10,8 @@ fi
 
 git pull --ff-only origin main
 docker compose config --quiet
-docker compose up -d --build
+docker compose pull
+docker compose up -d --no-build
 
 echo "Waiting for the application (first boot downloads the embedding model)..."
 for _ in $(seq 1 90); do

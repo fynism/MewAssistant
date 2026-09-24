@@ -82,14 +82,15 @@ AMAP_API_KEY=your_amap_api_key
 ```
 
 ### 4) Docker 部署（应用 + 数据库 + 缓存 + 向量库）
-当前仓库的 `docker-compose.yml` 同时承载应用、业务依赖与 Milvus 依赖。ECS 全容器部署请先阅读 [DEPLOY_DOCKER.md](DEPLOY_DOCKER.md)，复制 `.env.docker.example` 为 `.env` 并填入实际凭证：
+当前仓库的 `docker-compose.yml` 同时承载应用、业务依赖与 Milvus 依赖。ECS 部署采用开发机/CI 构建并推送 Docker Hub、服务器仅拉取镜像的方式。请先阅读 [DEPLOY_DOCKER.md](DEPLOY_DOCKER.md)，复制 `.env.docker.example` 为 `.env` 并填入镜像标签和实际凭证：
 - 应用：`app`（FastAPI + 前端静态文件）
 - 业务依赖：`postgres`、`redis`
 - 向量依赖：`etcd`、`minio`、`standalone`；`attu` 仅在 `debug` profile 启动
 
 ```bash
-# 启动全套服务
-docker compose up -d --build
+# 从镜像仓库拉取并启动全套服务
+docker compose pull
+docker compose up -d --no-build
 
 # 查看服务状态
 docker compose ps

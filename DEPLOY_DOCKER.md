@@ -1,22 +1,45 @@
-# 单台 ECS 全容器部署
+# 构建镜像并在单台 ECS 部署
 
-现有 Compose 包含 FastAPI 应用、PostgreSQL、Redis、Milvus、etcd 和 MinIO。前端由 FastAPI 提供静态文件，不需要另建前端容器。Attu 只在 `debug` profile 启动。LLM 和可选的 rerank 仍通过外部 API 调用。
+在开发机或 CI 构建应用镜像并推送 Docker Hub；ECS 只拉镜像并运行 Compose，不安装 Python，也不构建镜像。Compose 包含 FastAPI 应用、PostgreSQL、Redis、Milvus、etcd 和 MinIO。前端由 FastAPI 提供静态文件。Attu 只在 `debug` profile 启动。LLM 和可选的 rerank 仍通过外部 API 调用。
+
+## 在开发机或 CI 构建并推送
+
+以下示例适用于 `linux/amd64` 的 ECS；若实例是 ARM 架构，将平台改为 `linux/arm64`。每次发布使用新的、不可复用的版本标签，并将同一标签写入 ECS 的 `.env`：
+
+```bash
+docker login
+docker buildx build --platform linux/amd64 \
+  -t YOUR_DOCKERHUB_USERNAME/supermew:v0.1.0-cpu \
+  --push .
+```
+
+应用镜像包含代码和 CPU 版 PyTorch，不包含 `.env`、上传文件、数据库数据或下载后的 BGE 模型。后者首次启动时下载并缓存到持久化目录。Docker 官方支持用 `buildx --push` 将指定平台的构建结果直接推送到镜像仓库。
+
+PostgreSQL、Redis、MinIO、Milvus 和 Attu 本身已有可直接拉取的 Docker Hub 镜像，无须重新 `docker build`；当前 etcd 镜像来自 Quay。若要求**所有镜像都存放在你自己的 Docker Hub 命名空间**，可以将第三方镜像逐个 `docker pull`、`docker tag`、`docker push` 后，通过 `.env` 中的 `POSTGRES_IMAGE` 等变量覆盖来源。镜像版本和后续安全更新将由你负责。示例（etcd）：
+
+```bash
+docker pull quay.io/coreos/etcd:v3.5.18
+docker tag quay.io/coreos/etcd:v3.5.18 YOUR_DOCKERHUB_USERNAME/etcd:v3.5.18
+docker push YOUR_DOCKERHUB_USERNAME/etcd:v3.5.18
+```
 
 ## 服务器准备
 
 - 安装 Docker Engine 和 Docker Compose 插件。建议至少 4 核、8 GB 内存，并留出模型缓存、数据库和向量数据所需磁盘空间。小规格 ECS 请先实测内存与上传时的 CPU 占用。
 - 域名和 HTTPS 可由 ECS 上的 Nginx 反向代理提供。安全组仅开放 80/443；应用、数据库等端口都只在本机或 Compose 网络可达。
 
-## 首次启动
+## ECS 首次启动
 
 ```bash
 git clone <仓库地址> /opt/supermew
 cd /opt/supermew
 cp .env.docker.example .env
 chmod 600 .env
-# 编辑 .env：替换数据库、Redis、MinIO、JWT、管理员邀请码和模型 API 凭证
+# 编辑 .env：填入已推送的 SUPERMEW_APP_IMAGE、各服务凭证和模型 API 凭证
+# 私有 Docker Hub 仓库需在 ECS 上先执行 docker login
 docker compose config --quiet
-docker compose up -d --build
+docker compose pull
+docker compose up -d --no-build
 docker compose ps
 docker compose logs -f app
 curl -f http://127.0.0.1:8000/docs
@@ -26,9 +49,9 @@ curl -f http://127.0.0.1:8000/docs
 
 已有 Milvus 数据的部署升级时，MinIO 凭证应与原服务一致；如果同时修改 MinIO 凭证，确保 `MINIO_ROOT_USER` 和 `MINIO_ROOT_PASSWORD` 与 Milvus 端同步，并先做好备份。
 
-第一次启动时，`app` 下载 `BAAI/bge-m3` 到 `volumes/huggingface`，会比后续重启慢。依赖锁文件使用 CPU 版 PyTorch；服务器不需要 GPU、CUDA 驱动或 CUDA Toolkit。
+第一次启动时，`app` 下载 `BAAI/bge-m3` 到 `volumes/huggingface`，会比后续重启慢。依赖锁文件使用 CPU 版 PyTorch；服务器不需要 GPU、CUDA 驱动或 CUDA Toolkit。`SUPERMEW_APP_IMAGE` 应填写确实已推送的镜像及标签；更新代码后需先构建推送新标签，再修改 ECS 的 `.env` 并重新拉取。
 
-数据在 `volumes/postgres`、`volumes/redis`、`volumes/etcd`、`volumes/minio`、`volumes/milvus`、`volumes/huggingface` 和 `data`。升级或重建镜像时保留这些目录。备份时请同时覆盖数据库、Milvus 依赖数据以及 `data` 下的上传文件和 BM25 状态。
+数据在 `volumes/postgres`、`volumes/redis`、`volumes/etcd`、`volumes/minio`、`volumes/milvus`、`volumes/huggingface` 和 `data`。升级镜像时保留这些目录。备份时请同时覆盖数据库、Milvus 依赖数据以及 `data` 下的上传文件和 BM25 状态。
 
 ## HTTPS 入口
 
@@ -54,6 +77,6 @@ docker compose ps
 docker compose logs --tail=100 app
 ```
 
-`deploy.sh` 会从 `main` 快进拉取、重建镜像并等待应用就绪。如果不是从 `main` 部署，请手动更新代码后执行 `docker compose up -d --build`。
+发布新镜像后，先将 ECS `.env` 的 `SUPERMEW_APP_IMAGE` 改成新标签。`deploy.sh` 会从 `main` 快进拉取 Compose 配置、拉取镜像并等待应用就绪，**不会在 ECS 构建**。如果不是从 `main` 部署，请手动更新配置后执行 `docker compose pull && docker compose up -d --no-build`。
 
 Attu 默认不运行。需要临时排查 Milvus 时用 `docker compose --profile debug up -d attu`，并通过 SSH 隧道访问本机的 `8080` 端口。不要把 Attu、MinIO、Milvus、PostgreSQL 或 Redis 端口放到 ECS 公网安全组。

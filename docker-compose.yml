@@ -1,7 +1,6 @@
 services:
   app:
-    build: .
-    image: supermew-app:local
+    image: ${SUPERMEW_APP_IMAGE:?Set SUPERMEW_APP_IMAGE in .env}
     restart: unless-stopped
     env_file: .env
     environment:
@@ -28,7 +27,7 @@ services:
 
   postgres:
     container_name: supermew-postgres
-    image: postgres:15
+    image: ${POSTGRES_IMAGE:-postgres:15}
     restart: unless-stopped
     environment:
       POSTGRES_DB: langchain_app
@@ -46,7 +45,7 @@ services:
 
   redis:
     container_name: supermew-redis
-    image: redis:7-alpine
+    image: ${REDIS_IMAGE:-redis:7-alpine}
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}"]
     ports:
@@ -61,7 +60,7 @@ services:
 
   etcd:
     container_name: milvus-etcd
-    image: quay.io/coreos/etcd:v3.5.18
+    image: ${ETCD_IMAGE:-quay.io/coreos/etcd:v3.5.18}
     restart: unless-stopped
     environment:
       - ETCD_AUTO_COMPACTION_MODE=revision
@@ -79,7 +78,7 @@ services:
 
   minio:
     container_name: milvus-minio
-    image: minio/minio:RELEASE.2024-05-28T17-19-04Z
+    image: ${MINIO_IMAGE:-minio/minio:RELEASE.2024-05-28T17-19-04Z}
     restart: unless-stopped
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
@@ -95,7 +94,7 @@ services:
 
   standalone:
     container_name: milvus-standalone
-    image: milvusdb/milvus:v2.5.14
+    image: ${MILVUS_IMAGE:-milvusdb/milvus:v2.5.14}
     restart: unless-stopped
     command: ["milvus", "run", "standalone"]
     security_opt:
@@ -124,7 +123,7 @@ services:
         condition: service_healthy
   attu:
     container_name: milvus-attu
-    image: zilliz/attu:v2.5.11  
+    image: ${ATTU_IMAGE:-zilliz/attu:v2.5.11}
     profiles: ["debug"]
     restart: unless-stopped
     environment:
