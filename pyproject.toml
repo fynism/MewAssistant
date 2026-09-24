@@ -20,6 +20,7 @@ dependencies = [
     "langchain-huggingface>=0.1.0",
     "langchain-openai>=0.1.22",
     "sentence-transformers>=3.0.0",
+    "torch>=2.10.0",
     "langgraph>=0.2.31",
     "pypdf>=4.3.1",
     "docx2txt>=0.8",
@@ -40,3 +41,18 @@ study = [
     "chromadb>=0.5.5",
     "bilibili-api-python>=17.0.0",
 ]
+
+# The embedding model runs on CPU in the ECS deployment. Pin the transitive
+# PyTorch dependency to its CPU wheel so Linux images do not pull CUDA/Triton.
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "tsinghua"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true

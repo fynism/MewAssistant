@@ -81,39 +81,27 @@ AMAP_API_KEY=your_amap_api_key
 
 ```
 
-### 4) Docker 部署（数据库 + 缓存 + 向量库）
-当前仓库的 `docker-compose.yml` 同时承载业务依赖与 Milvus 依赖：
+### 4) Docker 部署（应用 + 数据库 + 缓存 + 向量库）
+当前仓库的 `docker-compose.yml` 同时承载应用、业务依赖与 Milvus 依赖。ECS 全容器部署请先阅读 [DEPLOY_DOCKER.md](DEPLOY_DOCKER.md)，复制 `.env.docker.example` 为 `.env` 并填入实际凭证：
+- 应用：`app`（FastAPI + 前端静态文件）
 - 业务依赖：`postgres`、`redis`
-- 向量依赖：`etcd`、`minio`、`standalone`、`attu`
+- 向量依赖：`etcd`、`minio`、`standalone`；`attu` 仅在 `debug` profile 启动
 
 ```bash
-# 启动向量库依赖
-docker compose up -d
+# 启动全套服务
+docker compose up -d --build
 
 # 查看服务状态
 docker compose ps
 
-# 查看日志（可选）
-docker compose logs -f standalone
+# 查看应用日志（可选）
+docker compose logs -f app
 ```
 
-端口说明：
-- PostgreSQL：`5432`
-- Redis：`6379`
-- Milvus：`19530`
-- Milvus 健康检查：`9091`
-- MinIO API：`9000`
-- MinIO Console：`9001`
-- Attu：`8080`
+应用 `8000`、PostgreSQL `5432`、Redis `6379`、Milvus `19530/9091` 仅绑定到宿主机 `127.0.0.1`；MinIO 不映射宿主机端口。Attu 仅调试时启用，端口 `8080` 也只绑定本机。
 
-### 5) 启动应用并访问
-在 Milvus 启动后，运行后端应用：
-
-```bash
-uv run uvicorn backend.app:app --host 0.0.0.0 --port 8000 --reload
-```
-
-浏览器访问：
+### 5) 访问应用
+Compose 会自动启动应用；在 ECS 上通过 Nginx/HTTPS 对外提供服务。本机可访问：
 - 前端页面：`http://127.0.0.1:8000/`
 - API 文档：`http://127.0.0.1:8000/docs`
 
