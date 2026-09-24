@@ -1,6 +1,6 @@
 services:
   app:
-    image: ${SUPERMEW_APP_IMAGE:?Set SUPERMEW_APP_IMAGE in .env}
+    image: ${SUPERMEW_APP_IMAGE:-supermew-app:dev}
     restart: unless-stopped
     env_file: .env
     environment:
@@ -32,7 +32,7 @@ services:
     environment:
       POSTGRES_DB: langchain_app
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
@@ -47,13 +47,15 @@ services:
     container_name: supermew-redis
     image: ${REDIS_IMAGE:-redis:7-alpine}
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD-}
+    command: ["sh", "-c", "if [ -n \"$${REDIS_PASSWORD}\" ]; then exec redis-server --appendonly yes --requirepass \"$${REDIS_PASSWORD}\"; else exec redis-server --appendonly yes; fi"]
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/redis:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}", "ping"]
+      test: ["CMD-SHELL", "if [ -n \"$${REDIS_PASSWORD}\" ]; then redis-cli -a \"$${REDIS_PASSWORD}\" ping; else redis-cli ping; fi"]
       interval: 10s
       timeout: 5s
       retries: 10

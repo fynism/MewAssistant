@@ -8,6 +8,13 @@ if [[ ! -f .env ]]; then
     exit 1
 fi
 
+for key in SUPERMEW_APP_IMAGE POSTGRES_PASSWORD REDIS_PASSWORD; do
+    if ! grep -Eq "^${key}=.+" .env; then
+        echo "Missing ${key} in .env; production deployment requires an image and database passwords." >&2
+        exit 1
+    fi
+done
+
 git pull --ff-only origin main
 docker compose config --quiet
 docker compose pull
