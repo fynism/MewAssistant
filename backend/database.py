@@ -2,6 +2,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from backend.core.config import settings
+from backend.observability import enable_sql_logging
 
 DATABASE_URL = settings.database_url
 
@@ -9,6 +10,8 @@ engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,
 )
+if settings.log_sql:
+    enable_sql_logging(engine, include_parameters=settings.log_sql_parameters)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 Base = declarative_base()
 

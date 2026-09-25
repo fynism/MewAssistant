@@ -14,6 +14,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 class Settings:
     host: str = os.getenv("HOST", "0.0.0.0")
     port: int = int(os.getenv("PORT", "8000"))
+    log_requests: bool = os.getenv("LOG_REQUESTS", "true").lower() == "true"
+    log_sql: bool = os.getenv("LOG_SQL", "false").lower() == "true"
+    log_sql_parameters: bool = os.getenv("LOG_SQL_PARAMETERS", "false").lower() == "true"
 
     database_url: str = os.getenv(
         "DATABASE_URL",

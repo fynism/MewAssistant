@@ -296,6 +296,7 @@ Compose 会自动启动应用；在 ECS 上通过 Nginx/HTTPS 对外提供服务
 - Milvus：`MILVUS_HOST`、`MILVUS_PORT`、`MILVUS_M1_COLLECTION`；旧 `MILVUS_COLLECTION` 仅供显式旧数据导入使用
 - 数据库缓存：`DATABASE_URL`、`REDIS_URL`
 - 鉴权相关：`JWT_SECRET_KEY`、`JWT_ALGORITHM`、`JWT_EXPIRE_MINUTES`
+- 日志：`LOG_REQUESTS=true` 记录接口方法、路径、状态、耗时和请求 ID；`LOG_SQL=true` 记录 SQL 模板与耗时；`LOG_SQL_PARAMETERS=true` 才记录绑定参数（仅限本地排查）。
 - 密码参数：`PASSWORD_PBKDF2_ROUNDS`
 - Auto-merging：`AUTO_MERGE_ENABLED`、`AUTO_MERGE_THRESHOLD`、`LEAF_RETRIEVE_LEVEL`
 - 工具：`AMAP_WEATHER_API`、`AMAP_API_KEY`

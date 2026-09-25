@@ -135,6 +135,18 @@ class M1IsolationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertTrue(response.headers["content-type"].startswith("application/json"))
 
+    def test_request_log_and_response_share_request_id(self):
+        with self.assertLogs("uvicorn.error", level="INFO") as captured:
+            response = self.client.get("/knowledges", headers=self.alice)
+        self.assertEqual(response.status_code, 200)
+        request_id = response.headers["X-Request-ID"]
+        self.assertEqual(len(request_id), 32)
+        self.assertTrue(any(
+            f"request_id={request_id} method=GET path=/knowledges status=200" in line
+            for line in captured.output
+        ))
+        self.assertFalse(any(self.alice["Authorization"] in line for line in captured.output))
+
     def test_retrieval_filters_hybrid_and_dense_fallback(self):
         from backend.rag import retrieval
 
