@@ -909,6 +909,30 @@ textarea {
     gap: 10px;
 }
 
+.knowledge-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+}
+
+.knowledge-controls select,
+.knowledge-controls input {
+    min-width: 180px;
+    flex: 1;
+    padding: 10px 12px;
+    border: 1px solid var(--primary-light);
+    border-radius: 10px;
+    background: var(--white);
+    color: var(--text-color);
+    font: inherit;
+}
+
+.knowledge-hint {
+    margin-top: 14px;
+    color: var(--text-light);
+}
+
 .upload-area {
     display: flex;
     flex-direction: column;

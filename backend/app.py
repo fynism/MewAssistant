@@ -41,9 +41,8 @@ def create_app() -> FastAPI:
     # frontend catch-all below.
     app.include_router(api_module.router)
 
-    # Serve frontend via a GET-only catch-all route. Using a Route (not a
-    # Mount) ensures only GET requests are matched — POST /auth/register and
-    # other API calls pass through to the API router registered above.
+    # Serve known frontend files. Unknown paths must not masquerade as a
+    # successful API response containing the HTML app shell.
     if FRONTEND_DIR.exists():
         @app.get("/", include_in_schema=False)
         async def serve_index():
@@ -58,9 +57,6 @@ def create_app() -> FastAPI:
                 except ValueError:
                     raise FastAPIHTTPException(status_code=404)
                 return FileResponse(str(file_path))
-            index_path = FRONTEND_DIR / "index.html"
-            if index_path.exists():
-                return FileResponse(str(index_path))
             raise FastAPIHTTPException(status_code=404)
 
     return app

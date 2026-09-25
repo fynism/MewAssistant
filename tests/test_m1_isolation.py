@@ -130,6 +130,11 @@ class M1IsolationTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200, response.text)
             self.assertEqual(agent.call_args.args[2], alice_id)
 
+    def test_removed_global_documents_endpoint_is_json_404(self):
+        response = self.client.get("/documents", headers=self.alice)
+        self.assertEqual(response.status_code, 404)
+        self.assertTrue(response.headers["content-type"].startswith("application/json"))
+
     def test_retrieval_filters_hybrid_and_dense_fallback(self):
         from backend.rag import retrieval
 

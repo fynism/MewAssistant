@@ -14,6 +14,10 @@ createApp({
             isComposing: false,
             documents: [],
             documentsLoading: false,
+            knowledges: [],
+            selectedKnowledgeId: '',
+            newKnowledgeName: '',
+            knowledgeLoading: false,
             selectedFile: null,
             isUploading: false,
             uploadProgress: '',
@@ -149,6 +153,9 @@ createApp({
             this.messages = [];
             this.sessions = [];
             this.documents = [];
+            this.knowledges = [];
+            this.selectedKnowledgeId = '';
+            this.newKnowledgeName = '';
             this.activeNav = 'newChat';
             this.showHistorySidebar = false;
             this.showNotice = true;
@@ -392,27 +399,65 @@ createApp({
         },
 
         handleUploadClick() {
-            if (!this.isAdmin) {
-                alert('仅管理员可上传和管理文档');
-                return;
-            }
             this.handleSettings();
         },
 
         handleSettings() {
-            if (!this.isAdmin) {
-                alert('仅管理员可访问文档管理');
-                return;
-            }
+            if (!this.isAuthenticated) return;
             this.activeNav = 'settings';
             this.showHistorySidebar = false;
-            this.loadDocuments();
+            this.loadKnowledges();
+        },
+
+        async loadKnowledges() {
+            this.knowledgeLoading = true;
+            try {
+                const response = await this.authFetch('/knowledges');
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.detail || '加载知识库失败');
+                this.knowledges = data.knowledges || [];
+                if (!this.knowledges.some(item => item.id === this.selectedKnowledgeId)) {
+                    this.selectedKnowledgeId = this.knowledges[0]?.id || '';
+                }
+                await this.loadDocuments();
+            } catch (error) {
+                alert('加载知识库失败：' + error.message);
+            } finally {
+                this.knowledgeLoading = false;
+            }
+        },
+
+        async createKnowledge() {
+            const name = this.newKnowledgeName.trim();
+            if (!name || this.knowledgeLoading) return;
+            this.knowledgeLoading = true;
+            try {
+                const response = await this.authFetch('/knowledges', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name })
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.detail || '创建知识库失败');
+                this.newKnowledgeName = '';
+                this.knowledges.unshift(data);
+                this.selectedKnowledgeId = data.id;
+                await this.loadDocuments();
+            } catch (error) {
+                alert('创建知识库失败：' + error.message);
+            } finally {
+                this.knowledgeLoading = false;
+            }
         },
 
         async loadDocuments() {
+            if (!this.selectedKnowledgeId) {
+                this.documents = [];
+                return;
+            }
             this.documentsLoading = true;
             try {
-                const response = await this.authFetch('/documents');
+                const response = await this.authFetch(`/knowledges/${encodeURIComponent(this.selectedKnowledgeId)}/documents`);
                 if (!response.ok) {
                     const data = await response.json().catch(() => ({}));
                     throw new Error(data.detail || 'Failed to load documents');
@@ -435,6 +480,10 @@ createApp({
         },
 
         async uploadDocument() {
+            if (!this.selectedKnowledgeId) {
+                alert('请先选择知识库');
+                return;
+            }
             if (!this.selectedFile) {
                 alert('请先选择文件');
                 return;
@@ -447,7 +496,7 @@ createApp({
                 const formData = new FormData();
                 formData.append('file', this.selectedFile);
 
-                const response = await this.authFetch('/documents/upload', {
+                const response = await this.authFetch(`/knowledges/${encodeURIComponent(this.selectedKnowledgeId)}/documents`, {
                     method: 'POST',
                     body: formData
                 });
@@ -457,8 +506,7 @@ createApp({
                     throw new Error(error.detail || 'Upload failed');
                 }
 
-                const data = await response.json();
-                this.uploadProgress = data.message;
+                this.uploadProgress = '文件已上传，正在处理；可点击刷新列表查看状态。';
 
                 this.selectedFile = null;
                 if (this.$refs.fileInput) {
@@ -478,13 +526,13 @@ createApp({
             }
         },
 
-        async deleteDocument(filename) {
-            if (!confirm(`确定要删除文档 "${filename}" 吗？这将同时删除 Milvus 中的所有相关向量。`)) {
+        async deleteDocument(doc) {
+            if (!confirm(`确定要删除文档 "${doc.filename}" 吗？`)) {
                 return;
             }
 
             try {
-                const response = await this.authFetch(`/documents/${encodeURIComponent(filename)}`, {
+                const response = await this.authFetch(`/knowledges/${encodeURIComponent(this.selectedKnowledgeId)}/documents/${encodeURIComponent(doc.id)}`, {
                     method: 'DELETE'
                 });
 
@@ -493,8 +541,6 @@ createApp({
                     throw new Error(error.detail || 'Delete failed');
                 }
 
-                const data = await response.json();
-                alert(data.message);
                 await this.loadDocuments();
 
             } catch (error) {
@@ -502,12 +548,32 @@ createApp({
             }
         },
 
+        async retryDocument(doc) {
+            try {
+                const response = await this.authFetch(`/knowledges/${encodeURIComponent(this.selectedKnowledgeId)}/documents/${encodeURIComponent(doc.id)}/retry`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.detail || '重试失败');
+                await this.loadDocuments();
+            } catch (error) {
+                alert('重试处理失败：' + error.message);
+            }
+        },
+
+        documentStatusLabel(status) {
+            return {
+                pending: '等待处理', processing: '处理中', ready: '可检索',
+                failed: '处理失败', deleting: '删除中'
+            }[status] || status;
+        },
+
         getFileIcon(fileType) {
-            if (fileType === 'PDF') {
+            if (fileType === '.pdf') {
                 return 'fas fa-file-pdf';
-            } else if (fileType === 'Word') {
+            } else if (fileType === '.doc' || fileType === '.docx') {
                 return 'fas fa-file-word';
-            } else if (fileType === 'Excel') {
+            } else if (fileType === '.xls' || fileType === '.xlsx') {
                 return 'fas fa-file-excel';
             }
             return 'fas fa-file';
