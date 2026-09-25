@@ -73,6 +73,7 @@ class RewriteStrategy(BaseModel):
 
 
 class RAGState(TypedDict):
+    owner_id: int
     question: str
     query: str
     context: str
@@ -101,7 +102,7 @@ def _format_docs(docs: List[dict]) -> str:
 def retrieve_initial(state: RAGState) -> RAGState:
     query = state["question"]
     emit_rag_step("🔍", "正在检索知识库...", f"查询: {query[:50]}")
-    retrieved = retrieve_documents(query, top_k=5)
+    retrieved = retrieve_documents(query, owner_id=state["owner_id"], top_k=5)
     results = retrieved.get("docs", [])
     retrieve_meta = retrieved.get("meta", {})
     context = _format_docs(results)
@@ -265,7 +266,7 @@ def retrieve_expanded(state: RAGState) -> RAGState:
 
     if strategy in ("hyde", "complex"):
         hypothetical_doc = state.get("hypothetical_doc") or generate_hypothetical_document(state["question"])
-        retrieved_hyde = retrieve_documents(hypothetical_doc, top_k=5)
+        retrieved_hyde = retrieve_documents(hypothetical_doc, owner_id=state["owner_id"], top_k=5)
         results.extend(retrieved_hyde.get("docs", []))
         hyde_meta = retrieved_hyde.get("meta", {})
         emit_rag_step(
@@ -294,7 +295,7 @@ def retrieve_expanded(state: RAGState) -> RAGState:
 
     if strategy in ("step_back", "complex"):
         expanded_query = state.get("expanded_query") or state["question"]
-        retrieved_stepback = retrieve_documents(expanded_query, top_k=5)
+        retrieved_stepback = retrieve_documents(expanded_query, owner_id=state["owner_id"], top_k=5)
         results.extend(retrieved_stepback.get("docs", []))
         step_meta = retrieved_stepback.get("meta", {})
         emit_rag_step(
@@ -324,7 +325,7 @@ def retrieve_expanded(state: RAGState) -> RAGState:
     deduped = []
     seen = set()
     for item in results:
-        key = (item.get("filename"), item.get("page_number"), item.get("text"))
+        key = (item.get("document_id"), item.get("page_number"), item.get("text"))
         if key in seen:
             continue
         seen.add(key)
@@ -389,8 +390,11 @@ def build_rag_graph():
 rag_graph = build_rag_graph()
 
 
-def run_rag_graph(question: str) -> dict:
+def run_rag_graph(question: str, owner_id: int) -> dict:
+    if not owner_id:
+        raise ValueError("RAG 调用缺少用户身份")
     return rag_graph.invoke({
+        "owner_id": owner_id,
         "question": question,
         "query": question,
         "context": "",

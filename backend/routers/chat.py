@@ -1,5 +1,4 @@
 import json
-import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -17,27 +16,12 @@ router = APIRouter()
 async def chat_endpoint(request: ChatRequest, current_user: User = Depends(get_current_user)):
     try:
         session_id = request.session_id or "default_session"
-        resp = chat_with_agent(request.message, current_user.username, session_id)
+        resp = chat_with_agent(request.message, current_user.username, current_user.id, session_id)
         if isinstance(resp, dict):
             return ChatResponse(**resp)
         return ChatResponse(response=resp)
-    except Exception as e:
-        message = str(e)
-        match = re.search(r"Error code:\s*(\d{3})", message)
-        if match:
-            code = int(match.group(1))
-            if code == 429:
-                raise HTTPException(
-                    status_code=429,
-                    detail=(
-                        "上游模型服务触发限流/额度限制（429）。请检查账号额度/模型状态。\n"
-                        f"原始错误：{message}"
-                    ),
-                )
-            if code in (401, 403):
-                raise HTTPException(status_code=code, detail=message)
-            raise HTTPException(status_code=code, detail=message)
-        raise HTTPException(status_code=500, detail=message)
+    except Exception:
+        raise HTTPException(status_code=502, detail="对话服务暂时不可用")
 
 
 @router.post("/chat/stream")
@@ -47,10 +31,10 @@ async def chat_stream_endpoint(request: ChatRequest, current_user: User = Depend
     async def event_generator():
         try:
             session_id = request.session_id or "default_session"
-            async for chunk in chat_with_agent_stream(request.message, current_user.username, session_id):
+            async for chunk in chat_with_agent_stream(request.message, current_user.username, current_user.id, session_id):
                 yield chunk
-        except Exception as e:
-            error_data = {"type": "error", "content": str(e)}
+        except Exception:
+            error_data = {"type": "error", "content": "对话服务暂时不可用"}
             yield f"data: {json.dumps(error_data)}\n\n"
 
     return StreamingResponse(

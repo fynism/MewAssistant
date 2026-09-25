@@ -23,8 +23,7 @@ createApp({
             authForm: {
                 username: '',
                 password: '',
-                role: 'user',
-                admin_code: ''
+                invite_code: ''
             },
             authLoading: false,
             showNotice: true
@@ -115,8 +114,7 @@ createApp({
                     password
                 };
                 if (this.authMode === 'register') {
-                    payload.role = this.authForm.role;
-                    payload.admin_code = this.authForm.admin_code || null;
+                    payload.invite_code = this.authForm.invite_code.trim();
                 }
 
                 const response = await fetch(endpoint, {
@@ -134,7 +132,7 @@ createApp({
                 this.currentUser = { username: data.username, role: data.role };
                 localStorage.setItem('accessToken', this.token);
                 this.authForm.password = '';
-                this.authForm.admin_code = '';
+                this.authForm.invite_code = '';
                 this.messages = [];
                 this.sessionId = 'session_' + Date.now();
                 this.activeNav = 'newChat';

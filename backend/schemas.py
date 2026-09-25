@@ -1,12 +1,12 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, List
 
 
 class RegisterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     username: str
     password: str
-    role: Optional[str] = "user"
-    admin_code: Optional[str] = None
+    invite_code: str
 
 
 class LoginRequest(BaseModel):

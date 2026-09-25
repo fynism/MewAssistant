@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from backend.core.config import settings
@@ -14,12 +14,12 @@ Base = declarative_base()
 
 
 def init_db() -> None:
-    # Delayed import to avoid circular dependency.
-    from backend import models  # noqa: F401
+    from sqlalchemy import inspect
 
-    Base.metadata.create_all(bind=engine)
-
-    from sqlalchemy import text
-    with engine.connect() as conn:
-        conn.execute(text("ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reasoning_content TEXT"))
-        conn.commit()
+    inspector = inspect(engine)
+    if not inspector.has_table("alembic_version"):
+        raise RuntimeError("数据库尚未迁移：先运行 uv run alembic upgrade head")
+    with engine.connect() as connection:
+        version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
+    if version != "0001_m1":
+        raise RuntimeError("数据库版本不是 M1：先运行 uv run alembic upgrade head")

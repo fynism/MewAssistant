@@ -32,7 +32,7 @@
                 <button @click="handleHistory" :class="['nav-btn', {active: activeNav === 'history'}]">
                     <i class="fas fa-history"></i> 历史记录
                 </button>
-                <button v-if="isAdmin" @click="handleSettings" :class="['nav-btn', {active: activeNav === 'settings'}]">
+                <button v-if="false" @click="handleSettings" :class="['nav-btn', {active: activeNav === 'settings'}]">
                     <i class="fas fa-cog"></i> 设置
                 </button>
             </nav>
@@ -54,15 +54,11 @@
         <main class="main-content">
             <div v-if="!isAuthenticated" class="auth-panel">
                 <h2>{{ authMode === 'login' ? '登录 呆猫助手' : '注册 呆猫助手' }}</h2>
-                <p>登录后即可使用聊天和历史记录；管理员可管理文档知识库。</p>
+                <p>使用邀请码注册后即可使用聊天；私有知识库管理界面正在建设中。</p>
                 <div class="auth-form">
                     <input v-model="authForm.username" type="text" placeholder="用户名" />
                     <input v-model="authForm.password" type="password" placeholder="密码" />
-                    <select v-if="authMode === 'register'" v-model="authForm.role">
-                        <option value="user">普通用户</option>
-                        <option value="admin">管理员</option>
-                    </select>
-                    <input v-if="authMode === 'register' && authForm.role === 'admin'" v-model="authForm.admin_code" type="password" placeholder="管理员邀请码" />
+                    <input v-if="authMode === 'register'" v-model="authForm.invite_code" type="text" placeholder="邀请码" />
                     <button class="send-btn auth-submit" :disabled="authLoading" @click="handleAuthSubmit">
                         {{ authLoading ? '提交中...' : (authMode === 'login' ? '登录' : '注册') }}
                     </button>
@@ -75,8 +71,8 @@
                     <div class="notice-modal">
                         <h3>使用须知</h3>
                         <ul>
-                            <li>注册管理员账号时，邀请码为 <code>fengye-admin-2026</code>，在角色选择"管理员"后填写即可。</li>
-                            <li>本应用支持上传 Word、PDF、Excel 文档用于功能测试。但请注意，所有已上传的文件对每位管理员均可见，普通用户的会话也可能检索到其中的内容，<strong>请勿上传涉及隐私或敏感信息的文件</strong>。</li>
+                            <li>注册需要有效邀请码。请向平台管理员获取。</li>
+                            <li>当前聊天只会检索登录用户自己的私有知识库。</li>
                             <li>当前版本尚在早期阶段，功能和使用体验会持续打磨，感谢你的耐心与反馈。</li>
                         </ul>
                         <button class="notice-confirm-btn" @click="showNotice = false">我知道了</button>
@@ -85,7 +81,7 @@
             </div>
 
             <!-- Settings Panel -->
-            <div v-if="isAuthenticated && activeNav === 'settings'" class="settings-panel">
+            <div v-if="false" class="settings-panel">
                 <div class="settings-header">
                     <h2><i class="fas fa-cog"></i> 文档管理</h2>
                     <p>上传文档进行向量化处理，支持 PDF 和 Word 、Excel 格式</p>

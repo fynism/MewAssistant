@@ -1,5 +1,4 @@
 from pathlib import Path
-import re
 import unittest
 
 
@@ -25,32 +24,24 @@ class BackendContractTests(unittest.TestCase):
         self.assertIn('@router.post("/chat/stream")', source)
         self.assertIn('media_type="text/event-stream"', source)
         self.assertIn('"X-Accel-Buffering": "no"', source)
-        self.assertIn('{"type": "error", "content": str(e)}', source)
+        self.assertIn('{"type": "error", "content": "对话服务暂时不可用"}', source)
         self.assertIn('yield f"data: {json.dumps(error_data)}\\n\\n"', source)
 
-    def test_document_delete_removes_bm25_before_milvus_delete(self):
-        source = read_backend_file("backend/services/document_service.py")
-        match = re.search(
-            r"def delete_document\(.*?(?=\n    def |\Z)",
-            source,
-            flags=re.DOTALL,
-        )
-
-        self.assertIsNotNone(match)
-        body = match.group(0)
-        self.assertLess(
-            body.index("self.remove_bm25_stats_for_filename(filename)"),
-            body.index("self.milvus_manager.delete(delete_expr)"),
-        )
+    def test_document_delete_scopes_cleanup_by_document_id(self):
+        source = read_backend_file("backend/services/knowledge_service.py")
+        self.assertIn('expr = f\'document_id == "{item.id}"\'', source)
+        self.assertIn('item.status = "deleting"', source)
 
     def test_api_module_aggregates_all_route_modules(self):
         source = read_backend_file("backend/api.py")
 
-        self.assertIn("from backend.routers import auth, chat, documents, sessions", source)
+        self.assertIn("from backend.routers import auth, chat, sessions, knowledges, invitations", source)
         self.assertIn("router.include_router(auth.router)", source)
         self.assertIn("router.include_router(sessions.router)", source)
         self.assertIn("router.include_router(chat.router)", source)
-        self.assertIn("router.include_router(documents.router)", source)
+        self.assertIn("router.include_router(knowledges.router)", source)
+        self.assertIn("router.include_router(invitations.router)", source)
+        self.assertNotIn("router.include_router(documents.router)", source)
 
     def test_rag_retrieval_uses_shared_dependencies(self):
         source = read_backend_file("backend/rag/retrieval.py")

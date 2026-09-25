@@ -2,10 +2,11 @@ import json
 import asyncio
 from langchain.chat_models import init_chat_model
 from langchain.agents import create_agent
+from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, AIMessage, AIMessageChunk, SystemMessage
 from backend.core.config import settings
-from backend.rag.events import set_rag_step_queue
-from backend.tools import get_current_weather, search_knowledge_base, get_last_rag_context, reset_tool_call_guards
+from backend.rag.events import bind_rag_step_sink, reset_rag_step_sink
+from backend.tools import get_current_weather
 from backend.services.conversation_storage import conversation_storage as storage
 
 from backend.langchain_patches import apply_patches
@@ -15,19 +16,45 @@ API_KEY = settings.ark_api_key
 MODEL = settings.model
 BASE_URL = settings.base_url
 
-def create_agent_instance():
-    model = init_chat_model(
+model = init_chat_model(
         model=MODEL,
         model_provider="openai",
         api_key=API_KEY,
         base_url=BASE_URL,
         temperature=0.3,
         stream_usage=True,
-    )
+)
+
+
+def create_agent_instance(owner_id: int, request_state: dict, event_sink=None):
+    if not owner_id:
+        raise ValueError("Agent 调用缺少用户身份")
+
+    @tool("search_knowledge_base")
+    def scoped_knowledge_search(query: str) -> str:
+        """Search the authenticated user's private knowledge bases."""
+        if request_state["calls"] >= 1:
+            return "本轮已检索知识库，请根据已有结果回答。"
+        request_state["calls"] += 1
+        from backend.rag_pipeline import run_rag_graph
+        token = bind_rag_step_sink(*event_sink) if event_sink else None
+        try:
+            result = run_rag_graph(query, owner_id=owner_id)
+        finally:
+            if token is not None:
+                reset_rag_step_sink(token)
+        request_state["rag_trace"] = result.get("rag_trace")
+        docs = result.get("docs", [])
+        if not docs:
+            return "当前用户的知识库中没有找到相关资料。"
+        return "Retrieved Chunks:\n" + "\n\n---\n\n".join(
+            f"[{i}] {doc.get('filename', 'Unknown')} (Page {doc.get('page_number', 'N/A')}):\n{doc.get('text', '')}"
+            for i, doc in enumerate(docs, 1)
+        )
 
     agent = create_agent(
         model=model,
-        tools=[get_current_weather, search_knowledge_base],
+        tools=[get_current_weather, scoped_knowledge_search],
         system_prompt=(
             "你是呆猫助手，怪物猎人世界里的随从猫，性格呆萌但很可靠喵。"
             "你称呼用户为'老大'，每句话结尾要加'喵'。"
@@ -43,10 +70,8 @@ def create_agent_instance():
             "If you don't know the answer, admit it honestly。"
         ),
     )
-    return agent, model
+    return agent
 
-
-agent, model = create_agent_instance()
 
 def summarize_old_messages(model, messages: list) -> str:
     """将旧消息总结为摘要"""
@@ -82,13 +107,12 @@ AI：{ai_response[:300]}
         return ""
 
 
-def chat_with_agent(user_text: str, user_id: str = "default_user", session_id: str = "default_session"):
+def chat_with_agent(user_text: str, user_id: str, owner_id: int, session_id: str = "default_session"):
     """使用 Agent 处理用户消息并返回响应"""
     messages = storage.load(user_id, session_id)
 
-    # 清理可能残留的 RAG 上下文，避免跨请求污染
-    get_last_rag_context(clear=True)
-    reset_tool_call_guards()
+    request_state = {"calls": 0, "rag_trace": None}
+    agent = create_agent_instance(owner_id, request_state)
     
     if len(messages) > 50:
         summary = summarize_old_messages(model, messages[:40])
@@ -119,8 +143,7 @@ def chat_with_agent(user_text: str, user_id: str = "default_user", session_id: s
     
     messages.append(AIMessage(content=response_content))
 
-    rag_context = get_last_rag_context(clear=True)
-    rag_trace = rag_context.get("rag_trace") if rag_context else None
+    rag_trace = request_state["rag_trace"]
 
     extra_message_data = [None] * (len(messages) - 1) + [{"rag_trace": rag_trace}]
     storage.save(user_id, session_id, messages, extra_message_data=extra_message_data)
@@ -137,7 +160,7 @@ def chat_with_agent(user_text: str, user_id: str = "default_user", session_id: s
     }
 
 
-async def chat_with_agent_stream(user_text: str, user_id: str = "default_user", session_id: str = "default_session"):
+async def chat_with_agent_stream(user_text: str, user_id: str, owner_id: int, session_id: str = "default_session"):
     """使用 Agent 处理用户消息并流式返回响应。
     
     架构：使用统一输出队列 + 后台任务，确保 RAG 检索步骤在工具执行期间实时推送，
@@ -145,9 +168,7 @@ async def chat_with_agent_stream(user_text: str, user_id: str = "default_user", 
     """
     messages = storage.load(user_id, session_id)
 
-    # 清理可能残留的 RAG 上下文
-    get_last_rag_context(clear=True)
-    reset_tool_call_guards()
+    request_state = {"calls": 0, "rag_trace": None}
 
     # 统一输出队列：所有事件（content / rag_step）都汇入这里
     output_queue = asyncio.Queue()
@@ -157,7 +178,7 @@ async def chat_with_agent_stream(user_text: str, user_id: str = "default_user", 
         def put_nowait(self, step):
             output_queue.put_nowait({"type": "rag_step", "step": step})
 
-    set_rag_step_queue(_RagStepProxy())
+    agent = create_agent_instance(owner_id, request_state, (asyncio.get_running_loop(), _RagStepProxy()))
 
     if len(messages) > 50:
         summary = summarize_old_messages(model, messages[:40])
@@ -196,8 +217,8 @@ async def chat_with_agent_stream(user_text: str, user_id: str = "default_user", 
                 if content:
                     full_response += content
                     await output_queue.put({"type": "content", "content": content})
-        except Exception as e:
-            await output_queue.put({"type": "error", "content": str(e)})
+        except Exception:
+            await output_queue.put({"type": "error", "content": "对话服务暂时不可用"})
         finally:
             # 哨兵：通知主循环 agent 已完成
             await output_queue.put(None)
@@ -224,13 +245,11 @@ async def chat_with_agent_stream(user_text: str, user_id: str = "default_user", 
         raise  # 重新抛出 GeneratorExit 以便 FastAPI 正确处理关闭
     finally:
         # 正常结束或异常退出时清理
-        set_rag_step_queue(None)
         if not agent_task.done():
              agent_task.cancel()
 
     # 获取 RAG trace
-    rag_context = get_last_rag_context(clear=True)
-    rag_trace = rag_context.get("rag_trace") if rag_context else None
+    rag_trace = request_state["rag_trace"]
 
     # 发送 trace 信息
     if rag_trace:

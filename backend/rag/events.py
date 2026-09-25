@@ -1,28 +1,22 @@
-_RAG_STEP_QUEUE = None  # asyncio.Queue-like object, set by agent before streaming
-_RAG_STEP_LOOP = None   # asyncio loop, captured when setting queue
+"""Request-local RAG events; the sink is bound inside the tool execution thread."""
+
+from contextvars import ContextVar
+
+_sink: ContextVar[tuple | None] = ContextVar("rag_step_sink", default=None)
 
 
-def set_rag_step_queue(queue):
-    """设置 RAG 步骤队列，并捕获当前事件循环以便跨线程调度。"""
-    global _RAG_STEP_QUEUE, _RAG_STEP_LOOP
-    _RAG_STEP_QUEUE = queue
-    if queue:
-        import asyncio
-        try:
-            _RAG_STEP_LOOP = asyncio.get_running_loop()
-        except RuntimeError:
-            _RAG_STEP_LOOP = asyncio.get_event_loop()
-    else:
-        _RAG_STEP_LOOP = None
+def bind_rag_step_sink(loop, queue):
+    return _sink.set((loop, queue))
+
+
+def reset_rag_step_sink(token):
+    _sink.reset(token)
 
 
 def emit_rag_step(icon: str, label: str, detail: str = ""):
-    """向队列发送一个 RAG 检索步骤。支持跨线程安全调用。"""
-    global _RAG_STEP_QUEUE, _RAG_STEP_LOOP
-    if _RAG_STEP_QUEUE is not None and _RAG_STEP_LOOP is not None:
-        step = {"icon": icon, "label": label, "detail": detail}
-        try:
-            if not _RAG_STEP_LOOP.is_closed():
-                _RAG_STEP_LOOP.call_soon_threadsafe(_RAG_STEP_QUEUE.put_nowait, step)
-        except Exception:
-            pass
+    sink = _sink.get()
+    if sink is None:
+        return
+    loop, queue = sink
+    if not loop.is_closed():
+        loop.call_soon_threadsafe(queue.put_nowait, {"icon": icon, "label": label, "detail": detail})

@@ -2,6 +2,8 @@
 
 Agent的项目记录，方便后续持续更新与展示。
 
+> M1：注册使用管理员创建的一次性邀请码。旧 `.env` 中的 `ADMIN_INVITE_CODE` 已停用；首次管理员运行 `uv run python -m backend.admin_bootstrap --username admin` 创建，登录后调用 `POST /admin/invitations` 获取新的 `invite_code`。启动前先运行 `uv run alembic upgrade head`。
+
 [![zread](https://img.shields.io/badge/Ask_Zread-_.svg?style=plastic&color=00b0aa&labelColor=000000&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQuOTYxNTYgMS42MDAxSDIuMjQxNTZDMS44ODgxIDEuNjAwMSAxLjYwMTU2IDEuODg2NjQgMS42MDE1NiAyLjI0MDFWNC45NjAxQzEuNjAxNTYgNS4zMTM1NiAxLjg4ODEgNS42MDAxIDIuMjQxNTYgNS42MDAxSDQuOTYxNTZDNS4zMTUwMiA1LjYwMDEgNS42MDE1NiA1LjMxMzU2IDUuNjAxNTYgNC45NjAxVjIuMjQwMUM1LjYwMTU2IDEuODg2NjQgNS4zMTUwMiAxLjYwMDEgNC45NjE1NiAxLjYwMDFaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00Ljk2MTU2IDEwLjM5OTlIMi4yNDE1NkMxLjg4ODEgMTAuMzk5OSAxLjYwMTU2IDEwLjY4NjQgMS42MDE1NiAxMS4wMzk5VjEzLjc1OTlDMS42MDE1NiAxNC4xMTM0IDEuODg4MSAxNC4zOTk5IDIuMjQxNTYgMTQuMzk5OUg0Ljk2MTU2QzUuMzE1MDIgMTQuMzk5OSA1LjYwMTU2IDE0LjExMzQgNS42MDE1NiAxMy43NTk5VjExLjAzOTlDNS42MDE1NiAxMC42ODY0IDUuMzE1MDIgMTAuMzk5OSA0Ljk2MTU2IDEwLjM5OTlaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik0xMy43NTg0IDEuNjAwMUgxMS4wMzg0QzEwLjY4NSAxLjYwMDEgMTAuMzk4NCAxLjg4NjY0IDEwLjM5ODQgMi4yNDAxVjQuOTYwMUMxMC4zOTg0IDUuMzEzNTYgMTAuNjg1IDUuNjAwMSAxMS4wMzg0IDUuNjAwMUgxMy43NTg0QzE0LjExMTkgNS42MDAxIDE0LjM5ODQgNS4zMTM1NiAxNC4zOTg0IDQuOTYwMVYyLjI0MDFDMTQuMzk4NCAxLjg4NjY0IDE0LjExMTkgMS42MDAxIDEzLjc1ODQgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8cGF0aCBkPSJNNCAxMkwxMiA0TDQgMTJaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00IDEyTDEyIDQiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K&logoColor=ffffff)](https://zread.ai/fynism/MewAssistant)
 
 ## 本地部署
@@ -60,6 +62,7 @@ RERANK_API_KEY=your_rerank_api_key
 MILVUS_HOST=127.0.0.1
 MILVUS_PORT=19530
 MILVUS_COLLECTION=embeddings_collection
+MILVUS_M1_COLLECTION=embeddings_collection_m1
 
 # ===== Database / Cache =====
 DATABASE_URL=postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/langchain_app
@@ -67,13 +70,12 @@ REDIS_URL=redis://127.0.0.1:6379/0
 
 # ===== Auth =====
 JWT_SECRET_KEY=replace-with-strong-random-secret
-ADMIN_INVITE_CODE=supermew-admin-2026
 JWT_ALGORITHM=HS256
 JWT_EXPIRE_MINUTES=1440
 PASSWORD_PBKDF2_ROUNDS=310000
 
-# ===== BM25 稀疏统计持久化（默认 data/bm25_state.json，可改路径）=====
-# BM25_STATE_PATH=/path/to/bm25_state.json
+# ===== M1 BM25 稀疏统计持久化 =====
+BM25_M1_STATE_PATH=data/bm25_state_m1.json
 
 # ===== Tools （可选）=====
 AMAP_WEATHER_API=https://restapi.amap.com/v3/weather/weatherInfo
@@ -289,20 +291,21 @@ Compose 会自动启动应用；在 ECS 上通过 Nginx/HTTPS 对外提供服务
 需在仓库根目录或运行环境配置：
 - 模型相关：`ARK_API_KEY`、`MODEL`、`BASE_URL`
 - 稠密向量：`EMBEDDING_MODEL`、`EMBEDDING_DEVICE`、`DENSE_EMBEDDING_DIM`（需与 Milvus 集合 `dense_embedding` 维度一致）
-- BM25 持久化：`BM25_STATE_PATH`（可选，默认 `data/bm25_state.json`）
+- BM25 持久化：`BM25_M1_STATE_PATH`（可选，默认 `data/bm25_state_m1.json`）
 - Rerank 相关：`RERANK_MODEL`、`RERANK_BINDING_HOST`、`RERANK_API_KEY`
-- Milvus：`MILVUS_HOST`、`MILVUS_PORT`、`MILVUS_COLLECTION`
+- Milvus：`MILVUS_HOST`、`MILVUS_PORT`、`MILVUS_M1_COLLECTION`；旧 `MILVUS_COLLECTION` 仅供显式旧数据导入使用
 - 数据库缓存：`DATABASE_URL`、`REDIS_URL`
-- 鉴权相关：`JWT_SECRET_KEY`、`ADMIN_INVITE_CODE`、`JWT_ALGORITHM`、`JWT_EXPIRE_MINUTES`
+- 鉴权相关：`JWT_SECRET_KEY`、`JWT_ALGORITHM`、`JWT_EXPIRE_MINUTES`
 - 密码参数：`PASSWORD_PBKDF2_ROUNDS`
 - Auto-merging：`AUTO_MERGE_ENABLED`、`AUTO_MERGE_THRESHOLD`、`LEAF_RETRIEVE_LEVEL`
 - 工具：`AMAP_WEATHER_API`、`AMAP_API_KEY`
 
 ## API 速览
 - 鉴权
-  - `POST /auth/register`：注册（支持普通用户/管理员邀请码模式）。
+  - `POST /auth/register`：使用管理员发放的邀请码注册普通用户。
   - `POST /auth/login`：登录，返回 Bearer Token。
   - `GET /auth/me`：获取当前登录用户信息。
+  - `POST /admin/invitations`：管理员创建邀请码；明文仅在创建响应中出现。
 - 聊天
   - `POST /chat`：聊天（非流式），入参 `message`、`session_id`。
   - `POST /chat/stream`：聊天（流式 SSE），入参同上，返回 `text/event-stream`。
@@ -310,10 +313,11 @@ Compose 会自动启动应用；在 ECS 上通过 Nginx/HTTPS 对外提供服务
   - `GET /sessions`：列出当前用户会话。
   - `GET /sessions/{session_id}`：拉取当前用户某会话消息。
   - `DELETE /sessions/{session_id}`：删除当前用户会话。
-- 文档（管理员权限）
-  - `GET /documents`：列出已入库文档及 chunk 数。
-  - `POST /documents/upload`：上传并向量化 PDF/Word/Excel。
-  - `DELETE /documents/{filename}`：删除指定文档向量数据（会先按文件名分页拉取 chunk 文本并同步扣减 BM25 持久化统计，再删 Milvus）。
+- 私有知识库与文档（需登录）
+  - `GET/POST /knowledges`：列出、创建当前用户的知识库。
+  - `GET/PATCH/DELETE /knowledges/{knowledge_id}`：查看、修改、删除自己的知识库。
+  - `GET/POST /knowledges/{knowledge_id}/documents`：列出、上传自己的文件。
+  - `GET/DELETE /knowledges/{knowledge_id}/documents/{document_id}`：查看状态、删除自己的文件。
 
 ## 流式输出与实时检索过程 — 技术细节
 

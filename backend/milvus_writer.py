@@ -1,53 +1,44 @@
-"""文档向量化并写入 Milvus - 支持密集+稀疏向量"""
+"""Write only tenant-tagged leaf chunks to the M1 collection."""
+
 from backend.embedding import EmbeddingService, embedding_service as _default_embedding_service
 from backend.milvus_client import MilvusManager
 
 
 class MilvusWriter:
-    """文档向量化并写入 Milvus 服务 - 支持混合检索"""
-
     def __init__(self, embedding_service: EmbeddingService = None, milvus_manager: MilvusManager = None):
         self.embedding_service = embedding_service or _default_embedding_service
         self.milvus_manager = milvus_manager or MilvusManager()
 
     def write_documents(self, documents: list[dict], batch_size: int = 50):
-        """
-        批量写入文档到 Milvus（同时生成密集和稀疏向量）
-        :param documents: 文档列表
-        :param batch_size: 批次大小
-        """
         if not documents:
             return
-
+        document_ids = {doc["document_id"] for doc in documents}
+        if len(document_ids) != 1 or any(not doc.get("knowledge_id") for doc in documents):
+            raise ValueError("一次写入必须只包含一个有归属的文档")
+        document_id = next(iter(document_ids))
+        texts = [doc["text"] for doc in documents]
         self.milvus_manager.init_collection()
-
-        all_texts = [doc["text"] for doc in documents]
-        self.embedding_service.increment_add_documents(all_texts)
-
-        total = len(documents)
-        for i in range(0, total, batch_size):
-            batch = documents[i:i + batch_size]
-            texts = [doc["text"] for doc in batch]
-            
-            # 同时生成密集向量和稀疏向量
-            dense_embeddings, sparse_embeddings = self.embedding_service.get_all_embeddings(texts)
-
-            insert_data = [
-                {
-                    "dense_embedding": dense_emb,
-                    "sparse_embedding": sparse_emb,
-                    "text": doc["text"],
-                    "filename": doc["filename"],
-                    "file_type": doc["file_type"],
-                    "file_path": doc.get("file_path", ""),
-                    "page_number": doc.get("page_number", 0),
-                    "chunk_idx": doc.get("chunk_idx", 0),
-                    "chunk_id": doc.get("chunk_id", ""),
-                    "parent_chunk_id": doc.get("parent_chunk_id", ""),
-                    "root_chunk_id": doc.get("root_chunk_id", ""),
-                    "chunk_level": doc.get("chunk_level", 0),
-                }
-                for doc, dense_emb, sparse_emb in zip(batch, dense_embeddings, sparse_embeddings)
-            ]
-
-            self.milvus_manager.insert(insert_data)
+        self.embedding_service.increment_add_documents(texts)
+        try:
+            for i in range(0, len(documents), batch_size):
+                batch = documents[i:i + batch_size]
+                dense, sparse = self.embedding_service.get_all_embeddings([doc["text"] for doc in batch])
+                payload = [{
+                    "dense_embedding": dense_vec, "sparse_embedding": sparse_vec,
+                    "text": doc["text"], "filename": doc["filename"],
+                    "knowledge_id": doc["knowledge_id"], "document_id": doc["document_id"],
+                    "file_type": doc["file_type"], "file_path": doc.get("file_path", ""),
+                    "page_number": doc.get("page_number", 0), "chunk_idx": doc.get("chunk_idx", 0),
+                    "chunk_id": doc["chunk_id"], "parent_chunk_id": doc.get("parent_chunk_id", ""),
+                    "root_chunk_id": doc.get("root_chunk_id", ""), "chunk_level": doc["chunk_level"],
+                } for doc, dense_vec, sparse_vec in zip(batch, dense, sparse)]
+                self.milvus_manager.insert(payload)
+            self.milvus_manager.flush()
+        except Exception:
+            # Never leave a failed document searchable; the DB also keeps it
+            # non-ready until the entire operation succeeds.
+            try:
+                self.milvus_manager.delete(f'document_id == "{document_id}"')
+            finally:
+                self.embedding_service.increment_remove_documents(texts)
+            raise
