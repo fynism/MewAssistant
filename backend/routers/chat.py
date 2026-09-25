@@ -1,4 +1,5 @@
 import json
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -10,6 +11,7 @@ from backend.schemas import ChatRequest, ChatResponse
 
 
 router = APIRouter()
+logger = logging.getLogger("uvicorn.error")
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -21,6 +23,7 @@ async def chat_endpoint(request: ChatRequest, current_user: User = Depends(get_c
             return ChatResponse(**resp)
         return ChatResponse(response=resp)
     except Exception:
+        logger.exception("Chat request failed (user_id=%s)", current_user.id)
         raise HTTPException(status_code=502, detail="对话服务暂时不可用")
 
 
@@ -34,6 +37,7 @@ async def chat_stream_endpoint(request: ChatRequest, current_user: User = Depend
             async for chunk in chat_with_agent_stream(request.message, current_user.username, current_user.id, session_id):
                 yield chunk
         except Exception:
+            logger.exception("Chat stream failed (user_id=%s)", current_user.id)
             error_data = {"type": "error", "content": "对话服务暂时不可用"}
             yield f"data: {json.dumps(error_data)}\n\n"
 

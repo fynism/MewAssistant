@@ -5,6 +5,31 @@ from unittest.mock import patch
 
 
 class M1StreamIsolationTests(unittest.TestCase):
+    def test_failed_stream_does_not_save_incomplete_turn(self):
+        from backend import agent
+
+        class FailingAgent:
+            async def astream(self, *_args, **_kwargs):
+                raise RuntimeError("upstream failed")
+                yield  # pragma: no cover
+
+        async def consume():
+            return [event async for event in agent.chat_with_agent_stream("question", "user-1", 1)]
+
+        with (patch.object(agent, "create_agent_instance", return_value=FailingAgent()),
+              patch.object(agent.storage, "load", return_value=[]),
+              patch.object(agent.storage, "save") as save,
+              patch.object(agent.storage, "update_title") as update_title,
+              patch.object(agent, "generate_session_title") as generate_title,
+              patch.object(agent.logger, "exception")):
+            events = asyncio.run(consume())
+
+        self.assertTrue(any('"type": "error"' in event for event in events))
+        self.assertIn("data: [DONE]\n\n", events)
+        save.assert_not_called()
+        update_title.assert_not_called()
+        generate_title.assert_not_called()
+
     def test_two_streams_keep_tool_results_and_rag_events_separate(self):
         from langchain_core.messages import AIMessageChunk
         from backend import agent, rag_pipeline

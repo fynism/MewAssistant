@@ -1,5 +1,6 @@
 import json
 import asyncio
+import logging
 from langchain.chat_models import init_chat_model
 from langchain.agents import create_agent
 from langchain_core.tools import tool
@@ -11,6 +12,8 @@ from backend.services.conversation_storage import conversation_storage as storag
 
 from backend.langchain_patches import apply_patches
 apply_patches()
+
+logger = logging.getLogger("uvicorn.error")
 
 API_KEY = settings.ark_api_key
 MODEL = settings.model
@@ -189,10 +192,11 @@ async def chat_with_agent_stream(user_text: str, user_id: str, owner_id: int, se
     messages.append(HumanMessage(content=user_text))
 
     full_response = ""
+    worker_failed = False
 
     async def _agent_worker():
         """后台任务：运行 agent 并将内容 chunk 推入输出队列。"""
-        nonlocal full_response
+        nonlocal full_response, worker_failed
         try:
             async for msg, metadata in agent.astream(
                 {"messages": messages},
@@ -218,6 +222,8 @@ async def chat_with_agent_stream(user_text: str, user_id: str, owner_id: int, se
                     full_response += content
                     await output_queue.put({"type": "content", "content": content})
         except Exception:
+            worker_failed = True
+            logger.exception("Agent streaming failed (user_id=%s, session_id=%s)", owner_id, session_id)
             await output_queue.put({"type": "error", "content": "对话服务暂时不可用"})
         finally:
             # 哨兵：通知主循环 agent 已完成
@@ -257,6 +263,10 @@ async def chat_with_agent_stream(user_text: str, user_id: str, owner_id: int, se
 
     # 发送结束信号
     yield "data: [DONE]\n\n"
+
+    # Keep failed turns out of history so a retry starts from the last valid state.
+    if worker_failed:
+        return
 
     # 保存对话
     messages.append(AIMessage(content=full_response))
