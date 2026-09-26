@@ -18,6 +18,19 @@ class User(Base):
     sessions = relationship("ChatSession", back_populates="user", cascade="all, delete-orphan")
 
 
+class PersonalApiKey(Base):
+    __tablename__ = "personal_api_keys"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    token_digest: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    token_suffix: Mapped[str] = mapped_column(String(8), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
     __table_args__ = (UniqueConstraint("user_id", "session_id", name="uq_user_session"),)
