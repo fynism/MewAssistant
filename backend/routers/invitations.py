@@ -37,7 +37,7 @@ def create_invitation(data: CreateInvitation, admin: User = Depends(require_admi
 @router.get("/admin/invitations")
 def list_invitations(_: User = Depends(require_admin), db: Session = Depends(get_db)):
     items = db.query(Invitation).order_by(Invitation.created_at.desc()).all()
-    return [{"id": i.id, "max_uses": i.max_uses, "used_count": i.used_count,
+    return [{"id": i.id, "created_at": i.created_at, "max_uses": i.max_uses, "used_count": i.used_count,
              "expires_at": i.expires_at, "revoked_at": i.revoked_at} for i in items]
 
 
