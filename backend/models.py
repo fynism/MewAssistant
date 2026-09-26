@@ -44,6 +44,7 @@ class ChatMessage(Base):
     reasoning_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     rag_trace: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    knowledge_scope_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     session = relationship("ChatSession", back_populates="messages")
 

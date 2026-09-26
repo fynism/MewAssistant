@@ -37,7 +37,7 @@ class ConversationStorage:
         return messages
 
     def save(self, user_id: str, session_id: str, messages: list, metadata: dict = None, extra_message_data: list = None):
-        """保存对话"""
+        """Append the completed turn; existing turns and their scopes stay immutable."""
         db = SessionLocal()
         try:
             user = db.query(User).filter(User.username == user_id).first()
@@ -54,17 +54,21 @@ class ConversationStorage:
                 db.add(session)
                 db.flush()
             else:
-                session.metadata_json = metadata or {}
+                if metadata:
+                    session.metadata_json = {**(session.metadata_json or {}), **metadata}
 
-            db.query(ChatMessage).filter(ChatMessage.session_ref_id == session.id).delete(synchronize_session=False)
-
-            serialized = []
+            # The agent may summarize old messages before calling save. Only
+            # the new human/AI pair belongs in the database on this call.
+            start = max(0, len(messages) - 2)
             now = datetime.utcnow()
-            for idx, msg in enumerate(messages):
+            for idx in range(start, len(messages)):
+                msg = messages[idx]
                 rag_trace = None
+                knowledge_ids = None
                 if extra_message_data and idx < len(extra_message_data):
                     extra = extra_message_data[idx] or {}
                     rag_trace = extra.get("rag_trace")
+                    knowledge_ids = extra.get("knowledge_ids")
 
                 reasoning = msg.additional_kwargs.get("reasoning_content") if hasattr(msg, "additional_kwargs") else None
                 db.add(
@@ -75,22 +79,14 @@ class ConversationStorage:
                         reasoning_content=reasoning,
                         timestamp=now,
                         rag_trace=rag_trace,
+                        knowledge_scope_json=knowledge_ids,
                     )
-                )
-                serialized.append(
-                    {
-                        "type": msg.type,
-                        "content": str(msg.content),
-                        "reasoning_content": reasoning,
-                        "timestamp": now.isoformat(),
-                        "rag_trace": rag_trace,
-                    }
                 )
 
             session.updated_at = now
             db.commit()
 
-            cache.set_json(self._messages_cache_key(user_id, session_id), serialized)
+            cache.delete(self._messages_cache_key(user_id, session_id))
             cache.delete(self._sessions_cache_key(user_id))
         finally:
             db.close()
@@ -135,6 +131,8 @@ class ConversationStorage:
                         "updated_at": s.updated_at.isoformat(),
                         "message_count": count,
                         "title": s.title,
+                        "last_knowledge_ids": (s.metadata_json or {}).get("last_knowledge_ids"),
+                        "legacy_scope_unknown": "last_knowledge_ids" not in (s.metadata_json or {}),
                     }
                 )
             cache.set_json(self._sessions_cache_key(user_id), result)
@@ -173,11 +171,24 @@ class ConversationStorage:
                     "reasoning_content": row.reasoning_content,
                     "timestamp": row.timestamp.isoformat(),
                     "rag_trace": row.rag_trace,
+                    "knowledge_ids": row.knowledge_scope_json,
                 }
                 for row in rows
             ]
             cache.set_json(self._messages_cache_key(user_id, session_id), result)
             return result
+        finally:
+            db.close()
+
+    def get_session_metadata(self, user_id: str, session_id: str) -> dict:
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter(User.username == user_id).first()
+            if not user:
+                return {}
+            session = db.query(ChatSession).filter(
+                ChatSession.user_id == user.id, ChatSession.session_id == session_id).first()
+            return dict(session.metadata_json or {}) if session else {}
         finally:
             db.close()
 

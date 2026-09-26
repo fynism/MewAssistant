@@ -29,7 +29,8 @@ model = init_chat_model(
 )
 
 
-def create_agent_instance(owner_id: int, request_state: dict, event_sink=None):
+def create_agent_instance(owner_id: int, request_state: dict, event_sink=None,
+                          knowledge_ids: list[str] | None = None):
     if not owner_id:
         raise ValueError("Agent 调用缺少用户身份")
 
@@ -42,7 +43,8 @@ def create_agent_instance(owner_id: int, request_state: dict, event_sink=None):
         from backend.rag_pipeline import run_rag_graph
         token = bind_rag_step_sink(*event_sink) if event_sink else None
         try:
-            result = run_rag_graph(query, owner_id=owner_id)
+            scope = {"knowledge_ids": knowledge_ids} if knowledge_ids is not None else {}
+            result = run_rag_graph(query, owner_id=owner_id, **scope)
         finally:
             if token is not None:
                 reset_rag_step_sink(token)
@@ -110,12 +112,14 @@ AI：{ai_response[:300]}
         return ""
 
 
-def chat_with_agent(user_text: str, user_id: str, owner_id: int, session_id: str = "default_session"):
+def chat_with_agent(user_text: str, user_id: str, owner_id: int,
+                    session_id: str = "default_session", knowledge_ids: list[str] | None = None):
     """使用 Agent 处理用户消息并返回响应"""
     messages = storage.load(user_id, session_id)
 
     request_state = {"calls": 0, "rag_trace": None}
-    agent = create_agent_instance(owner_id, request_state)
+    scope_snapshot = list(knowledge_ids) if knowledge_ids is not None else None
+    agent = create_agent_instance(owner_id, request_state, knowledge_ids=scope_snapshot)
     
     if len(messages) > 50:
         summary = summarize_old_messages(model, messages[:40])
@@ -148,8 +152,12 @@ def chat_with_agent(user_text: str, user_id: str, owner_id: int, session_id: str
 
     rag_trace = request_state["rag_trace"]
 
-    extra_message_data = [None] * (len(messages) - 1) + [{"rag_trace": rag_trace}]
-    storage.save(user_id, session_id, messages, extra_message_data=extra_message_data)
+    extra_message_data = [None] * (len(messages) - 2) + [
+        {"knowledge_ids": scope_snapshot},
+        {"rag_trace": rag_trace, "knowledge_ids": scope_snapshot},
+    ]
+    metadata = {"last_knowledge_ids": scope_snapshot} if scope_snapshot is not None else None
+    storage.save(user_id, session_id, messages, metadata=metadata, extra_message_data=extra_message_data)
 
     # 首次对话完成后自动生成标题
     if len(messages) <= 2:
@@ -160,10 +168,12 @@ def chat_with_agent(user_text: str, user_id: str, owner_id: int, session_id: str
     return {
         "response": response_content,
         "rag_trace": rag_trace,
+        "knowledge_ids": scope_snapshot,
     }
 
 
-async def chat_with_agent_stream(user_text: str, user_id: str, owner_id: int, session_id: str = "default_session"):
+async def chat_with_agent_stream(user_text: str, user_id: str, owner_id: int,
+                                 session_id: str = "default_session", knowledge_ids: list[str] | None = None):
     """使用 Agent 处理用户消息并流式返回响应。
     
     架构：使用统一输出队列 + 后台任务，确保 RAG 检索步骤在工具执行期间实时推送，
@@ -172,6 +182,7 @@ async def chat_with_agent_stream(user_text: str, user_id: str, owner_id: int, se
     messages = storage.load(user_id, session_id)
 
     request_state = {"calls": 0, "rag_trace": None}
+    scope_snapshot = list(knowledge_ids) if knowledge_ids is not None else None
 
     # 统一输出队列：所有事件（content / rag_step）都汇入这里
     output_queue = asyncio.Queue()
@@ -181,7 +192,9 @@ async def chat_with_agent_stream(user_text: str, user_id: str, owner_id: int, se
         def put_nowait(self, step):
             output_queue.put_nowait({"type": "rag_step", "step": step})
 
-    agent = create_agent_instance(owner_id, request_state, (asyncio.get_running_loop(), _RagStepProxy()))
+    agent = create_agent_instance(owner_id, request_state,
+                                  (asyncio.get_running_loop(), _RagStepProxy()),
+                                  knowledge_ids=scope_snapshot)
 
     if len(messages) > 50:
         summary = summarize_old_messages(model, messages[:40])
@@ -270,8 +283,12 @@ async def chat_with_agent_stream(user_text: str, user_id: str, owner_id: int, se
 
     # 保存对话
     messages.append(AIMessage(content=full_response))
-    extra_message_data = [None] * (len(messages) - 1) + [{"rag_trace": rag_trace}]
-    storage.save(user_id, session_id, messages, extra_message_data=extra_message_data)
+    extra_message_data = [None] * (len(messages) - 2) + [
+        {"knowledge_ids": scope_snapshot},
+        {"rag_trace": rag_trace, "knowledge_ids": scope_snapshot},
+    ]
+    metadata = {"last_knowledge_ids": scope_snapshot} if scope_snapshot is not None else None
+    storage.save(user_id, session_id, messages, metadata=metadata, extra_message_data=extra_message_data)
 
     # 首次对话完成后自动生成标题
     if len(messages) <= 2:
