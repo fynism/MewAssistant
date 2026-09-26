@@ -2,6 +2,7 @@ import asyncio
 import io
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -123,6 +124,19 @@ class M2DocumentTests(unittest.TestCase):
         self.assertGreater(settings["max_upload_bytes"], 0)
         document = self.db.query(KnowledgeDocument).one()
         self.assertIn("updated_at", routes.document_payload(document))
+
+    def test_user_document_and_storage_quotas_cover_upload_and_replacement(self):
+        with patch.object(service, "settings", replace(service.settings, max_user_documents=1)):
+            with self.assertRaises(HTTPException) as full:
+                asyncio.run(service.save_upload(self.db, 1, "alice-kb", self.upload()))
+        self.assertEqual(full.exception.status_code, 413)
+        self.assertEqual(self.db.query(KnowledgeDocument).count(), 1)
+
+        with patch.object(service, "settings", replace(service.settings, max_user_storage_bytes=14)):
+            with self.assertRaises(HTTPException) as full:
+                asyncio.run(service.replace_document(self.db, 1, "alice-kb", "alice-doc", self.upload()))
+        self.assertEqual(full.exception.status_code, 413)
+        self.assertEqual(self.db.query(KnowledgeDocument).one().status, "ready")
 
 
 if __name__ == "__main__":

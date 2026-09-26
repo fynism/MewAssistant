@@ -12,6 +12,7 @@ from backend.core.config import settings
 from backend.database import SessionLocal
 from backend.dependencies import document_loader, embedding_service, milvus_manager, milvus_writer
 from backend.models import KnowledgeBase, KnowledgeDocument, KnowledgeParentChunk
+from backend.models import User
 
 STORAGE_DIR = Path(__file__).resolve().parents[2] / "data" / "knowledge_documents"
 ALLOWED_EXTENSIONS = {".pdf", ".doc", ".docx", ".xls", ".xlsx"}
@@ -81,16 +82,45 @@ def _verify_file(data: bytes, suffix: str) -> None:
         raise HTTPException(status_code=400, detail="Office 文件格式无效")
 
 
+def _check_user_capacity(db: Session, owner_id: int, incoming_bytes: int,
+                         replacing: KnowledgeDocument | None = None) -> None:
+    # Lock the owner row so uploads to different knowledge bases share one quota decision.
+    db.query(User.id).filter(User.id == owner_id).with_for_update().one()
+    rows = db.query(KnowledgeDocument).join(KnowledgeBase).filter(
+        KnowledgeBase.owner_id == owner_id, KnowledgeDocument.status != "deleting").all()
+    if replacing is None and len(rows) >= settings.max_user_documents:
+        raise HTTPException(status_code=413, detail="已达到个人文件数量上限")
+    def occupied_bytes(row: KnowledgeDocument) -> int:
+        # M1/M2 uploads predate the size column; count their real stored bytes.
+        path = STORAGE_DIR / row.storage_key
+        original = row.size_bytes or (path.stat().st_size if path.exists() else 0)
+        replacement = row.replacement_size_bytes or 0
+        return original + replacement
+
+    occupied = sum(occupied_bytes(row) for row in rows)
+    if replacing is not None:
+        occupied -= occupied_bytes(replacing)
+        path = STORAGE_DIR / replacing.storage_key
+        original = replacing.size_bytes or (path.stat().st_size if path.exists() else 0)
+        occupied += original + incoming_bytes
+    else:
+        occupied += incoming_bytes
+    if occupied > settings.max_user_storage_bytes:
+        raise HTTPException(status_code=413, detail="已达到个人存储空间上限")
+
+
 async def save_upload(db: Session, owner_id: int, knowledge_id: str, file: UploadFile) -> KnowledgeDocument:
     get_owned_knowledge(db, owner_id, knowledge_id)
     filename, suffix, data = await _read_upload(file)
+    _check_user_capacity(db, owner_id, len(data))
     doc_id = str(uuid4())
     storage_key = doc_id + suffix
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
     path = STORAGE_DIR / storage_key
     path.write_bytes(data)
     item = KnowledgeDocument(id=doc_id, knowledge_id=knowledge_id,
-        filename=filename, storage_key=storage_key, file_type=suffix, status="pending")
+        filename=filename, storage_key=storage_key, file_type=suffix,
+        size_bytes=len(data), status="pending")
     try:
         db.add(item)
         db.commit()
@@ -123,6 +153,7 @@ async def replace_document(db: Session, owner_id: int, knowledge_id: str,
         raise HTTPException(status_code=404, detail="文件不存在")
     if item.status not in {"ready", "failed"}:
         raise HTTPException(status_code=409, detail="文件当前状态不允许替换")
+    _check_user_capacity(db, owner_id, len(data), replacing=item)
     storage_key = str(uuid4()) + suffix
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
     path = STORAGE_DIR / storage_key
@@ -131,6 +162,7 @@ async def replace_document(db: Session, owner_id: int, knowledge_id: str,
         item.replacement_storage_key = storage_key
         item.replacement_filename = filename
         item.replacement_file_type = suffix
+        item.replacement_size_bytes = len(data)
         item.replacement_old_ready = item.status == "ready"
         item.status = "replacing"
         item.error_summary = None
@@ -171,9 +203,11 @@ def process_document(document_id: str) -> None:
                 item.storage_key = item.replacement_storage_key
                 item.filename = item.replacement_filename
                 item.file_type = item.replacement_file_type
+                item.size_bytes = item.replacement_size_bytes or 0
                 item.replacement_storage_key = None
                 item.replacement_filename = None
                 item.replacement_file_type = None
+                item.replacement_size_bytes = None
                 item.replacement_old_ready = False
                 db.commit()
                 (STORAGE_DIR / old_storage_key).unlink(missing_ok=True)

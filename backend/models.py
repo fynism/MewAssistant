@@ -111,6 +111,8 @@ class KnowledgeDocument(Base):
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     storage_key: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     file_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    replacement_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
     error_summary: Mapped[str | None] = mapped_column(String(500), nullable=True)
     legacy_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)

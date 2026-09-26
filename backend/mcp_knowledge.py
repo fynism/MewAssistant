@@ -14,6 +14,7 @@ from backend.core.config import settings
 from backend.database import SessionLocal
 from backend.services.api_keys import authenticate_key
 from backend.services.knowledge_tools import list_knowledges, retrieve
+from backend.services.rate_limits import enforce_rate_limits
 
 
 class KnowledgeItem(BaseModel):
@@ -134,6 +135,13 @@ class ApiKeyMcpAuth:
             return
         if owner_id is None:
             await self._reject(send, 401)
+            return
+        try:
+            enforce_rate_limits(
+                (f"mcp:user:{owner_id}", getattr(settings, "mcp_user_rate_per_minute", 60)),
+                (f"mcp:key:{token[4:].split('_', 1)[0]}", getattr(settings, "mcp_key_rate_per_minute", 30)))
+        except HTTPException as exc:
+            await self._reject(send, exc.status_code)
             return
         await self.app(scope, receive, send)
 

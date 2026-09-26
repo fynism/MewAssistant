@@ -35,6 +35,7 @@ class McpProtocolTests(unittest.TestCase):
             _, self.alice_key = create_key(db, 1, "Codex")
             _, self.bob_key = create_key(db, 2, "Codex")
         self.patches = [patch("backend.mcp_knowledge.SessionLocal", self.factory),
+                        patch("backend.mcp_knowledge.enforce_rate_limits", lambda *_: None),
                         patch("backend.mcp_knowledge.settings", SimpleNamespace(
                             mcp_external_enabled=True, mcp_allowed_origins="")),
                         patch.object(self.app_module, "init_db", lambda: None)]

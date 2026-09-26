@@ -13,6 +13,7 @@ from backend.services.knowledge_service import (
     get_owned_knowledge, process_document, replace_document, save_upload,
     ALLOWED_EXTENSIONS,
 )
+from backend.services.rate_limits import enforce_rate_limits
 
 router = APIRouter()
 
@@ -46,6 +47,8 @@ def ready_count(db: Session, knowledge_id: str) -> int:
 @router.get("/knowledge-settings")
 def knowledge_settings():
     return {"max_upload_bytes": settings.max_upload_bytes,
+            "max_user_documents": settings.max_user_documents,
+            "max_user_storage_bytes": settings.max_user_storage_bytes,
             "allowed_extensions": sorted(ALLOWED_EXTENSIONS)}
 
 
@@ -91,6 +94,7 @@ def remove_knowledge(knowledge_id: str, user: User = Depends(get_current_user), 
 @router.post("/knowledges/{knowledge_id}/documents", status_code=202)
 async def upload_document(knowledge_id: str, tasks: BackgroundTasks, file: UploadFile = File(...),
                           user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    enforce_rate_limits((f"upload:user:{user.id}", settings.upload_rate_per_minute))
     item = await save_upload(db, user.id, knowledge_id, file)
     tasks.add_task(process_document, item.id)
     return document_payload(item)
@@ -114,6 +118,7 @@ def get_document(knowledge_id: str, document_id: str, user: User = Depends(get_c
 async def replace_document_endpoint(knowledge_id: str, document_id: str, tasks: BackgroundTasks,
                                     file: UploadFile = File(...), user: User = Depends(get_current_user),
                                     db: Session = Depends(get_db)):
+    enforce_rate_limits((f"upload:user:{user.id}", settings.upload_rate_per_minute))
     item = await replace_document(db, user.id, knowledge_id, document_id, file)
     tasks.add_task(process_document, item.id)
     return document_payload(item)
