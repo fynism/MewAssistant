@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from backend.routers import auth, chat, sessions, knowledges, invitations
+from backend.routers import auth, chat, sessions, knowledges, invitations, tool_debug, api_keys, platform
 
 
 router = APIRouter()
@@ -9,3 +9,6 @@ router.include_router(sessions.router)
 router.include_router(chat.router)
 router.include_router(knowledges.router)
 router.include_router(invitations.router)
+router.include_router(tool_debug.router)
+router.include_router(api_keys.router)
+router.include_router(platform.router)

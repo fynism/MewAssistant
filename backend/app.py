@@ -2,24 +2,29 @@ from fastapi import FastAPI, HTTPException as FastAPIHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pathlib import Path
+from contextlib import asynccontextmanager
 import time
 from uuid import uuid4
 
 from backend import api as api_module
 from backend.core.config import settings
 from backend.database import init_db
+from backend.mcp_knowledge import create_knowledge_mcp_app, knowledge_mcp
 from backend.observability import logger, request_id
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
+FRONTEND_ROUTES = {"services/knowledge", "account", "workspace/knowledges", "try"}
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="呆猫助手 API")
-
-    @app.on_event("startup")
-    async def _startup_init_db():
+    @asynccontextmanager
+    async def lifespan(_app):
         init_db()
+        async with knowledge_mcp.session_manager.run():
+            yield
+
+    app = FastAPI(title="呆猫助手 API", lifespan=lifespan)
 
     app.add_middleware(
         CORSMiddleware,
@@ -41,7 +46,7 @@ def create_app() -> FastAPI:
             response = await call_next(request)
             status_code = response.status_code
             response.headers["X-Request-ID"] = current_id
-            if path == "/" or path.endswith((".html", ".js", ".css")):
+            if path == "/" or path.lstrip("/") in FRONTEND_ROUTES or path.endswith((".html", ".js", ".css")):
                 response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
                 response.headers["Pragma"] = "no-cache"
                 response.headers["Expires"] = "0"
@@ -58,6 +63,7 @@ def create_app() -> FastAPI:
     # API routes must be registered first so they take priority over the
     # frontend catch-all below.
     app.include_router(api_module.router)
+    app.mount("/mcp", create_knowledge_mcp_app())
 
     # Serve known frontend files. Unknown paths must not masquerade as a
     # successful API response containing the HTML app shell.
@@ -68,6 +74,8 @@ def create_app() -> FastAPI:
 
         @app.get("/{full_path:path}", include_in_schema=False)
         async def serve_frontend(full_path: str):
+            if full_path.rstrip("/") in FRONTEND_ROUTES:
+                return FileResponse(str(FRONTEND_DIR / "index.html"))
             file_path = FRONTEND_DIR / full_path
             if file_path.is_file():
                 try:

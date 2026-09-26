@@ -2,13 +2,16 @@ from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.auth import get_current_user, get_db
+from backend.core.config import settings
 from backend.models import KnowledgeBase, KnowledgeDocument, User
 from backend.services.knowledge_service import (
     create_knowledge, delete_document, delete_knowledge, get_owned_document,
-    get_owned_knowledge, process_document, save_upload,
+    get_owned_knowledge, process_document, replace_document, save_upload,
+    ALLOWED_EXTENSIONS,
 )
 
 router = APIRouter()
@@ -19,15 +22,31 @@ class KnowledgeInput(BaseModel):
     description: str = ""
 
 
-def knowledge_payload(item: KnowledgeBase) -> dict:
+def knowledge_payload(item: KnowledgeBase, ready_document_count: int = 0) -> dict:
     return {"id": item.id, "name": item.name, "description": item.description,
-            "status": item.status, "created_at": item.created_at}
+            "status": item.status, "created_at": item.created_at,
+            "updated_at": item.updated_at, "ready_document_count": ready_document_count,
+            "has_ready_documents": ready_document_count > 0}
 
 
 def document_payload(item: KnowledgeDocument) -> dict:
     return {"id": item.id, "knowledge_id": item.knowledge_id, "filename": item.filename,
             "file_type": item.file_type, "status": item.status,
-            "error_summary": item.error_summary, "created_at": item.created_at}
+            "error_summary": item.error_summary, "created_at": item.created_at,
+            "updated_at": item.updated_at}
+
+
+def ready_count(db: Session, knowledge_id: str) -> int:
+    return db.query(func.count(KnowledgeDocument.id)).filter(
+        KnowledgeDocument.knowledge_id == knowledge_id,
+        KnowledgeDocument.status == "ready",
+    ).scalar() or 0
+
+
+@router.get("/knowledge-settings")
+def knowledge_settings():
+    return {"max_upload_bytes": settings.max_upload_bytes,
+            "allowed_extensions": sorted(ALLOWED_EXTENSIONS)}
 
 
 @router.post("/knowledges", status_code=201)
@@ -40,12 +59,16 @@ def create_knowledge_endpoint(data: KnowledgeInput, user: User = Depends(get_cur
 def list_knowledges(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     items = db.query(KnowledgeBase).filter(KnowledgeBase.owner_id == user.id,
         KnowledgeBase.status == "active").order_by(KnowledgeBase.created_at.desc()).all()
-    return {"knowledges": [knowledge_payload(i) for i in items]}
+    counts = dict(db.query(KnowledgeDocument.knowledge_id, func.count(KnowledgeDocument.id))
+        .filter(KnowledgeDocument.knowledge_id.in_([item.id for item in items]),
+                KnowledgeDocument.status == "ready")
+        .group_by(KnowledgeDocument.knowledge_id).all()) if items else {}
+    return {"knowledges": [knowledge_payload(i, counts.get(i.id, 0)) for i in items]}
 
 
 @router.get("/knowledges/{knowledge_id}")
 def get_knowledge(knowledge_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return knowledge_payload(get_owned_knowledge(db, user.id, knowledge_id))
+    return knowledge_payload(get_owned_knowledge(db, user.id, knowledge_id), ready_count(db, knowledge_id))
 
 
 @router.patch("/knowledges/{knowledge_id}")
@@ -56,7 +79,7 @@ def update_knowledge(knowledge_id: str, data: KnowledgeInput, user: User = Depen
     item.description = data.description.strip()
     item.updated_at = datetime.utcnow()
     db.commit()
-    return knowledge_payload(item)
+    return knowledge_payload(item, ready_count(db, knowledge_id))
 
 
 @router.delete("/knowledges/{knowledge_id}")
@@ -85,6 +108,15 @@ def list_documents(knowledge_id: str, user: User = Depends(get_current_user), db
 def get_document(knowledge_id: str, document_id: str, user: User = Depends(get_current_user),
                  db: Session = Depends(get_db)):
     return document_payload(get_owned_document(db, user.id, knowledge_id, document_id))
+
+
+@router.put("/knowledges/{knowledge_id}/documents/{document_id}/content", status_code=202)
+async def replace_document_endpoint(knowledge_id: str, document_id: str, tasks: BackgroundTasks,
+                                    file: UploadFile = File(...), user: User = Depends(get_current_user),
+                                    db: Session = Depends(get_db)):
+    item = await replace_document(db, user.id, knowledge_id, document_id, file)
+    tasks.add_task(process_document, item.id)
+    return document_payload(item)
 
 
 @router.post("/knowledges/{knowledge_id}/documents/{document_id}/retry", status_code=202)

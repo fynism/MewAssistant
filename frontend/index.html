@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>呆猫助手</title>
+    <title>SuperMew · MCP 开放平台</title>
     <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/platform.css">
     <!-- Fonts -->
     <!-- Icons (bootcdn) -->
     <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -19,27 +20,22 @@
 <body>
     <div id="app" class="app-wrapper">
 
-        <!-- Sidebar -->
+        <!-- Platform navigation -->
         <aside class="sidebar">
             <div class="sidebar-header">
                 <div class="logo-icon">🐱</div>
-                <h2>呆猫助手</h2>
+                <div><h2>SuperMew</h2><small>MCP 开放平台</small></div>
             </div>
             <nav class="sidebar-nav">
-                <button @click="handleNewChat" :class="['nav-btn', {active: activeNav === 'newChat'}]">
-                    <i class="fas fa-plus"></i> 新建会话
-                </button>
-                <button @click="handleHistory" :class="['nav-btn', {active: activeNav === 'history'}]">
-                    <i class="fas fa-history"></i> 历史记录
-                </button>
-                <button v-if="isAuthenticated" @click="handleSettings" :class="['nav-btn', {active: activeNav === 'settings'}]">
-                    <i class="fas fa-book"></i> 我的知识库
-                </button>
+                <span class="nav-caption">EXPLORE</span>
+                <a href="/" @click.prevent="navigate('/')" :class="['nav-btn', {active: page === '/'}]"><i class="fas fa-house"></i> 平台首页</a>
+                <a href="/services/knowledge" @click.prevent="navigate('/services/knowledge')" :class="['nav-btn', {active: page === '/services/knowledge'}]"><i class="fas fa-layer-group"></i> 知识库 MCP</a>
+                <span class="nav-caption">WORKSPACE</span>
+                <a href="/workspace/knowledges" @click.prevent="navigate('/workspace/knowledges')" :class="['nav-btn', {active: page === '/workspace/knowledges'}]"><i class="fas fa-book-open"></i> 我的知识库</a>
+                <a href="/try" @click.prevent="navigate('/try')" :class="['nav-btn', {active: page === '/try'}]"><i class="fas fa-flask"></i> 试一下</a>
+                <a href="/account" @click.prevent="navigate('/account')" :class="['nav-btn', {active: page === '/account'}]"><i class="fas fa-user-circle"></i> 个人管理</a>
             </nav>
             <div class="sidebar-footer">
-                <button @click="handleClearChat" class="danger-btn">
-                    <i class="fas fa-trash-alt"></i> 清空当前对话
-                </button>
                 <div v-if="isAuthenticated" class="user-badge">
                     <span>{{ currentUser.username }}</span>
                     <small>{{ currentUser.role }}</small>
@@ -47,13 +43,27 @@
                 <button v-if="isAuthenticated" @click="handleLogout" class="danger-btn logout-btn">
                     <i class="fas fa-right-from-bracket"></i> 退出登录
                 </button>
+                <button v-else @click="openLogin" class="btn-primary nav-login">登录 / 邀请注册</button>
             </div>
         </aside>
 
-        <!-- Main Chat Area -->
+        <!-- Platform pages -->
         <main class="main-content">
-            <div v-if="!isAuthenticated" class="auth-panel">
-                <h2>{{ authMode === 'login' ? '登录 呆猫助手' : '注册 呆猫助手' }}</h2>
+            <div v-if="page === '/'" class="platform-page home-page">
+                <div class="eyebrow">SUPERMew / OPEN PLATFORM <span>01—MCP SERVICES</span></div>
+                <section class="hero"><div><span class="pill">受邀开放 · {{ serviceInfo.externalAvailable ? '远程 MCP 可接入' : '站内试用' }}</span><h1>让你的知识，<br><em>成为可调用的能力。</em></h1><p>上传自己的文件，建立私有知识库，先在站内验证检索效果。通过标准 MCP 工具，在自己的知识库中发现并检索内容。</p><div class="hero-actions"><a href="/services/knowledge" @click.prevent="navigate('/services/knowledge')" class="btn-primary">探索知识库 MCP <i class="fas fa-arrow-right"></i></a><a href="/try" @click.prevent="navigate('/try')" class="text-link">进入试用工作台 ↗</a></div></div><div class="hero-visual"><div class="visual-index">01 / KNOWLEDGE</div><div class="visual-flow"><span>你的文件</span><i class="fas fa-arrow-down"></i><span>私有知识库</span><i class="fas fa-arrow-down"></i><strong>listKnowledges · retrieve</strong></div><div class="visual-foot">BUILD · RETRIEVE · VERIFY</div></div></section>
+                <section class="section-block"><div class="section-heading"><div><span class="kicker">SERVICE DIRECTORY</span><h2>已开放的服务</h2></div><span class="section-number">01 / 01</span></div><article v-for="service in services" :key="service.id" class="service-card"><div class="service-symbol"><i class="fas fa-book-open"></i></div><div><span class="card-tag">{{ service.category }} · {{ serviceInfo.externalAvailable ? '远程可接入' : '站内试用' }}</span><h3>{{ service.name }}</h3><p>{{ service.description }}</p><div class="tool-tags"><span v-for="tool in service.tools" :key="tool">{{ tool }}</span></div></div><a :href="service.path" @click.prevent="navigate(service.path)" class="card-arrow" :aria-label="'查看' + service.name"><i class="fas fa-arrow-up-right-from-square"></i></a></article></section>
+                <section class="path-strip"><div><b>01</b><span>受邀注册</span></div><div><b>02</b><span>上传资料</span></div><div><b>03</b><span>站内试用</span></div></section>
+            </div>
+
+            <div v-if="page === '/services/knowledge'" class="platform-page service-page"><div class="eyebrow">SERVICES / KNOWLEDGE <span>01</span></div><div class="page-intro"><span class="pill">{{ serviceInfo.externalAvailable ? '远程可接入' : '当前可站内试用' }}</span><h1>知识库 MCP</h1><p>为自己的文件建立可检索的私有知识库。你可以先在站内调用两个只读工具，查看知识库列表与原始检索片段。</p><div class="hero-actions"><a href="/workspace/knowledges" @click.prevent="navigate('/workspace/knowledges')" class="btn-primary">管理我的知识库 <i class="fas fa-arrow-right"></i></a><a href="/try" @click.prevent="navigate('/try')" class="text-link">试一下工具 ↗</a></div></div><div class="service-status"><i class="fas fa-circle-info"></i><div><strong>{{ serviceInfo.externalAvailable ? '远程 MCP 已开放' : '远程 MCP 接入待发布' }}</strong><p>{{ serviceInfo.externalAvailable ? '使用个人 API Key 连接 Codex；每个 Key 只读取你的私有知识库。' : '站内试用可用。公开 HTTPS 地址配置并完成客户端验收后开放远程接入。' }}</p></div></div><section v-if="serviceInfo.externalAvailable" class="mcp-connect"><div class="section-heading"><div><span class="kicker">CONNECT / CODEX</span><h2>接入远程服务</h2></div></div><p>先在个人管理页创建 API Key，立即保存明文，再把它设置为 Codex 运行环境中的 <code>SUPERMEW_MCP_API_KEY</code>。刷新 Codex 连接后发现工具。</p><div class="mcp-url"><code>{{ serviceInfo.endpoint }}</code><button class="btn-secondary" @click="copyText(serviceInfo.endpoint)">复制地址</button></div><pre>{{ codexConfig }}</pre><div class="detail-actions"><button class="btn-secondary" @click="copyText(codexConfig)">复制 Codex 配置</button><a href="/account" @click.prevent="navigate('/account')" class="text-link">创建 API Key ↗</a></div><p class="mcp-note">个人 API Key 使用平台 Bearer 鉴权；OAuth 自动授权暂未开放。401 表示 Key 无效或已撤销；403 表示 Origin 不被允许；工具错误通常表示参数或知识库范围不正确。</p></section><div class="section-heading"><div><span class="kicker">TOOLS</span><h2>两项基础能力</h2></div></div><div class="tool-grid"><article><span class="tool-no">01 / DISCOVER</span><h3>listKnowledges</h3><p>列出当前账号可用的知识库及可检索状态。</p><dl><dt>输入</dt><dd>可选 limit、cursor</dd><dt>输出</dt><dd>知识库列表、下一页游标</dd></dl></article><article><span class="tool-no">02 / RETRIEVE</span><h3>retrieve</h3><p>在所选知识库中查找相关片段，返回文件与位置来源。只返回检索结果，不生成回答。</p><dl><dt>输入</dt><dd>必填 query（1–500 字）、knowledgeIds（1–20 个不重复 ID）；可选 topK（默认 5，1–20）</dd><dt>输出</dt><dd>命中片段、知识库/文件来源、状态</dd></dl></article></div><div class="section-heading"><div><span class="kicker">GET STARTED</span><h2>三步开始</h2></div></div><div class="steps-grid"><div><b>01</b><h3>创建知识库</h3><p>为不同主题分别建库，资料只对自己可见。</p></div><div><b>02</b><h3>上传文件</h3><p>等待文件处理为“可检索”。</p></div><div><b>03</b><h3>试调工具</h3><p>在“试一下”查看原始结果或与 Agent 对话。</p></div></div></div>
+
+            <div v-if="page === '/account' && isAuthenticated" class="platform-page account-page"><div class="eyebrow">WORKSPACE / ACCOUNT</div><div class="page-intro"><span class="pill">个人空间</span><h1>个人管理</h1><p>管理自己的登录身份与远程 MCP 访问凭证。</p></div><div class="account-card"><span class="kicker">ACCOUNT</span><div class="account-avatar">{{ currentUser.username.slice(0, 1).toUpperCase() }}</div><h2>{{ currentUser.username }}</h2><p>角色：{{ currentUser.role }}</p></div><section class="api-key-panel"><div class="section-heading"><div><span class="kicker">CREDENTIALS</span><h2>个人 API Key</h2></div></div><p>每个 Key 可以调用你的知识库 MCP。明文仅在创建时显示一次；首版不会自动到期，可随时撤销。</p><form class="key-create" @submit.prevent="createApiKey"><input v-model="apiKeyName" maxlength="100" placeholder="名称，例如 Codex 桌面端" aria-label="API Key 名称"><button class="btn-primary" type="submit" :disabled="apiKeyBusy || !apiKeyName.trim()">创建 API Key</button></form><p v-if="apiKeyError" class="key-error" role="alert">{{ apiKeyError }}</p><div v-if="createdApiKey" class="new-key" role="status"><strong>立即复制并妥善保存，此处关闭或刷新后无法再查看。</strong><div class="mcp-url"><code>{{ createdApiKey }}</code><button class="btn-secondary" @click="copyText(createdApiKey)">复制 Key</button></div><button class="text-link key-dismiss" @click="createdApiKey = ''">我已保存，关闭</button></div><div class="key-list"><p v-if="!apiKeys.length">尚无 API Key。</p><article v-for="item in apiKeys" :key="item.id" class="key-row"><div><strong>{{ item.name }}</strong><small>尾号 {{ item.suffix }} · 创建于 {{ new Date(item.createdAt).toLocaleString() }} · 最近使用 {{ item.lastUsedAt ? new Date(item.lastUsedAt).toLocaleString() : '暂无' }}</small></div><span v-if="item.revokedAt" class="key-revoked">已撤销</span><button v-else class="danger-btn" :disabled="apiKeyBusy" @click="revokeApiKey(item)">撤销</button></article></div><p class="mcp-note">轮换 Key：创建新 Key → 更新客户端环境变量 → 撤销旧 Key。网页登录凭证与 API Key 用途不同。</p></section></div>
+
+            <div v-if="isProtectedPage && !isAuthenticated" class="platform-page gate-page"><div class="eyebrow">PRIVATE WORKSPACE</div><h1>登录后继续</h1><p>当前页面只向受邀用户开放。登录后会保留你要访问的页面。</p><button class="btn-primary" @click="openLogin">登录 / 邀请注册 <i class="fas fa-arrow-right"></i></button></div>
+
+            <div v-if="showAuth && !isAuthenticated" class="auth-overlay" @click.self="showAuth = false"><div class="auth-panel">
+                <button class="auth-close" @click="showAuth = false" aria-label="关闭">×</button><span class="kicker">WELCOME TO SUPERMew</span><h2>{{ authMode === 'login' ? '登录平台' : '邀请注册' }}</h2>
                 <p>使用邀请码注册后，可以管理自己的知识库并在聊天中检索。</p>
                 <div class="auth-form">
                     <input v-model="authForm.username" type="text" placeholder="用户名" />
@@ -67,30 +77,21 @@
                     </button>
                 </div>
 
-                <div v-if="showNotice" class="notice-overlay" @click.self="showNotice = false">
-                    <div class="notice-modal">
-                        <h3>使用须知</h3>
-                        <ul>
-                            <li>注册需要有效邀请码。请向平台管理员获取。</li>
-                            <li>当前聊天只会检索登录用户自己的私有知识库。</li>
-                            <li>当前版本尚在早期阶段，功能和使用体验会持续打磨，感谢你的耐心与反馈。</li>
-                        </ul>
-                        <button class="notice-confirm-btn" @click="showNotice = false">我知道了</button>
-                    </div>
-                </div>
-            </div>
+            </div></div>
 
             <!-- Private knowledge panel -->
-            <div v-if="isAuthenticated && activeNav === 'settings'" class="settings-panel">
+            <div v-if="isAuthenticated && page === '/workspace/knowledges'" class="settings-panel">
+                <div class="eyebrow">WORKSPACE / KNOWLEDGES</div>
                 <div class="settings-header">
-                    <h2><i class="fas fa-book"></i> 我的知识库</h2>
-                    <p>上传自己的文档后，可以在聊天中试试检索效果。</p>
+                    <h2>我的知识库</h2>
+                    <p>按主题管理资料。文件处理完成后，可直接进入站内试用。</p>
                 </div>
+                <p v-if="notice" class="platform-notice" role="status">{{ notice }} <button @click="notice = ''" aria-label="关闭提示">×</button></p>
 
                 <div class="upload-section">
                     <h3>选择知识库</h3>
                     <div class="knowledge-controls">
-                        <select v-model="selectedKnowledgeId" @change="loadDocuments" aria-label="选择知识库">
+                        <select v-model="selectedKnowledgeId" @change="selectKnowledge" aria-label="选择知识库">
                             <option value="">请选择知识库</option>
                             <option v-for="knowledge in knowledges" :key="knowledge.id" :value="knowledge.id">{{ knowledge.name }}</option>
                         </select>
@@ -100,8 +101,16 @@
                     <p v-if="knowledges.length === 0" class="knowledge-hint">先创建一个知识库，再上传文件。</p>
                 </div>
 
+                <div v-if="selectedKnowledge" class="upload-section knowledge-detail">
+                    <div class="section-heading"><div><span class="kicker">SELECTED KNOWLEDGE</span><h3>知识库信息</h3></div><span class="ready-badge">{{ selectedKnowledge.ready_document_count }} 个文件可检索</span></div>
+                    <label>名称<input v-model="knowledgeEdit.name" type="text" maxlength="200" /></label>
+                    <label>描述<textarea v-model="knowledgeEdit.description" rows="3" placeholder="这个知识库收录了什么内容？"></textarea></label>
+                    <div class="detail-actions"><button class="btn-primary" :disabled="knowledgeLoading || !knowledgeEdit.name.trim()" @click="updateKnowledge">保存修改</button><a :href="'/try?knowledge=' + selectedKnowledgeId" @click.prevent="openTryWithKnowledge(selectedKnowledgeId)" class="btn-secondary">去试一下 ↗</a><button class="btn-danger" :disabled="knowledgeLoading" @click="deleteKnowledge">删除知识库</button></div>
+                </div>
+
                 <div v-if="selectedKnowledgeId" class="upload-section">
                     <h3><i class="fas fa-upload"></i> 上传文档</h3>
+                    <p class="upload-limits">支持 {{ knowledgeSettings.allowed_extensions.join('、') || 'PDF、Word、Excel' }}；单文件上限 {{ uploadLimitLabel() }}。</p>
                     <div class="upload-area">
                         <input 
                             type="file" 
@@ -127,6 +136,7 @@
 
                 <div v-if="selectedKnowledgeId" class="documents-section">
                     <h3><i class="fas fa-list"></i> 已上传文档</h3>
+                    <input ref="replaceInput" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx" style="display:none" @change="replaceDocument" />
                     <button @click="loadDocuments" class="btn-secondary">
                         <i class="fas fa-sync"></i> 刷新列表
                     </button>
@@ -154,13 +164,16 @@
                                     <div class="document-name">{{ doc.filename }}</div>
                                     <div class="document-meta">
                                         <span>{{ doc.file_type }}</span>
-                                        <span>{{ documentStatusLabel(doc.status) }}</span>
+                                        <span>{{ new Date(doc.created_at).toLocaleString() }}</span>
+                                        <span :class="['status-chip', 'status-' + doc.status]">{{ documentStatusLabel(doc.status) }}</span>
                                         <span v-if="doc.error_summary">{{ doc.error_summary }}</span>
                                     </div>
                                 </div>
                             </div>
-                            <button v-if="doc.status === 'failed'" @click="retryDocument(doc)" class="btn-secondary" title="重试处理">重试</button>
+                            <button v-if="doc.status === 'failed'" :disabled="documentBusyId === doc.id" @click="retryDocument(doc)" class="btn-secondary" title="重试处理">重试</button>
+                            <button v-if="['ready', 'failed'].includes(doc.status)" :disabled="documentBusyId === doc.id" @click="chooseReplacement(doc)" class="btn-secondary" title="替换文件">替换</button>
                             <button 
+                                :disabled="documentBusyId === doc.id || ['processing', 'replacing'].includes(doc.status)"
                                 @click="deleteDocument(doc)"
                                 class="btn-danger"
                                 title="删除文档"
@@ -172,8 +185,16 @@
                 </div>
             </div>
 
+            <div v-if="isAuthenticated && page === '/try'" class="try-workbench">
+                <div class="eyebrow">WORKSPACE / TRY IT <span>站内试用</span></div>
+                <div class="try-heading"><div><h1>试一下</h1><p>选择本轮知识库范围，然后在 Agent 对话或原始工具调试中检验结果。</p></div><a href="/workspace/knowledges" @click.prevent="navigate('/workspace/knowledges')" class="text-link">管理知识库 ↗</a></div>
+                <div v-if="tryMode === 'chat'" class="scope-box"><div class="scope-title"><strong>检索范围</strong><span>切换仅影响下一条消息。</span></div><div class="scope-options"><label v-for="knowledge in knowledges" :key="knowledge.id"><input type="checkbox" :value="knowledge.id" v-model="selectedKnowledgeIds" /><span>{{ knowledge.name }}</span><small>{{ knowledge.has_ready_documents ? '可检索' : '暂无可检索文件' }}</small></label><span v-if="!knowledges.length" class="empty-scope">还没有知识库。<a href="/workspace/knowledges" @click.prevent="navigate('/workspace/knowledges')">先创建并上传文件 ↗</a></span></div><p class="scope-summary">当前：{{ selectedScopeLabel }}。<span v-if="!selectedKnowledgeIds.length">本次对话将使用空范围。</span></p></div>
+                <div class="try-tabs"><button :class="{active: tryMode === 'chat'}" @click="tryMode = 'chat'">Agent 对话</button><button :class="{active: tryMode === 'debug'}" @click="tryMode = 'debug'">工具调试</button></div>
+                <div v-if="tryMode === 'chat'" class="try-toolbar"><button @click="handleNewChat"><i class="fas fa-plus"></i> 新建会话</button><button @click="handleHistory"><i class="fas fa-clock-rotate-left"></i> 历史记录</button><button @click="handleClearChat"><i class="fas fa-trash"></i> 清空当前</button></div>
+            </div>
+
             <!-- History Sidebar -->
-            <div v-if="isAuthenticated && showHistorySidebar" class="history-sidebar">
+            <div v-if="isAuthenticated && page === '/try' && tryMode === 'chat' && showHistorySidebar" class="history-sidebar">
                 <div class="history-header">
                     <h3>历史会话</h3>
                     <button @click="showHistorySidebar = false" class="close-btn">
@@ -211,7 +232,7 @@
             </div>
 
             <!-- Chat Area (hidden when settings is active) -->
-            <div v-show="isAuthenticated && activeNav !== 'settings'" class="chat-area">
+            <div v-show="isAuthenticated && page === '/try' && tryMode === 'chat'" class="chat-area">
                 <header class="chat-header">
                     <div class="header-info">
                         <div class="status-dot"></div>
@@ -231,6 +252,7 @@
                 
                 <!-- Messages -->
                 <div v-for="(msg, index) in messages" :key="index" :class="['message', msg.isUser ? 'user-message' : 'bot-message']">
+                    <div class="message-scope">本轮知识库：{{ scopeNames(msg.knowledgeIds) }}</div>
                     <!-- 思考动画（在气泡内部，RAG 步骤实时填入） -->
                     <div v-if="!msg.isUser && msg.isThinking && !msg.text" class="message-content thinking-content">
                         <div class="thinking-header">
@@ -335,6 +357,8 @@
                                             </div>
                                             <div class="source-meta-line">
                                                 <span class="source-page">RRF名次：#{{ chunk.rrf_rank || (sIndex + 1) }}</span>
+                                                <span v-if="chunk.knowledge_id" class="source-page">知识库：{{ scopeNames([chunk.knowledge_id]) }}</span>
+                                                <span v-if="chunk.document_id" class="source-page">文件 ID：{{ chunk.document_id }}</span>
                                                 <span v-if="chunk.rerank_score !== null && chunk.rerank_score !== undefined" class="source-page">Rerank分数：{{ Number(chunk.rerank_score).toFixed(4) }}</span>
                                             </div>
                                             <div v-if="chunk.text" class="source-excerpt">{{ chunk.text }}</div>
@@ -351,6 +375,8 @@
                                             </div>
                                             <div class="source-meta-line">
                                                 <span class="source-page">RRF名次：#{{ chunk.rrf_rank || (sIndex + 1) }}</span>
+                                                <span v-if="chunk.knowledge_id" class="source-page">知识库：{{ scopeNames([chunk.knowledge_id]) }}</span>
+                                                <span v-if="chunk.document_id" class="source-page">文件 ID：{{ chunk.document_id }}</span>
                                                 <span v-if="chunk.rerank_score !== null && chunk.rerank_score !== undefined" class="source-page">Rerank分数：{{ Number(chunk.rerank_score).toFixed(4) }}</span>
                                             </div>
                                             <div v-if="chunk.text" class="source-excerpt">{{ chunk.text }}</div>
@@ -367,6 +393,8 @@
                                             </div>
                                             <div class="source-meta-line">
                                                 <span class="source-page">RRF名次：#{{ chunk.rrf_rank || (sIndex + 1) }}</span>
+                                                <span v-if="chunk.knowledge_id" class="source-page">知识库：{{ scopeNames([chunk.knowledge_id]) }}</span>
+                                                <span v-if="chunk.document_id" class="source-page">文件 ID：{{ chunk.document_id }}</span>
                                                 <span v-if="chunk.rerank_score !== null && chunk.rerank_score !== undefined" class="source-page">Rerank分数：{{ Number(chunk.rerank_score).toFixed(4) }}</span>
                                             </div>
                                             <div v-if="chunk.text" class="source-excerpt">{{ chunk.text }}</div>
@@ -405,9 +433,16 @@
             </div>
             </div>
             <!-- End of Chat Area -->
+            <div v-if="isAuthenticated && page === '/try' && tryMode === 'debug'" class="debug-panel">
+                <div class="debug-intro"><span class="kicker">RAW TOOL OUTPUT</span><h2>站内工具调试</h2><p>这里直接展示只读工具返回的检索数据，不生成 AI 回答。远程 MCP 调用将在后续阶段开放。</p></div>
+                <div class="debug-grid"><section class="debug-card"><span class="tool-no">01 / DISCOVER</span><h3>listKnowledges</h3><p>列出当前账号的知识库和可检索状态。</p><button class="btn-primary" :disabled="debugLoading" @click="runDebug('listKnowledges')">运行工具 <i class="fas fa-play"></i></button></section><section class="debug-card"><span class="tool-no">02 / RETRIEVE</span><h3>retrieve</h3><label>检索问题<input v-model="debugQuery" type="text" maxlength="500" placeholder="输入想在文件里查找的问题" @keyup.enter="runDebug('retrieve')" /></label><fieldset><legend>知识库 ID（至少选择一个）</legend><div class="scope-options"><label v-for="knowledge in knowledges" :key="knowledge.id"><input type="checkbox" :value="knowledge.id" v-model="selectedKnowledgeIds" /><span>{{ knowledge.name }}</span><small>{{ knowledge.id }}</small></label><span v-if="!knowledges.length" class="empty-scope">暂无知识库，请先创建并上传文件。</span></div></fieldset><label>返回片段数量（1–20）<input v-model.number="debugTopK" type="number" min="1" max="20" /></label><button class="btn-primary" :disabled="debugLoading || !debugQuery.trim() || !selectedKnowledgeIds.length" @click="runDebug('retrieve')">运行检索 <i class="fas fa-play"></i></button></section></div>
+                <div v-if="debugLoading" class="debug-result">工具运行中…</div><div v-if="debugError" class="platform-notice" role="alert">{{ debugError }}</div>
+                <section v-if="debugResult" class="debug-result"><div class="section-heading"><div><span class="kicker">RESULT</span><h2>{{ debugTool }}</h2></div><span v-if="debugResult.status" class="ready-badge">{{ debugResult.status }}</span></div><p v-if="debugResult.status === 'no_documents'" class="debug-empty">当前范围没有可检索文件。请上传文件并等待处理完成。</p><p v-if="debugResult.status === 'no_match'" class="debug-empty">本次没有找到匹配片段。可以调整问题或知识库范围。</p><div v-for="item in debugResult.results || []" :key="item.sourceId" class="result-item"><div><b>#{{ item.rank }}</b><strong>{{ item.knowledgeName }} / {{ item.filename }}</strong><span v-if="item.pageNumber">第 {{ item.pageNumber }} 页</span></div><p>{{ item.text }}</p><small>来源：{{ item.sourceId }}</small></div><div v-if="debugResult.items" class="debug-knowledge-list"><div v-for="item in debugResult.items" :key="item.id"><strong>{{ item.name }}</strong><span>{{ item.readyDocumentCount }} 个文件可检索</span><small>{{ item.id }}</small></div></div><details open><summary>原始 JSON</summary><pre>{{ JSON.stringify(debugResult, null, 2) }}</pre></details></section>
+            </div>
         </main>
     </div>
 
     <script src="/script.js"></script>
 </body>
 </html>
+

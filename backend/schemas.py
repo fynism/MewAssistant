@@ -29,10 +29,14 @@ class CurrentUserResponse(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = "default_session"
+    knowledge_ids: Optional[List[str]] = None
 
 
 class RetrievedChunk(BaseModel):
     filename: str
+    knowledge_id: Optional[str] = None
+    document_id: Optional[str] = None
+    chunk_id: Optional[str] = None
     page_number: Optional[str | int] = None
     text: Optional[str] = None
     score: Optional[float] = None
@@ -76,6 +80,7 @@ class RagTrace(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     rag_trace: Optional[RagTrace] = None
+    knowledge_ids: Optional[List[str]] = None
 
 
 class MessageInfo(BaseModel):
@@ -83,10 +88,13 @@ class MessageInfo(BaseModel):
     content: str
     timestamp: str
     rag_trace: Optional[RagTrace] = None
+    knowledge_ids: Optional[List[str]] = None
 
 
 class SessionMessagesResponse(BaseModel):
     messages: List[MessageInfo]
+    last_knowledge_ids: Optional[List[str]] = None
+    legacy_scope_unknown: bool = False
 
 
 class SessionInfo(BaseModel):
@@ -94,6 +102,8 @@ class SessionInfo(BaseModel):
     updated_at: str
     message_count: int
     title: Optional[str] = None
+    last_knowledge_ids: Optional[List[str]] = None
+    legacy_scope_unknown: bool = False
 
 
 class SessionListResponse(BaseModel):
