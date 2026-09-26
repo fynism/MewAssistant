@@ -21,6 +21,8 @@ createApp({
             invitationBusy: false,
             invitationLoading: false,
             invitationError: '',
+            operations: null,
+            operationsError: '',
             services: [{ id: 'knowledge', category: 'KNOWLEDGE', name: '知识库 MCP', description: '把私有文件转为可检索知识，通过站内试用和标准 MCP 工具接入。', tools: ['listKnowledges', 'retrieve'], path: '/services/knowledge' }],
             abortController: null,
             sessionId: 'session_' + Date.now(),
@@ -99,7 +101,7 @@ createApp({
         }
         if (this.isAuthenticated && ['/workspace/knowledges', '/try'].includes(this.page)) await this.loadKnowledges();
         if (this.isAuthenticated && this.page === '/account') await this.loadApiKeys();
-        if (this.isAdmin && this.page === '/admin') await this.loadInvitations();
+        if (this.isAdmin && this.page === '/admin') await Promise.all([this.loadInvitations(), this.loadOperations()]);
     },
     beforeUnmount() {
         window.removeEventListener('popstate', this.syncRoute);
@@ -111,7 +113,7 @@ createApp({
             this.page = ['/', '/services/knowledge', '/account', '/admin', '/workspace/knowledges', '/try'].includes(path) ? path : '/';
             if (this.page === '/account' && this.isAuthenticated) this.loadApiKeys();
             if (this.page !== '/account') this.createdApiKey = '';
-            if (this.page === '/admin' && this.isAdmin) this.loadInvitations();
+            if (this.page === '/admin' && this.isAdmin) { this.loadInvitations(); this.loadOperations(); }
             if (this.page !== '/admin') this.createdInvitationCode = '';
             if (this.page === '/workspace/knowledges' || this.page === '/try') this.loadKnowledges();
             if (this.page !== '/workspace/knowledges') this.stopDocumentPolling();
@@ -190,6 +192,16 @@ createApp({
                 this.invitationError = '';
             } catch (error) { this.invitationError = error.message; }
             finally { this.invitationLoading = false; }
+        },
+        async loadOperations() {
+            if (!this.isAdmin) return;
+            try {
+                const response = await this.authFetch('/admin/operations');
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(this.apiError(response, data, '加载调用概况失败'));
+                this.operations = data;
+                this.operationsError = '';
+            } catch (error) { this.operationsError = error.message; }
         },
         async createInvitation() {
             if (!this.isAdmin || this.invitationBusy) return;

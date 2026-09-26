@@ -31,6 +31,19 @@ class PersonalApiKey(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class CallAudit(Base):
+    __tablename__ = "call_audits"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True, nullable=True)
+    key_id: Mapped[str | None] = mapped_column(String(36), index=True, nullable=True)
+    operation: Mapped[str] = mapped_column(String(60), nullable=False)
+    result_category: Mapped[str] = mapped_column(String(30), nullable=False)
+    request_id: Mapped[str] = mapped_column(String(36), index=True, nullable=False)
+    duration_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True, nullable=False)
+
+
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
     __table_args__ = (UniqueConstraint("user_id", "session_id", name="uq_user_session"),)

@@ -78,6 +78,14 @@
                     <div v-else class="key-list"><article v-for="item in invitations" :key="item.id" class="key-row invitation-row"><div><strong>邀请码 · {{ item.id.slice(0, 8) }}</strong><small>已用 {{ item.used_count }} / {{ item.max_uses }} 次 · 创建于 {{ utcDate(item.created_at).toLocaleString() }} · 过期时间 {{ item.expires_at ? utcDate(item.expires_at).toLocaleString() : '不设置' }}</small></div><span :class="['invitation-status', { 'invitation-status-active': invitationStatus(item) === '可使用' }]">{{ invitationStatus(item) }}</span><button v-if="invitationStatus(item) === '可使用'" class="danger-btn" type="button" :disabled="invitationBusy" @click="revokeInvitation(item)">停用</button></article></div>
                     <p class="mcp-note">列表只展示状态与使用情况，完整邀请码无法从服务端再次读取。</p>
                 </section>
+                <section class="invitation-panel operations-panel"><div class="section-heading"><div><span class="kicker">MCP / LAST 24 HOURS</span><h2>服务调用概况</h2></div><button class="btn-secondary" type="button" @click="loadOperations">刷新</button></div>
+                    <p v-if="operationsError" class="key-error" role="alert">{{ operationsError }}</p>
+                    <template v-if="operations"><div class="operations-stats"><div><strong>{{ operations.calls }}</strong><span>调用总数</span></div><div><strong>{{ operations.errors }}</strong><span>异常调用</span></div><div><strong>{{ operations.averageDurationMs }} <small>ms</small></strong><span>平均耗时</span></div></div>
+                    <div class="operations-breakdown"><span v-for="item in operations.byOperation" :key="item.name">{{ item.name }} <b>{{ item.count }}</b></span></div>
+                    <h3 class="operations-subtitle">最近异常</h3><p v-if="!operations.recentFailures.length" class="invitation-empty">近 24 小时没有异常调用。</p>
+                    <div v-else class="key-list"><article v-for="item in operations.recentFailures" :key="item.requestId + item.createdAt" class="key-row invitation-row"><div><strong>{{ item.operation }} · {{ item.category }}</strong><small>{{ utcDate(item.createdAt).toLocaleString() }} · 用户 {{ item.ownerId ?? '未知' }} · Key {{ item.keyId ? item.keyId.slice(0, 8) : '—' }} · 请求 {{ item.requestId }}</small></div></article></div></template>
+                    <p class="mcp-note">仅展示调用元数据，不保存查询原文、文件内容或完整 API Key。审计记录保留 90 天。</p>
+                </section>
             </div>
             <div v-if="page === '/admin' && isAuthenticated && !isAdmin" class="platform-page gate-page"><div class="eyebrow">ADMIN ONLY</div><h1>仅管理员可访问</h1><p>此页面需要管理员身份。</p></div>
             <div v-if="isProtectedPage && !isAuthenticated" class="platform-page gate-page"><div class="eyebrow">PRIVATE WORKSPACE</div><h1>登录后继续</h1><p>当前页面只向受邀用户开放。登录后会保留你要访问的页面。</p><button class="btn-primary" @click="openLogin">登录 / 邀请注册 <i class="fas fa-arrow-right"></i></button></div>

@@ -112,6 +112,15 @@ body { display: block; height: 100vh; overflow: hidden; background: var(--paper)
 .invitation-row small { overflow-wrap: anywhere; }
 .invitation-status { flex-shrink: 0; color: #758278; font-size: 12px; }
 .invitation-status-active { color: #237149; font-weight: 700; }
+.operations-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+.operations-stats > div { display: flex; flex-direction: column; gap: 3px; padding: 18px; background: #f4f8f2; border: 1px solid #dfeadf; border-radius: 10px; }
+.operations-stats strong { color: #234b37; font-size: 27px; font-weight: 700; }
+.operations-stats strong small { font-size: 13px; font-weight: 500; }
+.operations-stats span, .operations-breakdown { color: #6a7d70; font-size: 12px; }
+.operations-breakdown { display: flex; flex-wrap: wrap; gap: 8px; }
+.operations-breakdown span { padding: 5px 9px; border-radius: 6px; background: #edf2e9; }
+.operations-breakdown b { margin-left: 5px; color: #274c36; }
+.operations-subtitle { margin: 24px 0 8px; font-size: 14px; color: #2e4b37; }
 .gate-page { padding-top: 100px; }
 .gate-page h1 { font-size: 48px; }
 .gate-page .btn-primary { margin-top: 27px; }
@@ -235,6 +244,7 @@ body { display: block; height: 100vh; overflow: hidden; background: var(--paper)
   .service-card { grid-template-columns: 55px 1fr 28px; gap: 12px; padding: 20px; }
   .invitation-panel { padding: 19px; }
   .invitation-form .btn-primary { width: 100%; justify-content: center; }
+  .operations-stats { grid-template-columns: 1fr; }
   .key-row { flex-wrap: wrap; }
   .key-row > div { flex-basis: 100%; }
   .service-symbol { width: 50px; height: 50px; font-size: 20px; }

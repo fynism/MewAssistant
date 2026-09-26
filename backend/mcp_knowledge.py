@@ -1,6 +1,7 @@
 """Official MCP Streamable HTTP adapter for the private knowledge service."""
 
 import json
+import time
 from urllib.parse import urlsplit
 
 from fastapi import HTTPException
@@ -15,6 +16,7 @@ from backend.database import SessionLocal
 from backend.services.api_keys import authenticate_key
 from backend.services.knowledge_tools import list_knowledges, retrieve
 from backend.services.rate_limits import enforce_rate_limits
+from backend.services.call_audit import record_call
 
 
 class KnowledgeItem(BaseModel):
@@ -59,6 +61,7 @@ def _bearer(headers) -> str | None:
 
 
 def _invoke(headers, operation, **kwargs):
+    started = time.perf_counter()
     token = _bearer(headers)
     if token is None:
         raise ToolError("认证失败")
@@ -66,14 +69,22 @@ def _invoke(headers, operation, **kwargs):
         owner_id = authenticate_key(db, token)
         if owner_id is None:
             raise ToolError("认证失败")
+        category = "success"
         try:
             return operation(db, owner_id, **kwargs)
         except HTTPException as exc:
+            category = ("permission" if exc.status_code == 404 else
+                        "invalid_input" if exc.status_code in (400, 422) else "service_error")
             if exc.status_code in (400, 404, 422):
                 raise ToolError("参数无效或知识库不可访问") from None
             raise ToolError("检索服务暂时不可用") from None
         except Exception:
+            category = "service_error"
             raise ToolError("检索服务暂时不可用") from None
+        finally:
+            tool_name = "listKnowledges" if operation is list_knowledges else operation.__name__
+            record_call(owner_id, token[4:].split("_", 1)[0],
+                        tool_name, category, int((time.perf_counter() - started) * 1000))
 
 
 @knowledge_mcp.tool(name="listKnowledges", description="列出当前凭证所有者的私有知识库及可检索状态。", structured_output=True)
@@ -118,22 +129,27 @@ class ApiKeyMcpAuth:
         origin = headers.get("origin")
         allowed_origins = {value.strip() for value in settings.mcp_allowed_origins.split(",") if value.strip()}
         if origin and origin not in allowed_origins:
+            record_call(None, None, "mcp_request", "permission", 0)
             await self._reject(send, 403)
             return
         if not settings.mcp_external_enabled:
+            record_call(None, None, "mcp_request", "service_error", 0)
             await self._reject(send, 503)
             return
         token = _bearer(headers)
         if token is None:
+            record_call(None, None, "mcp_request", "authentication", 0)
             await self._reject(send, 401)
             return
         try:
             with SessionLocal() as db:
                 owner_id = authenticate_key(db, token)
         except Exception:
+            record_call(None, None, "mcp_request", "service_error", 0)
             await self._reject(send, 503)
             return
         if owner_id is None:
+            record_call(None, None, "mcp_request", "authentication", 0)
             await self._reject(send, 401)
             return
         try:
@@ -141,6 +157,8 @@ class ApiKeyMcpAuth:
                 (f"mcp:user:{owner_id}", getattr(settings, "mcp_user_rate_per_minute", 60)),
                 (f"mcp:key:{token[4:].split('_', 1)[0]}", getattr(settings, "mcp_key_rate_per_minute", 30)))
         except HTTPException as exc:
+            record_call(owner_id, token[4:].split("_", 1)[0], "mcp_request",
+                        "rate_limited" if exc.status_code == 429 else "service_error", 0)
             await self._reject(send, exc.status_code)
             return
         await self.app(scope, receive, send)
