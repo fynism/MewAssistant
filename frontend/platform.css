@@ -77,6 +77,26 @@ body { display: block; height: 100vh; overflow: hidden; background: var(--paper)
 .account-avatar { width: 64px; height: 64px; display: grid; place-items: center; background: #dcecdc; color: #23503b; border-radius: 13px; font: 800 27px Manrope; margin: 20px 0; }
 .account-card h2 { font-size: 22px; }
 .account-card p { color: #6b8175; margin-top: 7px; }
+.mcp-connect, .api-key-panel { background: #fff; border: 1px solid var(--line); border-radius: 13px; padding: 27px; margin: 0 0 48px; }
+.mcp-connect p, .api-key-panel > p { color: #5c7467; font-size: 13px; line-height: 1.75; }
+.mcp-connect code, .api-key-panel code { font-family: ui-monospace, Consolas, monospace; }
+.mcp-url { display: flex; align-items: center; gap: 12px; justify-content: space-between; background: #f0f5ee; border: 1px solid #dce7db; border-radius: 8px; padding: 12px; margin: 17px 0; }
+.mcp-url code { overflow-wrap: anywhere; user-select: all; font-size: 12px; }
+.mcp-url button { flex-shrink: 0; }
+.mcp-connect pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #183c33; color: #eaf4e8; border-radius: 9px; padding: 19px; font-size: 12px; line-height: 1.8; }
+.mcp-note { margin-top: 17px; font-size: 12px !important; color: #6b8074 !important; }
+.key-create { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+.key-create input { flex: 1; min-width: 180px; border: 1px solid #d3dfd4; border-radius: 8px; padding: 11px 13px; font: inherit; }
+.key-error { color: #a8362c !important; margin-top: 12px; }
+.new-key { border: 1px solid #b8d7bb; border-radius: 9px; background: #eaf4e7; padding: 16px; margin-top: 20px; }
+.new-key strong { color: #285742; font-size: 13px; }
+.key-dismiss { border: 0; background: transparent; padding: 0; cursor: pointer; }
+.key-list { margin-top: 22px; border-top: 1px solid var(--line); }
+.key-row { display: flex; gap: 12px; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); padding: 16px 0; }
+.key-row strong { font-size: 14px; }
+.key-row small { display: block; color: #718276; font-size: 11px; line-height: 1.6; margin-top: 4px; }
+.key-row button { flex-shrink: 0; }
+.key-revoked { color: #8b918b; font-size: 12px; }
 .gate-page { padding-top: 100px; }
 .gate-page h1 { font-size: 48px; }
 .gate-page .btn-primary { margin-top: 27px; }

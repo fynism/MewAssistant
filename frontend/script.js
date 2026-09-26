@@ -9,6 +9,12 @@ createApp({
             activeNav: 'newChat',
             page: ['/', '/services/knowledge', '/account', '/workspace/knowledges', '/try'].includes(window.location.pathname.replace(/\/$/, '') || '/') ? (window.location.pathname.replace(/\/$/, '') || '/') : '/',
             showAuth: false,
+            serviceInfo: { externalAvailable: false, endpoint: null },
+            apiKeys: [],
+            apiKeyName: '',
+            createdApiKey: '',
+            apiKeyBusy: false,
+            apiKeyError: '',
             services: [{ id: 'knowledge', category: 'KNOWLEDGE', name: '知识库 MCP', description: '把私有文件转为可检索知识，先通过站内工具验证结果与来源。', tools: ['listKnowledges', 'retrieve'], path: '/services/knowledge' }],
             abortController: null,
             sessionId: 'session_' + Date.now(),
@@ -68,10 +74,15 @@ createApp({
         selectedScopeLabel() {
             if (!this.selectedKnowledgeIds.length) return '未选择知识库（空范围）';
             return this.selectedKnowledgeIds.map(id => this.knowledges.find(item => item.id === id)?.name || '已删除的知识库').join('、');
+        },
+        codexConfig() {
+            if (!this.serviceInfo.endpoint) return '';
+            return `[mcp_servers.supermew_knowledge]\nurl = "${this.serviceInfo.endpoint}"\nbearer_token_env_var = "SUPERMEW_MCP_API_KEY"`;
         }
     },
     async mounted() {
         this.configureMarked();
+        await this.loadServiceInfo();
         window.addEventListener('popstate', this.syncRoute);
         if (this.token) {
             try {
@@ -81,6 +92,7 @@ createApp({
             }
         }
         if (this.isAuthenticated && ['/workspace/knowledges', '/try'].includes(this.page)) await this.loadKnowledges();
+        if (this.isAuthenticated && this.page === '/account') await this.loadApiKeys();
     },
     beforeUnmount() {
         window.removeEventListener('popstate', this.syncRoute);
@@ -90,6 +102,8 @@ createApp({
         syncRoute() {
             const path = window.location.pathname.replace(/\/$/, '') || '/';
             this.page = ['/', '/services/knowledge', '/account', '/workspace/knowledges', '/try'].includes(path) ? path : '/';
+            if (this.page === '/account' && this.isAuthenticated) this.loadApiKeys();
+            if (this.page !== '/account') this.createdApiKey = '';
             if (this.page === '/workspace/knowledges' || this.page === '/try') this.loadKnowledges();
             if (this.page !== '/workspace/knowledges') this.stopDocumentPolling();
             if (this.page !== '/try') this.showHistorySidebar = false;
@@ -130,6 +144,55 @@ createApp({
             return detail;
         },
         setNotice(message) { this.notice = message; },
+        async loadServiceInfo() {
+            try {
+                const response = await fetch('/platform/services/knowledge');
+                if (response.ok) this.serviceInfo = await response.json();
+            } catch (_) { /* Unavailable service keeps the pending state. */ }
+        },
+        async loadApiKeys() {
+            if (!this.isAuthenticated) return;
+            try {
+                const response = await this.authFetch('/account/api-keys');
+                const data = await response.json();
+                if (!response.ok) throw new Error(this.apiError(response, data, '加载凭证失败'));
+                this.apiKeys = data.items;
+                this.apiKeyError = '';
+            } catch (error) { this.apiKeyError = error.message; }
+        },
+        async createApiKey() {
+            const name = this.apiKeyName.trim();
+            if (!name || this.apiKeyBusy) return;
+            this.apiKeyBusy = true;
+            this.apiKeyError = '';
+            this.createdApiKey = '';
+            try {
+                const response = await this.authFetch('/account/api-keys', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name})
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(this.apiError(response, data, '创建凭证失败'));
+                this.createdApiKey = data.key;
+                this.apiKeyName = '';
+                await this.loadApiKeys();
+            } catch (error) { this.apiKeyError = error.message; }
+            finally { this.apiKeyBusy = false; }
+        },
+        async revokeApiKey(item) {
+            if (this.apiKeyBusy || item.revokedAt || !window.confirm(`撤销“${item.name}”？使用它的客户端会立即失去访问权限。`)) return;
+            this.apiKeyBusy = true;
+            try {
+                const response = await this.authFetch(`/account/api-keys/${encodeURIComponent(item.id)}`, {method: 'DELETE'});
+                if (!response.ok) throw new Error('撤销失败，请稍后重试');
+                await this.loadApiKeys();
+            } catch (error) { this.apiKeyError = error.message; }
+            finally { this.apiKeyBusy = false; }
+        },
+        async copyText(value) {
+            try { await navigator.clipboard.writeText(value); this.setNotice('已复制到剪贴板。'); }
+            catch (_) { this.setNotice('复制失败，请手动选择并复制。'); }
+        },
         configureMarked() {
             marked.setOptions({
                 highlight: function(code, lang) {
@@ -220,6 +283,7 @@ createApp({
                 this.activeNav = 'newChat';
                 this.showAuth = false;
                 if (['/workspace/knowledges', '/try'].includes(this.page)) await this.loadKnowledges();
+                if (this.page === '/account') await this.loadApiKeys();
             } catch (error) {
                 alert(error.message);
             } finally {
@@ -228,6 +292,9 @@ createApp({
         },
 
         handleLogout() {
+            this.createdApiKey = '';
+            this.apiKeys = [];
+            this.apiKeyName = '';
             this.token = '';
             this.currentUser = null;
             this.messages = [];
