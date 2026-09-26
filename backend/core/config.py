@@ -14,6 +14,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 class Settings:
     host: str = os.getenv("HOST", "0.0.0.0")
     port: int = int(os.getenv("PORT", "8000"))
+    log_requests: bool = os.getenv("LOG_REQUESTS", "true").lower() == "true"
+    log_sql: bool = os.getenv("LOG_SQL", "false").lower() == "true"
+    log_sql_parameters: bool = os.getenv("LOG_SQL_PARAMETERS", "false").lower() == "true"
 
     database_url: str = os.getenv(
         "DATABASE_URL",
@@ -26,7 +29,6 @@ class Settings:
     jwt_secret_key: str = os.getenv("JWT_SECRET_KEY", "change-this-secret")
     jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
     jwt_expire_minutes: int = int(os.getenv("JWT_EXPIRE_MINUTES", "1440"))
-    admin_invite_code: str = os.getenv("ADMIN_INVITE_CODE", "")
     password_pbkdf2_rounds: int = int(os.getenv("PASSWORD_PBKDF2_ROUNDS", "310000"))
 
     ark_api_key: str | None = os.getenv("ARK_API_KEY")
@@ -40,11 +42,13 @@ class Settings:
     milvus_host: str = os.getenv("MILVUS_HOST", "localhost")
     milvus_port: str = os.getenv("MILVUS_PORT", "19530")
     milvus_collection: str = os.getenv("MILVUS_COLLECTION", "embeddings_collection")
+    milvus_m1_collection: str = os.getenv("MILVUS_M1_COLLECTION", "embeddings_collection_m1")
     dense_embedding_dim: int = int(os.getenv("DENSE_EMBEDDING_DIM", "1024"))
 
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
     embedding_device: str = os.getenv("EMBEDDING_DEVICE", "cpu")
-    bm25_state_path: Path = Path(os.getenv("BM25_STATE_PATH", BASE_DIR / "data" / "bm25_state.json"))
+    bm25_state_path: Path = Path(os.getenv("BM25_M1_STATE_PATH", BASE_DIR / "data" / "bm25_state_m1.json"))
+    max_upload_bytes: int = int(os.getenv("MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
 
     rerank_model: str | None = os.getenv("RERANK_MODEL")
     rerank_binding_host: str | None = os.getenv("RERANK_BINDING_HOST")

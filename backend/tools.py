@@ -9,30 +9,6 @@ except ImportError:
 AMAP_WEATHER_API = settings.amap_weather_api
 AMAP_API_KEY = settings.amap_api_key
 
-_LAST_RAG_CONTEXT = None
-_KNOWLEDGE_TOOL_CALLS_THIS_TURN = 0
-
-
-def _set_last_rag_context(context: dict):
-    global _LAST_RAG_CONTEXT
-    _LAST_RAG_CONTEXT = context
-
-
-def get_last_rag_context(clear: bool = True) -> Optional[dict]:
-    """获取最近一次 RAG 检索上下文，默认读取后清空。"""
-    global _LAST_RAG_CONTEXT
-    context = _LAST_RAG_CONTEXT
-    if clear:
-        _LAST_RAG_CONTEXT = None
-    return context
-
-
-def reset_tool_call_guards():
-    """每轮对话开始时重置工具调用计数。"""
-    global _KNOWLEDGE_TOOL_CALLS_THIS_TURN
-    _KNOWLEDGE_TOOL_CALLS_THIS_TURN = 0
-
-
 def get_current_weather(location: str, extensions: Optional[str] = "base") -> str:
     """获取天气信息"""
     if not location:
@@ -92,37 +68,3 @@ def get_current_weather(location: str, extensions: Optional[str] = "base") -> st
         return f"错误：天气服务请求失败 - {e}"
     except Exception as e:
         return f"错误：解析天气数据失败 - {e}"
-
-
-@tool("search_knowledge_base")
-def search_knowledge_base(query: str) -> str:
-    """Search for information in the knowledge base using hybrid retrieval (dense + sparse vectors)."""
-    # ... guards omitted ...
-    global _KNOWLEDGE_TOOL_CALLS_THIS_TURN
-    if _KNOWLEDGE_TOOL_CALLS_THIS_TURN >= 1:
-        return (
-            "TOOL_CALL_LIMIT_REACHED: search_knowledge_base has already been called once in this turn. "
-            "Use the existing retrieval result and provide the final answer directly."
-        )
-    _KNOWLEDGE_TOOL_CALLS_THIS_TURN += 1
-
-    from backend.rag_pipeline import run_rag_graph
-
-    rag_result = run_rag_graph(query)
-
-    docs = rag_result.get("docs", []) if isinstance(rag_result, dict) else []
-    rag_trace = rag_result.get("rag_trace", {}) if isinstance(rag_result, dict) else {}
-    if rag_trace:
-        _set_last_rag_context({"rag_trace": rag_trace})
-
-    if not docs:
-        return "No relevant documents found in the knowledge base."
-
-    formatted = []
-    for i, result in enumerate(docs, 1):
-        source = result.get("filename", "Unknown")
-        page = result.get("page_number", "N/A")
-        text = result.get("text", "")
-        formatted.append(f"[{i}] {source} (Page {page}):\n{text}")
-
-    return "Retrieved Chunks:\n" + "\n\n---\n\n".join(formatted)

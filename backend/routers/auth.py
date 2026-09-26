@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from datetime import datetime
+import hashlib
 
 from backend.auth import (
     authenticate_user,
@@ -7,9 +9,8 @@ from backend.auth import (
     get_current_user,
     get_db,
     get_password_hash,
-    resolve_role,
 )
-from backend.models import User
+from backend.models import Invitation, User
 from backend.schemas import AuthResponse, CurrentUserResponse, LoginRequest, RegisterRequest
 
 
@@ -23,17 +24,21 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
     if not username or not password:
         raise HTTPException(status_code=400, detail="用户名和密码不能为空")
 
-    exists = db.query(User).filter(User.username == username).first()
-    if exists:
+    code_hash = hashlib.sha256(request.invite_code.strip().encode("utf-8")).hexdigest()
+    invitation = db.query(Invitation).filter(Invitation.code_hash == code_hash).with_for_update().first()
+    if (invitation is None or invitation.revoked_at is not None
+            or (invitation.expires_at is not None and invitation.expires_at <= datetime.utcnow())
+            or invitation.used_count >= invitation.max_uses):
+        raise HTTPException(status_code=403, detail="邀请码无效或已失效")
+    if db.query(User).filter(User.username == username).first():
         raise HTTPException(status_code=409, detail="用户名已存在")
-
-    role = resolve_role(request.role, request.admin_code)
-    user = User(username=username, password_hash=get_password_hash(password), role=role)
+    user = User(username=username, password_hash=get_password_hash(password), role="user")
+    invitation.used_count += 1
     db.add(user)
     db.commit()
 
-    token = create_access_token(username=username, role=role)
-    return AuthResponse(access_token=token, username=username, role=role)
+    token = create_access_token(username=username, role="user")
+    return AuthResponse(access_token=token, username=username, role="user")
 
 
 @router.post("/auth/login", response_model=AuthResponse)

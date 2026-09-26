@@ -10,10 +10,10 @@ QUERY_MAX_LIMIT = 16384
 class MilvusManager:
     """Milvus 连接和集合管理 - 支持混合检索"""
 
-    def __init__(self):
+    def __init__(self, collection_name: str | None = None):
         self.host = settings.milvus_host
         self.port = settings.milvus_port
-        self.collection_name = settings.milvus_collection
+        self.collection_name = collection_name or settings.milvus_m1_collection
         self.uri = f"http://{self.host}:{self.port}"
         self.client = None
 
@@ -66,6 +66,8 @@ class MilvusManager:
                 # 文本和元数据字段
                 schema.add_field("text", DataType.VARCHAR, max_length=2000)
                 schema.add_field("filename", DataType.VARCHAR, max_length=255)
+                schema.add_field("knowledge_id", DataType.VARCHAR, max_length=36)
+                schema.add_field("document_id", DataType.VARCHAR, max_length=36)
                 schema.add_field("file_type", DataType.VARCHAR, max_length=50)
                 schema.add_field("file_path", DataType.VARCHAR, max_length=1024)
                 schema.add_field("page_number", DataType.INT64)
@@ -106,6 +108,12 @@ class MilvusManager:
     def insert(self, data: list[dict]):
         """插入数据到 Milvus"""
         return self._retry_on_closed_channel(lambda: self._get_client().insert(self.collection_name, data))
+
+    def flush(self):
+        """Wait for inserted rows to become durable before marking a document ready."""
+        return self._retry_on_closed_channel(
+            lambda: self._get_client().flush(collection_name=self.collection_name)
+        )
 
     def query(
         self,
@@ -179,7 +187,7 @@ class MilvusManager:
     ) -> list[dict]:
         """混合检索 - 使用 RRF 融合密集向量和稀疏向量的检索结果"""
         output_fields = [
-            "text", "filename", "file_type", "page_number",
+                "text", "filename", "file_type", "page_number", "knowledge_id", "document_id",
             "chunk_id", "parent_chunk_id", "root_chunk_id", "chunk_level", "chunk_idx",
         ]
 
@@ -213,6 +221,8 @@ class MilvusManager:
                         "id": hit.get("id"),
                         "text": hit.get("text", ""),
                         "filename": hit.get("filename", ""),
+                        "knowledge_id": hit.get("knowledge_id", ""),
+                        "document_id": hit.get("document_id", ""),
                         "file_type": hit.get("file_type", ""),
                         "page_number": hit.get("page_number", 0),
                         "chunk_id": hit.get("chunk_id", ""),
@@ -228,7 +238,7 @@ class MilvusManager:
     def dense_retrieve(self, dense_embedding: list[float], top_k: int = 5, filter_expr: str = "") -> list[dict]:
         """仅使用密集向量检索（降级模式，用于稀疏向量不可用时）"""
         output_fields = [
-            "text", "filename", "file_type", "page_number",
+            "text", "filename", "file_type", "page_number", "knowledge_id", "document_id",
             "chunk_id", "parent_chunk_id", "root_chunk_id", "chunk_level", "chunk_idx",
         ]
 
@@ -249,6 +259,8 @@ class MilvusManager:
                         "id": hit.get("id"),
                         "text": hit.get("entity", {}).get("text", ""),
                         "filename": hit.get("entity", {}).get("filename", ""),
+                        "knowledge_id": hit.get("entity", {}).get("knowledge_id", ""),
+                        "document_id": hit.get("entity", {}).get("document_id", ""),
                         "file_type": hit.get("entity", {}).get("file_type", ""),
                         "page_number": hit.get("entity", {}).get("page_number", 0),
                         "chunk_id": hit.get("entity", {}).get("chunk_id", ""),

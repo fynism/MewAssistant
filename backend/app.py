@@ -2,10 +2,13 @@ from fastapi import FastAPI, HTTPException as FastAPIHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pathlib import Path
+import time
+from uuid import uuid4
 
 from backend import api as api_module
 from backend.core.config import settings
 from backend.database import init_db
+from backend.observability import logger, request_id
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
@@ -26,24 +29,38 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # No-cache middleware for development
+    # Request log and no-cache headers for development assets.
     @app.middleware("http")
-    async def _no_cache(request, call_next):
-        response = await call_next(request)
+    async def _request_logging_and_no_cache(request, call_next):
+        current_id = uuid4().hex
+        token = request_id.set(current_id)
+        started = time.perf_counter()
         path = request.url.path or ""
-        if path == "/" or path.endswith((".html", ".js", ".css")):
-            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-            response.headers["Pragma"] = "no-cache"
-            response.headers["Expires"] = "0"
-        return response
+        status_code = 500
+        try:
+            response = await call_next(request)
+            status_code = response.status_code
+            response.headers["X-Request-ID"] = current_id
+            if path == "/" or path.endswith((".html", ".js", ".css")):
+                response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+                response.headers["Pragma"] = "no-cache"
+                response.headers["Expires"] = "0"
+            return response
+        finally:
+            if settings.log_requests:
+                logger.info(
+                    "request_id=%s method=%s path=%s status=%d duration_ms=%.1f",
+                    current_id, request.method, path, status_code,
+                    (time.perf_counter() - started) * 1000,
+                )
+            request_id.reset(token)
 
     # API routes must be registered first so they take priority over the
     # frontend catch-all below.
     app.include_router(api_module.router)
 
-    # Serve frontend via a GET-only catch-all route. Using a Route (not a
-    # Mount) ensures only GET requests are matched — POST /auth/register and
-    # other API calls pass through to the API router registered above.
+    # Serve known frontend files. Unknown paths must not masquerade as a
+    # successful API response containing the HTML app shell.
     if FRONTEND_DIR.exists():
         @app.get("/", include_in_schema=False)
         async def serve_index():
@@ -58,9 +75,6 @@ def create_app() -> FastAPI:
                 except ValueError:
                     raise FastAPIHTTPException(status_code=404)
                 return FileResponse(str(file_path))
-            index_path = FRONTEND_DIR / "index.html"
-            if index_path.exists():
-                return FileResponse(str(index_path))
             raise FastAPIHTTPException(status_code=404)
 
     return app

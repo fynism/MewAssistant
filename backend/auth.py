@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import hmac
+import os
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, HTTPException, status
@@ -15,7 +16,6 @@ from backend.models import User
 SECRET_KEY = settings.jwt_secret_key
 ALGORITHM = settings.jwt_algorithm
 ACCESS_TOKEN_EXPIRE_MINUTES = settings.jwt_expire_minutes
-ADMIN_INVITE_CODE = settings.admin_invite_code
 PBKDF2_ROUNDS = settings.password_pbkdf2_rounds
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
@@ -121,12 +121,3 @@ def require_admin(current_user: User = Depends(get_current_user)) -> User:
     if current_user.role != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="管理员权限不足")
     return current_user
-
-
-def resolve_role(requested_role: str | None, admin_code: str | None) -> str:
-    role = (requested_role or "user").strip().lower()
-    if role != "admin":
-        return "user"
-    if ADMIN_INVITE_CODE and admin_code == ADMIN_INVITE_CODE:
-        return "admin"
-    raise HTTPException(status_code=403, detail="管理员邀请码错误")
