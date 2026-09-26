@@ -14,6 +14,13 @@ createApp({
             sessionId: 'session_' + Date.now(),
             sessions: [],
             showHistorySidebar: false,
+            tryMode: 'chat',
+            debugQuery: '',
+            debugTopK: 5,
+            debugTool: '',
+            debugLoading: false,
+            debugResult: null,
+            debugError: '',
             isComposing: false,
             documents: [],
             documentsLoading: false,
@@ -92,6 +99,28 @@ createApp({
             this.syncRoute();
         },
         openLogin() { this.showAuth = true; },
+        scopeNames(ids) {
+            if (ids === null || ids === undefined) return '旧会话：未记录知识库范围';
+            if (!ids.length) return '空范围';
+            return ids.map(id => this.knowledges.find(item => item.id === id)?.name || `已删除的知识库 (${id.slice(0, 8)})`).join('、');
+        },
+        async runDebug(tool) {
+            if (this.debugLoading) return;
+            const query = this.debugQuery.trim();
+            if (tool === 'retrieve' && !query) { this.debugError = '请输入检索问题。'; return; }
+            this.debugTool = tool;
+            this.debugResult = null;
+            this.debugError = '';
+            this.debugLoading = true;
+            try {
+                const payload = tool === 'retrieve' ? {query, knowledgeIds: [...this.selectedKnowledgeIds], topK: Number(this.debugTopK)} : {limit: 50};
+                const response = await this.authFetch(`/tools/debug/${tool}`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(this.apiError(response, data, '工具调试失败'));
+                this.debugResult = data;
+            } catch (error) { this.debugError = error.message; }
+            finally { this.debugLoading = false; }
+        },
         apiError(response, payload, fallback) {
             const detail = typeof payload.detail === 'string' ? payload.detail : fallback;
             if (response.status === 409) return `操作冲突：${detail}。请稍后重试。`;
@@ -245,10 +274,12 @@ createApp({
 
             const text = this.userInput.trim();
             if (!text || this.isLoading || this.isComposing) return;
+            const scopeSnapshot = [...this.selectedKnowledgeIds];
 
             this.messages.push({
                 text: text,
-                isUser: true
+                isUser: true,
+                knowledgeIds: scopeSnapshot
             });
 
             this.userInput = '';
@@ -263,7 +294,8 @@ createApp({
                 isUser: false,
                 isThinking: true,
                 ragTrace: null,
-                ragSteps: []
+                ragSteps: [],
+                knowledgeIds: scopeSnapshot
             });
             const botMsgIdx = this.messages.length - 1;
 
@@ -275,7 +307,8 @@ createApp({
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         message: text,
-                        session_id: this.sessionId
+                        session_id: this.sessionId,
+                        knowledge_ids: scopeSnapshot
                     }),
                     signal: this.abortController.signal,
                 });
@@ -365,6 +398,7 @@ createApp({
 
         handleNewChat() {
             if (!this.isAuthenticated) return;
+            this.navigate('/try');
             this.messages = [];
             this.sessionId = 'session_' + Date.now();
             this.activeNav = 'newChat';
@@ -379,6 +413,7 @@ createApp({
 
         async handleHistory() {
             if (!this.isAuthenticated) return;
+            this.navigate('/try');
             this.activeNav = 'history';
             this.showHistorySidebar = true;
             try {
@@ -407,8 +442,13 @@ createApp({
                 this.messages = data.messages.map(msg => ({
                     text: msg.content,
                     isUser: msg.type === 'human',
-                    ragTrace: msg.rag_trace || null
+                    ragTrace: msg.rag_trace || null,
+                    knowledgeIds: msg.knowledge_ids
                 }));
+                if (Array.isArray(data.last_knowledge_ids)) {
+                    const owned = new Set(this.knowledges.map(item => item.id));
+                    this.selectedKnowledgeIds = data.last_knowledge_ids.filter(id => owned.has(id));
+                }
 
                 this.$nextTick(() => {
                     this.scrollToBottom();

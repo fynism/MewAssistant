@@ -11,7 +11,7 @@ vm.runInNewContext(source, {
   localStorage: { getItem() { return ''; } },
   window: { location: globalLocation, history: { pushState(_, __, path) { globalLocation.pathname = path; } } },
   fetch: async () => ({ ok: true, json: async () => ({ allowed_extensions: ['.pdf'], max_upload_bytes: 1000000 }) }),
-  URLSearchParams, FormData, Blob, setTimeout() {}, clearTimeout() {}, confirm() { return true; }, console,
+  URLSearchParams, FormData, Blob, TextDecoder, AbortController, setTimeout() {}, clearTimeout() {}, confirm() { return true; }, console,
 });
 
 const app = Object.assign(component.data(), component.methods);
@@ -46,5 +46,23 @@ app.authFetch = async (url, options = {}) => {
   await app.deleteDocument({ id: 'doc', filename: 'same.pdf' });
   assert(requests.includes(`DELETE /knowledges/${knowledgeId}/documents/doc`));
   assert(!requests.some(request => /(?:^|\s)\/documents(?:\b|\/)/.test(request)));
+  const payloads = [];
+  app.authFetch = async (url, options = {}) => {
+    payloads.push([url, options.body && JSON.parse(options.body)]);
+    if (url === '/chat/stream') return { ok: true, body: { getReader() { return { read: async () => ({ done: true }) }; } } };
+    return { ok: true, json: async () => url.endsWith('retrieve') ? { status: 'no_match', results: [] } : { items: [], nextCursor: null } };
+  };
+  app.selectedKnowledgeIds = [knowledgeId];
+  app.userInput = '测试问题';
+  await app.handleSend();
+  assert.equal(payloads[0][0], '/chat/stream');
+  assert.deepEqual(JSON.parse(JSON.stringify(payloads[0][1].knowledge_ids)), [knowledgeId]);
+  assert.equal(app.messages[0].knowledgeIds[0], knowledgeId);
+  app.selectedKnowledgeIds = [];
+  app.debugQuery = '测试检索';
+  await app.runDebug('retrieve');
+  assert.equal(payloads[1][0], '/tools/debug/retrieve');
+  assert.deepEqual(JSON.parse(JSON.stringify(payloads[1][1].knowledgeIds)), []);
+  assert.equal(app.debugResult.status, 'no_match');
   console.log('Frontend knowledge attachment smoke passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

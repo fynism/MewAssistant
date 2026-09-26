@@ -17,7 +17,8 @@ body { display: block; height: 100vh; overflow: hidden; background: var(--paper)
 .sidebar-footer { border-top: 1px solid #376152; padding-top: 20px; }
 .sidebar-footer .user-badge { background: #224c3f; color: #fff; border-radius: 10px; }
 .sidebar-footer .user-badge small { color: #afc8b7; }
-.sidebar-footer .danger-btn { color: #dceadf; }
+.sidebar-footer .danger-btn { color: #dceadf; background: transparent; border-radius: 8px; }
+.sidebar-footer .danger-btn:hover { background: #2b5a4a; }
 .nav-login { width: 100%; justify-content: center; }
 .main-content { position: relative; flex: 1; overflow-y: auto; background: var(--paper); min-width: 0; }
 .platform-page { max-width: 1150px; margin: 0 auto; padding: 40px 55px 90px; }
@@ -88,7 +89,7 @@ body { display: block; height: 100vh; overflow: hidden; background: var(--paper)
 .auth-form input { width: 100%; border: 1px solid #d3dfd4; padding: 12px 13px; border-radius: 7px; }
 .auth-submit { justify-content: center; }
 .auth-switch { background: none; border: 0; color: #206a4c; cursor: pointer; padding: 10px; }
-.settings-panel { max-width: 1020px; padding: 38px 50px 90px; margin: 0 auto; overflow: visible; }
+.settings-panel { max-width: 1020px; height: auto; padding: 38px 50px 90px; margin: 0 auto; overflow: visible; background: transparent; }
 .settings-header { margin: 32px 0 28px; }
 .settings-header h2 { font: 800 38px Manrope,'Microsoft YaHei',sans-serif; letter-spacing: -.05em; color: var(--ink); }
 .settings-header p { font-size: 14px; color: #63786d; margin-top: 9px; }
@@ -118,6 +119,54 @@ body { display: block; height: 100vh; overflow: hidden; background: var(--paper)
 .document-name { overflow-wrap: anywhere; }
 .document-meta { flex-wrap: wrap; }
 .documents-list .btn-secondary, .documents-list .btn-danger { flex-shrink: 0; }
+.try-workbench { max-width: 1040px; margin: 0 auto; padding: 31px 42px 0; }
+.try-heading { display: flex; justify-content: space-between; align-items: end; gap: 20px; margin: 25px 0; }
+.try-heading h1 { font: 800 36px Manrope,'Microsoft YaHei',sans-serif; letter-spacing: -.05em; }
+.try-heading p { font-size: 13px; color: #718176; margin-top: 7px; line-height: 1.6; }
+.scope-box { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 17px 20px; }
+.scope-title { display: flex; gap: 14px; align-items: center; margin-bottom: 12px; }
+.scope-title strong { font-size: 13px; }
+.scope-title span, .scope-summary, .empty-scope { color: #738579; font-size: 11px; }
+.scope-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.scope-options label { cursor: pointer; display: inline-flex; gap: 6px; align-items: center; border: 1px solid #d4dfd5; border-radius: 7px; padding: 7px 10px; font-size: 12px; }
+.scope-options label:has(input:checked) { border-color: #438963; background: #e8f2e6; color: #215f40; }
+.scope-options input { accent-color: #22704c; }
+.scope-options small { color: #859b8a; font-size: 10px; }
+.scope-summary { margin-top: 11px; }
+.empty-scope a { color: #267550; }
+.try-tabs { display: flex; gap: 25px; border-bottom: 1px solid var(--line); margin-top: 25px; }
+.try-tabs button { background: none; border: 0; border-bottom: 3px solid transparent; padding: 12px 3px; color: #6e8375; cursor: pointer; font: 700 13px Manrope,'Microsoft YaHei',sans-serif; }
+.try-tabs button.active { border-bottom-color: #267451; color: #164331; }
+.try-toolbar { display: flex; gap: 8px; margin-top: 15px; }
+.try-toolbar button { background: #fff; border: 1px solid var(--line); border-radius: 7px; padding: 8px 11px; color: #2b5b43; font-size: 11px; cursor: pointer; }
+.try-toolbar button i { margin-right: 5px; }
+.chat-area { max-width: 1040px; margin: 0 auto 30px; height: 600px; min-height: 500px; border: 1px solid var(--line); border-radius: 12px; background: #fff; overflow: hidden; }
+.chat-header { background: #fff; border-bottom: 1px solid var(--line); }
+.history-sidebar { z-index: 20; }
+.message-scope { color: #738576; font-size: 10px; margin: 0 0 6px; }
+.user-message .message-scope { text-align: right; }
+.debug-panel { max-width: 1040px; margin: 0 auto; padding: 22px 42px 85px; }
+.debug-intro h2 { font: 800 24px Manrope,'Microsoft YaHei',sans-serif; margin: 7px 0; }
+.debug-intro p { color: #6f8275; font-size: 13px; line-height: 1.7; }
+.debug-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 23px 0; }
+.debug-card, .debug-result { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 22px; }
+.debug-card h3 { font: 800 20px monospace; color: #1d553b; margin: 12px 0; }
+.debug-card p { font-size: 12px; color: #687f70; margin-bottom: 30px; }
+.debug-card label { display: flex; flex-direction: column; gap: 6px; font-size: 11px; font-weight: 700; color: #54705b; margin: 12px 0; }
+.debug-card input { border: 1px solid var(--line); border-radius: 6px; padding: 10px; font: inherit; color: var(--ink); }
+.debug-card .btn-primary { margin-top: 7px; }
+.debug-result { margin-top: 15px; }
+.debug-empty { color: #718176; font-size: 13px; padding: 17px; background: #f5f7f3; border-radius: 7px; }
+.result-item { padding: 17px 0; border-bottom: 1px solid var(--line); }
+.result-item > div { display: flex; gap: 12px; align-items: center; font-size: 12px; }
+.result-item b { color: #4b886b; }
+.result-item span, .result-item small { color: #849287; }
+.result-item p { white-space: pre-wrap; margin: 10px 0; font-size: 13px; line-height: 1.7; }
+.debug-knowledge-list > div { display: flex; gap: 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.debug-knowledge-list span, .debug-knowledge-list small { color: #718176; }
+.debug-result details { margin-top: 25px; }
+.debug-result summary { cursor: pointer; font-size: 12px; color: #386e50; font-weight: 700; }
+.debug-result pre { margin-top: 10px; max-height: 360px; overflow: auto; background: #18362e; color: #e2f1e1; border-radius: 8px; padding: 17px; font: 11px/1.6 monospace; }
 
 @media(max-width:800px) {
   body { overflow: auto; }
@@ -132,6 +181,12 @@ body { display: block; height: 100vh; overflow: hidden; background: var(--paper)
   .main-content { overflow: visible; }
   .platform-page { padding: 25px 20px 60px; }
   .settings-panel { padding: 25px 17px 60px; }
+  .try-workbench { padding: 23px 17px 0; }
+  .debug-panel { padding: 20px 17px 60px; }
+  .debug-grid { grid-template-columns: 1fr; }
+  .chat-area { height: 65vh; min-height: 490px; border-radius: 0; }
+  .scope-title { flex-wrap: wrap; }
+  .scope-options label { flex-wrap: wrap; }
   .upload-section, .documents-section { padding: 17px; }
   .document-item { flex-wrap: wrap; }
   .hero { grid-template-columns: 1fr; gap: 28px; padding: 50px 0; }

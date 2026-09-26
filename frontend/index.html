@@ -185,8 +185,16 @@
                 </div>
             </div>
 
+            <div v-if="isAuthenticated && page === '/try'" class="try-workbench">
+                <div class="eyebrow">WORKSPACE / TRY IT <span>站内试用</span></div>
+                <div class="try-heading"><div><h1>试一下</h1><p>选择本轮知识库范围，然后在 Agent 对话或原始工具调试中检验结果。</p></div><a href="/knowledges" @click.prevent="navigate('/knowledges')" class="text-link">管理知识库 ↗</a></div>
+                <div class="scope-box"><div class="scope-title"><strong>检索范围</strong><span>切换仅影响下一条消息；调试工具使用当前选择。</span></div><div class="scope-options"><label v-for="knowledge in knowledges" :key="knowledge.id"><input type="checkbox" :value="knowledge.id" v-model="selectedKnowledgeIds" /><span>{{ knowledge.name }}</span><small>{{ knowledge.has_ready_documents ? '可检索' : '暂无可检索文件' }}</small></label><span v-if="!knowledges.length" class="empty-scope">还没有知识库。<a href="/knowledges" @click.prevent="navigate('/knowledges')">先创建并上传文件 ↗</a></span></div><p class="scope-summary">当前：{{ selectedScopeLabel }}。<span v-if="!selectedKnowledgeIds.length">本次调用将使用空范围。</span></p></div>
+                <div class="try-tabs"><button :class="{active: tryMode === 'chat'}" @click="tryMode = 'chat'">Agent 对话</button><button :class="{active: tryMode === 'debug'}" @click="tryMode = 'debug'">工具调试</button></div>
+                <div v-if="tryMode === 'chat'" class="try-toolbar"><button @click="handleNewChat"><i class="fas fa-plus"></i> 新建会话</button><button @click="handleHistory"><i class="fas fa-clock-rotate-left"></i> 历史记录</button><button @click="handleClearChat"><i class="fas fa-trash"></i> 清空当前</button></div>
+            </div>
+
             <!-- History Sidebar -->
-            <div v-if="isAuthenticated && page === '/try' && showHistorySidebar" class="history-sidebar">
+            <div v-if="isAuthenticated && page === '/try' && tryMode === 'chat' && showHistorySidebar" class="history-sidebar">
                 <div class="history-header">
                     <h3>历史会话</h3>
                     <button @click="showHistorySidebar = false" class="close-btn">
@@ -224,7 +232,7 @@
             </div>
 
             <!-- Chat Area (hidden when settings is active) -->
-            <div v-show="isAuthenticated && page === '/try'" class="chat-area">
+            <div v-show="isAuthenticated && page === '/try' && tryMode === 'chat'" class="chat-area">
                 <header class="chat-header">
                     <div class="header-info">
                         <div class="status-dot"></div>
@@ -244,6 +252,7 @@
                 
                 <!-- Messages -->
                 <div v-for="(msg, index) in messages" :key="index" :class="['message', msg.isUser ? 'user-message' : 'bot-message']">
+                    <div class="message-scope">本轮知识库：{{ scopeNames(msg.knowledgeIds) }}</div>
                     <!-- 思考动画（在气泡内部，RAG 步骤实时填入） -->
                     <div v-if="!msg.isUser && msg.isThinking && !msg.text" class="message-content thinking-content">
                         <div class="thinking-header">
@@ -348,6 +357,8 @@
                                             </div>
                                             <div class="source-meta-line">
                                                 <span class="source-page">RRF名次：#{{ chunk.rrf_rank || (sIndex + 1) }}</span>
+                                                <span v-if="chunk.knowledge_id" class="source-page">知识库：{{ scopeNames([chunk.knowledge_id]) }}</span>
+                                                <span v-if="chunk.document_id" class="source-page">文件 ID：{{ chunk.document_id }}</span>
                                                 <span v-if="chunk.rerank_score !== null && chunk.rerank_score !== undefined" class="source-page">Rerank分数：{{ Number(chunk.rerank_score).toFixed(4) }}</span>
                                             </div>
                                             <div v-if="chunk.text" class="source-excerpt">{{ chunk.text }}</div>
@@ -364,6 +375,8 @@
                                             </div>
                                             <div class="source-meta-line">
                                                 <span class="source-page">RRF名次：#{{ chunk.rrf_rank || (sIndex + 1) }}</span>
+                                                <span v-if="chunk.knowledge_id" class="source-page">知识库：{{ scopeNames([chunk.knowledge_id]) }}</span>
+                                                <span v-if="chunk.document_id" class="source-page">文件 ID：{{ chunk.document_id }}</span>
                                                 <span v-if="chunk.rerank_score !== null && chunk.rerank_score !== undefined" class="source-page">Rerank分数：{{ Number(chunk.rerank_score).toFixed(4) }}</span>
                                             </div>
                                             <div v-if="chunk.text" class="source-excerpt">{{ chunk.text }}</div>
@@ -380,6 +393,8 @@
                                             </div>
                                             <div class="source-meta-line">
                                                 <span class="source-page">RRF名次：#{{ chunk.rrf_rank || (sIndex + 1) }}</span>
+                                                <span v-if="chunk.knowledge_id" class="source-page">知识库：{{ scopeNames([chunk.knowledge_id]) }}</span>
+                                                <span v-if="chunk.document_id" class="source-page">文件 ID：{{ chunk.document_id }}</span>
                                                 <span v-if="chunk.rerank_score !== null && chunk.rerank_score !== undefined" class="source-page">Rerank分数：{{ Number(chunk.rerank_score).toFixed(4) }}</span>
                                             </div>
                                             <div v-if="chunk.text" class="source-excerpt">{{ chunk.text }}</div>
@@ -418,6 +433,12 @@
             </div>
             </div>
             <!-- End of Chat Area -->
+            <div v-if="isAuthenticated && page === '/try' && tryMode === 'debug'" class="debug-panel">
+                <div class="debug-intro"><span class="kicker">RAW TOOL OUTPUT</span><h2>站内工具调试</h2><p>这里直接展示只读工具返回的检索数据，不生成 AI 回答。远程 MCP 调用将在后续阶段开放。</p></div>
+                <div class="debug-grid"><section class="debug-card"><span class="tool-no">01 / DISCOVER</span><h3>listKnowledges</h3><p>列出当前账号的知识库和可检索状态。</p><button class="btn-primary" :disabled="debugLoading" @click="runDebug('listKnowledges')">运行工具 <i class="fas fa-play"></i></button></section><section class="debug-card"><span class="tool-no">02 / RETRIEVE</span><h3>retrieve</h3><label>检索问题<input v-model="debugQuery" type="text" maxlength="500" placeholder="输入想在文件里查找的问题" @keyup.enter="runDebug('retrieve')" /></label><label>返回片段数量（1–20）<input v-model.number="debugTopK" type="number" min="1" max="20" /></label><button class="btn-primary" :disabled="debugLoading || !debugQuery.trim()" @click="runDebug('retrieve')">运行检索 <i class="fas fa-play"></i></button></section></div>
+                <div v-if="debugLoading" class="debug-result">工具运行中…</div><div v-if="debugError" class="platform-notice" role="alert">{{ debugError }}</div>
+                <section v-if="debugResult" class="debug-result"><div class="section-heading"><div><span class="kicker">RESULT</span><h2>{{ debugTool }}</h2></div><span v-if="debugResult.status" class="ready-badge">{{ debugResult.status }}</span></div><p v-if="debugResult.status === 'no_documents'" class="debug-empty">当前范围没有可检索文件。请上传文件并等待处理完成。</p><p v-if="debugResult.status === 'no_match'" class="debug-empty">本次没有找到匹配片段。可以调整问题或知识库范围。</p><div v-for="item in debugResult.results || []" :key="item.sourceId" class="result-item"><div><b>#{{ item.rank }}</b><strong>{{ item.knowledgeName }} / {{ item.filename }}</strong><span v-if="item.pageNumber">第 {{ item.pageNumber }} 页</span></div><p>{{ item.text }}</p><small>来源：{{ item.sourceId }}</small></div><div v-if="debugResult.items" class="debug-knowledge-list"><div v-for="item in debugResult.items" :key="item.id"><strong>{{ item.name }}</strong><span>{{ item.readyDocumentCount }} 个文件可检索</span><small>{{ item.id }}</small></div></div><details open><summary>原始 JSON</summary><pre>{{ JSON.stringify(debugResult, null, 2) }}</pre></details></section>
+            </div>
         </main>
     </div>
 
