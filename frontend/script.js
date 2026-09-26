@@ -7,7 +7,7 @@ createApp({
             userInput: '',
             isLoading: false,
             activeNav: 'newChat',
-            page: ['/', '/services/knowledge', '/account', '/knowledges', '/try'].includes(window.location.pathname.replace(/\/$/, '') || '/') ? (window.location.pathname.replace(/\/$/, '') || '/') : '/',
+            page: ['/', '/services/knowledge', '/account', '/workspace/knowledges', '/try'].includes(window.location.pathname.replace(/\/$/, '') || '/') ? (window.location.pathname.replace(/\/$/, '') || '/') : '/',
             showAuth: false,
             services: [{ id: 'knowledge', category: 'KNOWLEDGE', name: '知识库 MCP', description: '把私有文件转为可检索知识，先通过站内工具验证结果与来源。', tools: ['listKnowledges', 'retrieve'], path: '/services/knowledge' }],
             abortController: null,
@@ -60,7 +60,7 @@ createApp({
             return this.currentUser?.role === 'admin';
         },
         isProtectedPage() {
-            return ['/account', '/knowledges', '/try'].includes(this.page);
+            return ['/account', '/workspace/knowledges', '/try'].includes(this.page);
         },
         selectedKnowledge() {
             return this.knowledges.find(item => item.id === this.selectedKnowledgeId) || null;
@@ -80,7 +80,7 @@ createApp({
                 this.handleLogout();
             }
         }
-        if (this.isAuthenticated && ['/knowledges', '/try'].includes(this.page)) await this.loadKnowledges();
+        if (this.isAuthenticated && ['/workspace/knowledges', '/try'].includes(this.page)) await this.loadKnowledges();
     },
     beforeUnmount() {
         window.removeEventListener('popstate', this.syncRoute);
@@ -89,9 +89,9 @@ createApp({
     methods: {
         syncRoute() {
             const path = window.location.pathname.replace(/\/$/, '') || '/';
-            this.page = ['/', '/services/knowledge', '/account', '/knowledges', '/try'].includes(path) ? path : '/';
-            if (this.page === '/knowledges' || this.page === '/try') this.loadKnowledges();
-            if (this.page !== '/knowledges') this.stopDocumentPolling();
+            this.page = ['/', '/services/knowledge', '/account', '/workspace/knowledges', '/try'].includes(path) ? path : '/';
+            if (this.page === '/workspace/knowledges' || this.page === '/try') this.loadKnowledges();
+            if (this.page !== '/workspace/knowledges') this.stopDocumentPolling();
             if (this.page !== '/try') this.showHistorySidebar = false;
         },
         navigate(path) {
@@ -218,7 +218,7 @@ createApp({
                 this.sessionId = 'session_' + Date.now();
                 this.activeNav = 'newChat';
                 this.showAuth = false;
-                if (['/knowledges', '/try'].includes(this.page)) await this.loadKnowledges();
+                if (['/workspace/knowledges', '/try'].includes(this.page)) await this.loadKnowledges();
             } catch (error) {
                 alert(error.message);
             } finally {
@@ -493,14 +493,14 @@ createApp({
         },
 
         handleUploadClick() {
-            this.navigate('/knowledges');
+            this.navigate('/workspace/knowledges');
         },
 
         handleSettings() {
             if (!this.isAuthenticated) return;
             this.activeNav = 'settings';
             this.showHistorySidebar = false;
-            this.navigate('/knowledges');
+            this.navigate('/workspace/knowledges');
         },
 
         async loadKnowledges() {
@@ -526,7 +526,7 @@ createApp({
                     this.selectedKnowledgeId = this.knowledges[0]?.id || '';
                 }
                 this.syncKnowledgeEdit();
-                if (this.page === '/knowledges') await this.loadDocuments();
+                if (this.page === '/workspace/knowledges') await this.loadDocuments();
             } catch (error) {
                 this.setNotice('加载知识库失败：' + error.message);
             } finally {
@@ -627,7 +627,7 @@ createApp({
                     knowledge.ready_document_count = this.documents.filter(item => item.status === 'ready').length;
                     knowledge.has_ready_documents = knowledge.ready_document_count > 0;
                 }
-                if (this.page === '/knowledges' && this.documents.some(item => ['pending', 'processing', 'replacing', 'deleting'].includes(item.status))) {
+                if (this.page === '/workspace/knowledges' && this.documents.some(item => ['pending', 'processing', 'replacing', 'deleting'].includes(item.status))) {
                     this.documentPollTimer = setTimeout(() => this.loadDocuments(), 2500);
                 }
             } catch (error) {

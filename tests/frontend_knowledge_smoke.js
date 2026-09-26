@@ -36,7 +36,7 @@ app.authFetch = async (url, options = {}) => {
 (async () => {
   app.handleUploadClick();
   await new Promise(setImmediate);
-  assert.equal(app.page, '/knowledges');
+  assert.equal(app.page, '/workspace/knowledges');
   assert.deepEqual(requests.slice(0, 2), [
     'GET /knowledges', `GET /knowledges/${knowledgeId}/documents`,
   ]);

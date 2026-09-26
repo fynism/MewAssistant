@@ -31,7 +31,7 @@
                 <a href="/" @click.prevent="navigate('/')" :class="['nav-btn', {active: page === '/'}]"><i class="fas fa-house"></i> 平台首页</a>
                 <a href="/services/knowledge" @click.prevent="navigate('/services/knowledge')" :class="['nav-btn', {active: page === '/services/knowledge'}]"><i class="fas fa-layer-group"></i> 知识库 MCP</a>
                 <span class="nav-caption">WORKSPACE</span>
-                <a href="/knowledges" @click.prevent="navigate('/knowledges')" :class="['nav-btn', {active: page === '/knowledges'}]"><i class="fas fa-book-open"></i> 我的知识库</a>
+                <a href="/workspace/knowledges" @click.prevent="navigate('/workspace/knowledges')" :class="['nav-btn', {active: page === '/workspace/knowledges'}]"><i class="fas fa-book-open"></i> 我的知识库</a>
                 <a href="/try" @click.prevent="navigate('/try')" :class="['nav-btn', {active: page === '/try'}]"><i class="fas fa-flask"></i> 试一下</a>
                 <a href="/account" @click.prevent="navigate('/account')" :class="['nav-btn', {active: page === '/account'}]"><i class="fas fa-user-circle"></i> 个人管理</a>
             </nav>
@@ -56,7 +56,7 @@
                 <section class="path-strip"><div><b>01</b><span>受邀注册</span></div><div><b>02</b><span>上传资料</span></div><div><b>03</b><span>站内试用</span></div></section>
             </div>
 
-            <div v-if="page === '/services/knowledge'" class="platform-page service-page"><div class="eyebrow">SERVICES / KNOWLEDGE <span>01</span></div><div class="page-intro"><span class="pill">当前可站内试用</span><h1>知识库 MCP</h1><p>为自己的文件建立可检索的私有知识库。你可以先在站内调用两个只读工具，查看知识库列表与原始检索片段。</p><div class="hero-actions"><a href="/knowledges" @click.prevent="navigate('/knowledges')" class="btn-primary">管理我的知识库 <i class="fas fa-arrow-right"></i></a><a href="/try" @click.prevent="navigate('/try')" class="text-link">试一下工具 ↗</a></div></div><div class="service-status"><i class="fas fa-circle-info"></i><div><strong>远程 MCP 接入即将开放</strong><p>当前提供站内工具调试；服务地址、个人 API Key 与客户端配置将在后续阶段提供。</p></div></div><div class="section-heading"><div><span class="kicker">TOOLS</span><h2>两项基础能力</h2></div></div><div class="tool-grid"><article><span class="tool-no">01 / DISCOVER</span><h3>listKnowledges</h3><p>列出当前账号可用的知识库及可检索状态。</p><dl><dt>输入</dt><dd>可选 limit、cursor</dd><dt>输出</dt><dd>知识库列表、下一页游标</dd></dl></article><article><span class="tool-no">02 / RETRIEVE</span><h3>retrieve</h3><p>在所选知识库中查找相关片段，返回文件与位置来源。只返回检索结果，不生成回答。</p><dl><dt>输入</dt><dd>query、knowledgeIds、topK</dd><dt>输出</dt><dd>命中片段、知识库/文件来源、状态</dd></dl></article></div><div class="section-heading"><div><span class="kicker">GET STARTED</span><h2>三步开始</h2></div></div><div class="steps-grid"><div><b>01</b><h3>创建知识库</h3><p>为不同主题分别建库，资料只对自己可见。</p></div><div><b>02</b><h3>上传文件</h3><p>等待文件处理为“可检索”。</p></div><div><b>03</b><h3>试调工具</h3><p>在“试一下”查看原始结果或与 Agent 对话。</p></div></div></div>
+            <div v-if="page === '/services/knowledge'" class="platform-page service-page"><div class="eyebrow">SERVICES / KNOWLEDGE <span>01</span></div><div class="page-intro"><span class="pill">当前可站内试用</span><h1>知识库 MCP</h1><p>为自己的文件建立可检索的私有知识库。你可以先在站内调用两个只读工具，查看知识库列表与原始检索片段。</p><div class="hero-actions"><a href="/workspace/knowledges" @click.prevent="navigate('/workspace/knowledges')" class="btn-primary">管理我的知识库 <i class="fas fa-arrow-right"></i></a><a href="/try" @click.prevent="navigate('/try')" class="text-link">试一下工具 ↗</a></div></div><div class="service-status"><i class="fas fa-circle-info"></i><div><strong>远程 MCP 接入即将开放</strong><p>当前提供站内工具调试；服务地址、个人 API Key 与客户端配置将在后续阶段提供。</p></div></div><div class="section-heading"><div><span class="kicker">TOOLS</span><h2>两项基础能力</h2></div></div><div class="tool-grid"><article><span class="tool-no">01 / DISCOVER</span><h3>listKnowledges</h3><p>列出当前账号可用的知识库及可检索状态。</p><dl><dt>输入</dt><dd>可选 limit、cursor</dd><dt>输出</dt><dd>知识库列表、下一页游标</dd></dl></article><article><span class="tool-no">02 / RETRIEVE</span><h3>retrieve</h3><p>在所选知识库中查找相关片段，返回文件与位置来源。只返回检索结果，不生成回答。</p><dl><dt>输入</dt><dd>query、knowledgeIds、topK</dd><dt>输出</dt><dd>命中片段、知识库/文件来源、状态</dd></dl></article></div><div class="section-heading"><div><span class="kicker">GET STARTED</span><h2>三步开始</h2></div></div><div class="steps-grid"><div><b>01</b><h3>创建知识库</h3><p>为不同主题分别建库，资料只对自己可见。</p></div><div><b>02</b><h3>上传文件</h3><p>等待文件处理为“可检索”。</p></div><div><b>03</b><h3>试调工具</h3><p>在“试一下”查看原始结果或与 Agent 对话。</p></div></div></div>
 
             <div v-if="page === '/account' && isAuthenticated" class="platform-page account-page"><div class="eyebrow">WORKSPACE / ACCOUNT</div><div class="page-intro"><span class="pill">个人空间</span><h1>个人管理</h1><p>查看当前登录身份与后续开放的接入能力。</p></div><div class="account-card"><span class="kicker">ACCOUNT</span><div class="account-avatar">{{ currentUser.username.slice(0, 1).toUpperCase() }}</div><h2>{{ currentUser.username }}</h2><p>角色：{{ currentUser.role }}</p></div><div class="service-status"><i class="fas fa-key"></i><div><strong>个人 API Key · 后续开放</strong><p>当前版本使用登录态进行站内试用。密钥创建、撤销与远程 MCP 客户端连接将在 M3 提供。</p></div></div></div>
 
@@ -80,7 +80,7 @@
             </div></div>
 
             <!-- Private knowledge panel -->
-            <div v-if="isAuthenticated && page === '/knowledges'" class="settings-panel">
+            <div v-if="isAuthenticated && page === '/workspace/knowledges'" class="settings-panel">
                 <div class="eyebrow">WORKSPACE / KNOWLEDGES</div>
                 <div class="settings-header">
                     <h2>我的知识库</h2>
@@ -187,8 +187,8 @@
 
             <div v-if="isAuthenticated && page === '/try'" class="try-workbench">
                 <div class="eyebrow">WORKSPACE / TRY IT <span>站内试用</span></div>
-                <div class="try-heading"><div><h1>试一下</h1><p>选择本轮知识库范围，然后在 Agent 对话或原始工具调试中检验结果。</p></div><a href="/knowledges" @click.prevent="navigate('/knowledges')" class="text-link">管理知识库 ↗</a></div>
-                <div class="scope-box"><div class="scope-title"><strong>检索范围</strong><span>切换仅影响下一条消息；调试工具使用当前选择。</span></div><div class="scope-options"><label v-for="knowledge in knowledges" :key="knowledge.id"><input type="checkbox" :value="knowledge.id" v-model="selectedKnowledgeIds" /><span>{{ knowledge.name }}</span><small>{{ knowledge.has_ready_documents ? '可检索' : '暂无可检索文件' }}</small></label><span v-if="!knowledges.length" class="empty-scope">还没有知识库。<a href="/knowledges" @click.prevent="navigate('/knowledges')">先创建并上传文件 ↗</a></span></div><p class="scope-summary">当前：{{ selectedScopeLabel }}。<span v-if="!selectedKnowledgeIds.length">本次调用将使用空范围。</span></p></div>
+                <div class="try-heading"><div><h1>试一下</h1><p>选择本轮知识库范围，然后在 Agent 对话或原始工具调试中检验结果。</p></div><a href="/workspace/knowledges" @click.prevent="navigate('/workspace/knowledges')" class="text-link">管理知识库 ↗</a></div>
+                <div class="scope-box"><div class="scope-title"><strong>检索范围</strong><span>切换仅影响下一条消息；调试工具使用当前选择。</span></div><div class="scope-options"><label v-for="knowledge in knowledges" :key="knowledge.id"><input type="checkbox" :value="knowledge.id" v-model="selectedKnowledgeIds" /><span>{{ knowledge.name }}</span><small>{{ knowledge.has_ready_documents ? '可检索' : '暂无可检索文件' }}</small></label><span v-if="!knowledges.length" class="empty-scope">还没有知识库。<a href="/workspace/knowledges" @click.prevent="navigate('/workspace/knowledges')">先创建并上传文件 ↗</a></span></div><p class="scope-summary">当前：{{ selectedScopeLabel }}。<span v-if="!selectedKnowledgeIds.length">本次调用将使用空范围。</span></p></div>
                 <div class="try-tabs"><button :class="{active: tryMode === 'chat'}" @click="tryMode = 'chat'">Agent 对话</button><button :class="{active: tryMode === 'debug'}" @click="tryMode = 'debug'">工具调试</button></div>
                 <div v-if="tryMode === 'chat'" class="try-toolbar"><button @click="handleNewChat"><i class="fas fa-plus"></i> 新建会话</button><button @click="handleHistory"><i class="fas fa-clock-rotate-left"></i> 历史记录</button><button @click="handleClearChat"><i class="fas fa-trash"></i> 清空当前</button></div>
             </div>
@@ -445,3 +445,4 @@
     <script src="/script.js"></script>
 </body>
 </html>
+

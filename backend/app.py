@@ -12,7 +12,7 @@ from backend.observability import logger, request_id
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
-FRONTEND_ROUTES = {"services/knowledge", "account", "knowledges", "try"}
+FRONTEND_ROUTES = {"services/knowledge", "account", "workspace/knowledges", "try"}
 
 
 def create_app() -> FastAPI:
