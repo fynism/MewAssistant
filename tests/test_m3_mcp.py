@@ -71,10 +71,13 @@ class McpProtocolTests(unittest.TestCase):
         self.assertEqual(set(schemas), {"listKnowledges", "retrieve"})
         self.assertIn("knowledgeIds", schemas["retrieve"]["inputSchema"]["required"])
         self.assertTrue(schemas["retrieve"]["inputSchema"]["properties"]["knowledgeIds"]["uniqueItems"])
+        self.assertEqual(schemas["retrieve"]["inputSchema"]["properties"]["knowledgeIds"]["minItems"], 1)
+        self.assertIn("outputSchema", schemas["retrieve"])
         listed = self.post({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
             "name": "listKnowledges", "arguments": {}}})
         self.assertEqual(listed.status_code, 200, listed.text)
         self.assertEqual([item["id"] for item in listed.json()["result"]["structuredContent"]["items"]], ["alice-kb"])
+        self.assertIn("alice-kb", listed.json()["result"]["content"][0]["text"])
         denied = self.post({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {
             "name": "retrieve", "arguments": {"query": "secret", "knowledgeIds": ["bob-kb"]}}})
         self.assertEqual(denied.status_code, 200, denied.text)

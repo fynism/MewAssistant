@@ -15,7 +15,7 @@ createApp({
             createdApiKey: '',
             apiKeyBusy: false,
             apiKeyError: '',
-            services: [{ id: 'knowledge', category: 'KNOWLEDGE', name: '知识库 MCP', description: '把私有文件转为可检索知识，先通过站内工具验证结果与来源。', tools: ['listKnowledges', 'retrieve'], path: '/services/knowledge' }],
+            services: [{ id: 'knowledge', category: 'KNOWLEDGE', name: '知识库 MCP', description: '把私有文件转为可检索知识，通过站内试用和标准 MCP 工具接入。', tools: ['listKnowledges', 'retrieve'], path: '/services/knowledge' }],
             abortController: null,
             sessionId: 'session_' + Date.now(),
             sessions: [],

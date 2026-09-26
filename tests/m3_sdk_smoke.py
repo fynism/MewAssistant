@@ -19,10 +19,10 @@ async def main():
                 names = {tool.name for tool in tools.tools}
                 assert names == {"listKnowledges", "retrieve"}, names
                 result = await session.call_tool("listKnowledges", {})
-                assert not result.isError, result
-                print("protocol:", initialized.protocolVersion)
+                assert not result.is_error, result
+                print("protocol:", initialized.protocol_version)
                 print("tools:", sorted(names))
-                print("knowledge_count:", len(result.structuredContent["items"]))
+                print("knowledge_count:", len(result.structured_content["items"]))
 
 
 if __name__ == "__main__":

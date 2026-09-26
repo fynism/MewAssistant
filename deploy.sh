@@ -18,7 +18,17 @@ done
 git pull --ff-only origin main
 docker compose config --quiet
 docker compose pull
-docker compose up -d --no-build
+
+# M3 startup requires the API Key migration. Keep a PostgreSQL snapshot before
+# upgrading so a failed application release can be rolled back without dropping keys.
+docker compose up -d --wait --no-build postgres redis standalone
+backup_dir="${SUPERMEW_BACKUP_DIR:-/opt/supermew-backups}"
+mkdir -p "$backup_dir"
+backup_file="$backup_dir/supermew-$(date -u +%Y%m%dT%H%M%SZ).sql"
+docker compose exec -T postgres sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U postgres -d langchain_app' > "$backup_file"
+echo "Database backup: $backup_file"
+docker compose run --rm --no-deps app alembic upgrade head
+docker compose up -d --no-build app
 
 echo "Waiting for the application (first boot downloads the embedding model)..."
 for _ in $(seq 1 90); do

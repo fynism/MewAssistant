@@ -4,6 +4,22 @@ Agent的项目记录，方便后续持续更新与展示。
 
 > M1：注册使用管理员创建的一次性邀请码。旧 `.env` 中的 `ADMIN_INVITE_CODE` 已停用；首次管理员运行 `uv run python -m backend.admin_bootstrap --username admin` 创建，登录后调用 `POST /admin/invitations` 获取新的 `invite_code`。启动前先运行 `uv run alembic upgrade head`。
 
+## M3 远程知识库 MCP
+
+站内登录后可在“个人管理”创建、查看元信息和撤销个人 API Key；明文只在创建时返回一次。知识库服务使用官方 Python MCP SDK `2.2.0`，端点为 `/mcp/knowledge`，提供 `listKnowledges`、`retrieve`。`retrieve` 必须指定 1–20 个不重复的 `knowledgeIds`，只返回原始检索片段。
+
+部署前备份 PostgreSQL 并运行 `uv run alembic upgrade head`。配置 `.env` 中的 `MCP_PUBLIC_BASE_URL=https://你的域名`、`MCP_ALLOWED_HOSTS=你的域名,localhost:*,127.0.0.1:*`；参考 [`deploy/nginx-mcp.conf.example`](deploy/nginx-mcp.conf.example) 保留认证和 MCP 请求头。完成实际 HTTPS 与客户端验收后设置 `MCP_EXTERNAL_ENABLED=true`，页面才会显示远程地址。个人 Key 是 Bearer 凭证，暂不支持 OAuth 自动授权。
+
+Codex CLI 的配置示例（把 Key 只放在 Codex 运行环境的环境变量中）：
+
+```toml
+[mcp_servers.supermew_knowledge]
+url = "https://你的域名/mcp/knowledge"
+bearer_token_env_var = "SUPERMEW_MCP_API_KEY"
+```
+
+本地验收：`uv run python tests/m3_local_integration.py` 会在临时数据库运行迁移、启动 HTTP 服务，用官方 SDK 验证双用户隔离、两个工具和撤销。Docker 中的 Milvus 可用时追加 `--milvus`，会在随机测试 collection 中上传并检索两份同名文件。真实部署后可用 `MCP_URL`、`MCP_API_KEY` 环境变量运行 `uv run python tests/m3_sdk_smoke.py`。服务端默认关闭远程入口；未完成 HTTPS 发布验收时保持关闭。
+
 [![zread](https://img.shields.io/badge/Ask_Zread-_.svg?style=plastic&color=00b0aa&labelColor=000000&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQuOTYxNTYgMS42MDAxSDIuMjQxNTZDMS44ODgxIDEuNjAwMSAxLjYwMTU2IDEuODg2NjQgMS42MDE1NiAyLjI0MDFWNC45NjAxQzEuNjAxNTYgNS4zMTM1NiAxLjg4ODEgNS42MDAxIDIuMjQxNTYgNS42MDAxSDQuOTYxNTZDNS4zMTUwMiA1LjYwMDEgNS42MDE1NiA1LjMxMzU2IDUuNjAxNTYgNC45NjAxVjIuMjQwMUM1LjYwMTU2IDEuODg2NjQgNS4zMTUwMiAxLjYwMDEgNC45NjE1NiAxLjYwMDFaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00Ljk2MTU2IDEwLjM5OTlIMi4yNDE1NkMxLjg4ODEgMTAuMzk5OSAxLjYwMTU2IDEwLjY4NjQgMS42MDE1NiAxMS4wMzk5VjEzLjc1OTlDMS42MDE1NiAxNC4xMTM0IDEuODg4MSAxNC4zOTk5IDIuMjQxNTYgMTQuMzk5OUg0Ljk2MTU2QzUuMzE1MDIgMTQuMzk5OSA1LjYwMTU2IDE0LjExMzQgNS42MDE1NiAxMy43NTk5VjExLjAzOTlDNS42MDE1NiAxMC42ODY0IDUuMzE1MDIgMTAuMzk5OSA0Ljk2MTU2IDEwLjM5OTlaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik0xMy43NTg0IDEuNjAwMUgxMS4wMzg0QzEwLjY4NSAxLjYwMDEgMTAuMzk4NCAxLjg4NjY0IDEwLjM5ODQgMi4yNDAxVjQuOTYwMUMxMC4zOTg0IDUuMzEzNTYgMTAuNjg1IDUuNjAwMSAxMS4wMzg0IDUuNjAwMUgxMy43NTg0QzE0LjExMTkgNS42MDAxIDE0LjM5ODQgNS4zMTM1NiAxNC4zOTg0IDQuOTYwMVYyLjI0MDFDMTQuMzk4NCAxLjg4NjY0IDE0LjExMTkgMS42MDAxIDEzLjc1ODQgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8cGF0aCBkPSJNNCAxMkwxMiA0TDQgMTJaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00IDEyTDEyIDQiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K&logoColor=ffffff)](https://zread.ai/fynism/MewAssistant)
 
 ## 本地部署
