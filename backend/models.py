@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.database import Base
@@ -100,6 +100,10 @@ class KnowledgeDocument(Base):
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
     error_summary: Mapped[str | None] = mapped_column(String(500), nullable=True)
     legacy_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    replacement_storage_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    replacement_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    replacement_file_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    replacement_old_ready: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 

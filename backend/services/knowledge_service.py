@@ -83,19 +83,14 @@ def _verify_file(data: bytes, suffix: str) -> None:
 
 async def save_upload(db: Session, owner_id: int, knowledge_id: str, file: UploadFile) -> KnowledgeDocument:
     get_owned_knowledge(db, owner_id, knowledge_id)
-    filename = ntpath.basename(file.filename or "").strip()
-    suffix = Path(filename).suffix.lower()
-    if not filename or filename in {".", ".."} or suffix not in ALLOWED_EXTENSIONS or "\x00" in filename:
-        raise HTTPException(status_code=400, detail="仅支持 PDF、Word、Excel 文档")
-    data = await file.read(settings.max_upload_bytes + 1)
-    _verify_file(data, suffix)
+    filename, suffix, data = await _read_upload(file)
     doc_id = str(uuid4())
     storage_key = doc_id + suffix
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
     path = STORAGE_DIR / storage_key
     path.write_bytes(data)
     item = KnowledgeDocument(id=doc_id, knowledge_id=knowledge_id,
-        filename=filename[:255], storage_key=storage_key, file_type=suffix, status="pending")
+        filename=filename, storage_key=storage_key, file_type=suffix, status="pending")
     try:
         db.add(item)
         db.commit()
@@ -106,12 +101,54 @@ async def save_upload(db: Session, owner_id: int, knowledge_id: str, file: Uploa
     return item
 
 
-def _cleanup_vectors(db: Session, item: KnowledgeDocument) -> None:
+async def _read_upload(file: UploadFile) -> tuple[str, str, bytes]:
+    filename = ntpath.basename(file.filename or "").strip()
+    suffix = Path(filename).suffix.lower()
+    if not filename or filename in {".", ".."} or suffix not in ALLOWED_EXTENSIONS or "\x00" in filename:
+        raise HTTPException(status_code=400, detail="仅支持 PDF、Word、Excel 文档")
+    data = await file.read(settings.max_upload_bytes + 1)
+    _verify_file(data, suffix)
+    return filename[:255], suffix, data
+
+
+async def replace_document(db: Session, owner_id: int, knowledge_id: str,
+                           document_id: str, file: UploadFile) -> KnowledgeDocument:
+    get_owned_knowledge(db, owner_id, knowledge_id)
+    filename, suffix, data = await _read_upload(file)
+    item = db.query(KnowledgeDocument).filter(
+        KnowledgeDocument.id == document_id,
+        KnowledgeDocument.knowledge_id == knowledge_id,
+    ).with_for_update().first()
+    if item is None:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    if item.status not in {"ready", "failed"}:
+        raise HTTPException(status_code=409, detail="文件当前状态不允许替换")
+    storage_key = str(uuid4()) + suffix
+    STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+    path = STORAGE_DIR / storage_key
+    path.write_bytes(data)
+    try:
+        item.replacement_storage_key = storage_key
+        item.replacement_filename = filename
+        item.replacement_file_type = suffix
+        item.replacement_old_ready = item.status == "ready"
+        item.status = "replacing"
+        item.error_summary = None
+        item.updated_at = datetime.utcnow()
+        db.commit()
+    except Exception:
+        db.rollback()
+        path.unlink(missing_ok=True)
+        raise
+    return item
+
+
+def _cleanup_vectors(db: Session, item: KnowledgeDocument, remove_bm25: bool = False) -> None:
     milvus_manager.init_collection()
     expr = f'document_id == "{item.id}"'
     rows = milvus_manager.query_all(filter_expr=expr, output_fields=["text"])
     milvus_manager.delete(expr)
-    if rows and item.status in {"ready", "deleting"}:
+    if rows and (remove_bm25 or item.status in {"ready", "deleting"}):
         embedding_service.increment_remove_documents([r.get("text", "") for r in rows])
     db.query(KnowledgeParentChunk).filter(KnowledgeParentChunk.document_id == item.id).delete()
     db.commit()
@@ -121,14 +158,27 @@ def process_document(document_id: str) -> None:
     db = SessionLocal()
     try:
         item = db.query(KnowledgeDocument).filter(KnowledgeDocument.id == document_id).with_for_update(skip_locked=True).first()
-        if item is None or item.status not in {"pending", "failed"}:
+        if item is None or item.status not in {"pending", "failed", "replacing"}:
             return
         item.status = "processing"
         item.error_summary = None
         item.updated_at = datetime.utcnow()
         db.commit()
         try:
-            _cleanup_vectors(db, item)
+            if item.replacement_storage_key:
+                _cleanup_vectors(db, item, remove_bm25=item.replacement_old_ready)
+                old_storage_key = item.storage_key
+                item.storage_key = item.replacement_storage_key
+                item.filename = item.replacement_filename
+                item.file_type = item.replacement_file_type
+                item.replacement_storage_key = None
+                item.replacement_filename = None
+                item.replacement_file_type = None
+                item.replacement_old_ready = False
+                db.commit()
+                (STORAGE_DIR / old_storage_key).unlink(missing_ok=True)
+            else:
+                _cleanup_vectors(db, item)
             path = STORAGE_DIR / item.storage_key
             chunks = document_loader.load_document(str(path), item.filename, item.id, item.knowledge_id)
             parents = [c for c in chunks if c["chunk_level"] in (1, 2)]
@@ -149,7 +199,7 @@ def process_document(document_id: str) -> None:
         except Exception:
             db.rollback()
             try:
-                _cleanup_vectors(db, item)
+                _cleanup_vectors(db, item, remove_bm25=item.replacement_old_ready)
             except Exception:
                 db.rollback()
             item.status = "failed"
@@ -173,7 +223,7 @@ def recover_pending_documents(include_stale_processing: bool = False) -> int:
             ).update({"status": "pending"}, synchronize_session=False)
         db.commit()
         ids = [row[0] for row in db.query(KnowledgeDocument.id).filter(
-            KnowledgeDocument.status == "pending").all()]
+            KnowledgeDocument.status.in_(["pending", "replacing"])).all()]
     finally:
         db.close()
     for document_id in ids:
@@ -182,6 +232,12 @@ def recover_pending_documents(include_stale_processing: bool = False) -> int:
 
 
 def delete_document(db: Session, item: KnowledgeDocument) -> None:
+    item = db.query(KnowledgeDocument).filter(
+        KnowledgeDocument.id == item.id,
+        KnowledgeDocument.knowledge_id == item.knowledge_id,
+    ).with_for_update().first()
+    if item is None:
+        raise HTTPException(status_code=404, detail="文件不存在")
     # Processing owns the index write. A deletion during that write could leave
     # vectors behind after the cleanup query has already run.
     if item.status == "processing":
@@ -190,6 +246,8 @@ def delete_document(db: Session, item: KnowledgeDocument) -> None:
     db.commit()
     _cleanup_vectors(db, item)
     (STORAGE_DIR / item.storage_key).unlink(missing_ok=True)
+    if item.replacement_storage_key:
+        (STORAGE_DIR / item.replacement_storage_key).unlink(missing_ok=True)
     db.delete(item)
     db.commit()
 

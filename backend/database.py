@@ -24,8 +24,8 @@ def init_db() -> None:
         raise RuntimeError("数据库尚未迁移：先运行 uv run alembic upgrade head")
     with engine.connect() as connection:
         version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
-    if version not in {"0001_m1", "0002_m1_title"}:
-        raise RuntimeError("数据库版本不是 M1：先运行 uv run alembic upgrade head")
+    if version != "0003_m2_replace":
+        raise RuntimeError("数据库版本不是 M2：先运行 uv run alembic upgrade head")
     columns = {column["name"] for column in inspector.get_columns("chat_sessions")}
     if "title" not in columns:
         raise RuntimeError("chat_sessions.title 缺失：先运行 uv run alembic upgrade head")
