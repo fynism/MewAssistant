@@ -31,6 +31,11 @@ class Settings:
     jwt_expire_minutes: int = int(os.getenv("JWT_EXPIRE_MINUTES", "1440"))
     password_pbkdf2_rounds: int = int(os.getenv("PASSWORD_PBKDF2_ROUNDS", "310000"))
 
+    mcp_public_base_url: str = os.getenv("MCP_PUBLIC_BASE_URL", "")
+    mcp_allowed_hosts: str = os.getenv("MCP_ALLOWED_HOSTS", "localhost:*,127.0.0.1:*,testserver")
+    mcp_allowed_origins: str = os.getenv("MCP_ALLOWED_ORIGINS", "")
+    mcp_external_enabled: bool = os.getenv("MCP_EXTERNAL_ENABLED", "false").lower() == "true"
+
     ark_api_key: str | None = os.getenv("ARK_API_KEY")
     model: str | None = os.getenv("MODEL")
     base_url: str | None = os.getenv("BASE_URL")
