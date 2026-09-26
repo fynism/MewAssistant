@@ -4,16 +4,21 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 let component;
+const globalLocation = { pathname: '/try', search: '' };
 const source = fs.readFileSync('frontend/script.js', 'utf8');
 vm.runInNewContext(source, {
   Vue: { createApp(options) { component = options; return { mount() {} }; } },
   localStorage: { getItem() { return ''; } },
-  FormData, Blob, setTimeout() {}, confirm() { return true; }, console,
+  window: { location: globalLocation, history: { pushState(_, __, path) { globalLocation.pathname = path; } } },
+  fetch: async () => ({ ok: true, json: async () => ({ allowed_extensions: ['.pdf'], max_upload_bytes: 1000000 }) }),
+  URLSearchParams, FormData, Blob, setTimeout() {}, clearTimeout() {}, confirm() { return true; }, console,
 });
 
 const app = Object.assign(component.data(), component.methods);
 Object.defineProperty(app, 'isAuthenticated', { get() { return true; } });
+Object.defineProperty(app, 'selectedKnowledge', { get() { return app.knowledges.find(item => item.id === app.selectedKnowledgeId); } });
 app.currentUser = { username: 'alice', role: 'user' };
+app.$nextTick = fn => fn();
 app.$refs = { fileInput: { value: '' } };
 const requests = [];
 const knowledgeId = '11111111-1111-1111-1111-111111111111';
@@ -31,11 +36,11 @@ app.authFetch = async (url, options = {}) => {
 (async () => {
   app.handleUploadClick();
   await new Promise(setImmediate);
-  assert.equal(app.activeNav, 'settings');
+  assert.equal(app.page, '/knowledges');
   assert.deepEqual(requests.slice(0, 2), [
     'GET /knowledges', `GET /knowledges/${knowledgeId}/documents`,
   ]);
-  app.selectedFile = new Blob(['test']);
+  app.selectedFile = new Blob(['test']); app.selectedFile.name = 'same.pdf';
   await app.uploadDocument();
   assert(requests.includes(`POST /knowledges/${knowledgeId}/documents`));
   await app.deleteDocument({ id: 'doc', filename: 'same.pdf' });

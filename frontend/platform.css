@@ -88,6 +88,36 @@ body { display: block; height: 100vh; overflow: hidden; background: var(--paper)
 .auth-form input { width: 100%; border: 1px solid #d3dfd4; padding: 12px 13px; border-radius: 7px; }
 .auth-submit { justify-content: center; }
 .auth-switch { background: none; border: 0; color: #206a4c; cursor: pointer; padding: 10px; }
+.settings-panel { max-width: 1020px; padding: 38px 50px 90px; margin: 0 auto; overflow: visible; }
+.settings-header { margin: 32px 0 28px; }
+.settings-header h2 { font: 800 38px Manrope,'Microsoft YaHei',sans-serif; letter-spacing: -.05em; color: var(--ink); }
+.settings-header p { font-size: 14px; color: #63786d; margin-top: 9px; }
+.upload-section, .documents-section { background: #fff; border: 1px solid var(--line); border-radius: 13px; padding: 24px; margin-bottom: 18px; box-shadow: none; }
+.upload-section h3, .documents-section h3 { color: var(--ink); font-size: 16px; }
+.knowledge-controls { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 17px; }
+.knowledge-controls select, .knowledge-controls input, .knowledge-detail input, .knowledge-detail textarea { border: 1px solid #d3dfd4; background: #fff; border-radius: 7px; padding: 11px 12px; font: inherit; color: var(--ink); }
+.knowledge-controls select { min-width: 220px; }
+.knowledge-controls input { flex: 1; min-width: 180px; }
+.knowledge-detail label { display: flex; flex-direction: column; gap: 7px; font-size: 12px; font-weight: 700; color: #4c6657; margin: 13px 0; }
+.knowledge-detail textarea { resize: vertical; min-height: 78px; }
+.knowledge-detail .section-heading { margin-bottom: 16px; }
+.knowledge-detail .section-heading h3 { font: 800 18px Manrope,'Microsoft YaHei',sans-serif; margin: 5px 0 0; }
+.ready-badge { font-size: 11px; padding: 7px 10px; border-radius: 100px; background: #e7f2e6; color: #236647; }
+.detail-actions { display: flex; gap: 9px; flex-wrap: wrap; align-items: center; margin-top: 17px; }
+.detail-actions .btn-secondary { text-decoration: none; }
+.upload-limits { color: #75877b; font-size: 12px; margin: 9px 0 18px; }
+.platform-notice { position: relative; background: #e6f1e4; color: #285742; border: 1px solid #cde3d0; border-radius: 8px; padding: 12px 40px 12px 14px; font-size: 13px; margin: 12px 0; }
+.platform-notice button { position: absolute; right: 12px; top: 7px; background: none; border: 0; color: inherit; cursor: pointer; font-size: 18px; }
+.status-chip { display: inline-flex; padding: 3px 7px; border-radius: 4px; background: #f1f3ed; color: #59745e; font-weight: 700; }
+.status-ready { background: #e5f3e7; color: #267047; }
+.status-failed { background: #fff0eb; color: #b14a35; }
+.status-processing, .status-pending, .status-replacing { background: #fff3d8; color: #856324; }
+.document-item { gap: 10px; }
+.document-info { min-width: 0; }
+.document-details { min-width: 0; }
+.document-name { overflow-wrap: anywhere; }
+.document-meta { flex-wrap: wrap; }
+.documents-list .btn-secondary, .documents-list .btn-danger { flex-shrink: 0; }
 
 @media(max-width:800px) {
   body { overflow: auto; }
@@ -101,6 +131,9 @@ body { display: block; height: 100vh; overflow: hidden; background: var(--paper)
   .sidebar-footer .user-badge { display: none; }
   .main-content { overflow: visible; }
   .platform-page { padding: 25px 20px 60px; }
+  .settings-panel { padding: 25px 17px 60px; }
+  .upload-section, .documents-section { padding: 17px; }
+  .document-item { flex-wrap: wrap; }
   .hero { grid-template-columns: 1fr; gap: 28px; padding: 50px 0; }
   .hero-visual { min-height: 300px; }
   .tool-grid, .steps-grid { grid-template-columns: 1fr; }

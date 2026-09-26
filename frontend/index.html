@@ -81,15 +81,17 @@
 
             <!-- Private knowledge panel -->
             <div v-if="isAuthenticated && page === '/knowledges'" class="settings-panel">
+                <div class="eyebrow">WORKSPACE / KNOWLEDGES</div>
                 <div class="settings-header">
-                    <h2><i class="fas fa-book"></i> 我的知识库</h2>
-                    <p>上传自己的文档后，可以在聊天中试试检索效果。</p>
+                    <h2>我的知识库</h2>
+                    <p>按主题管理资料。文件处理完成后，可直接进入站内试用。</p>
                 </div>
+                <p v-if="notice" class="platform-notice" role="status">{{ notice }} <button @click="notice = ''" aria-label="关闭提示">×</button></p>
 
                 <div class="upload-section">
                     <h3>选择知识库</h3>
                     <div class="knowledge-controls">
-                        <select v-model="selectedKnowledgeId" @change="loadDocuments" aria-label="选择知识库">
+                        <select v-model="selectedKnowledgeId" @change="selectKnowledge" aria-label="选择知识库">
                             <option value="">请选择知识库</option>
                             <option v-for="knowledge in knowledges" :key="knowledge.id" :value="knowledge.id">{{ knowledge.name }}</option>
                         </select>
@@ -99,8 +101,16 @@
                     <p v-if="knowledges.length === 0" class="knowledge-hint">先创建一个知识库，再上传文件。</p>
                 </div>
 
+                <div v-if="selectedKnowledge" class="upload-section knowledge-detail">
+                    <div class="section-heading"><div><span class="kicker">SELECTED KNOWLEDGE</span><h3>知识库信息</h3></div><span class="ready-badge">{{ selectedKnowledge.ready_document_count }} 个文件可检索</span></div>
+                    <label>名称<input v-model="knowledgeEdit.name" type="text" maxlength="200" /></label>
+                    <label>描述<textarea v-model="knowledgeEdit.description" rows="3" placeholder="这个知识库收录了什么内容？"></textarea></label>
+                    <div class="detail-actions"><button class="btn-primary" :disabled="knowledgeLoading || !knowledgeEdit.name.trim()" @click="updateKnowledge">保存修改</button><a :href="'/try?knowledge=' + selectedKnowledgeId" @click.prevent="openTryWithKnowledge(selectedKnowledgeId)" class="btn-secondary">去试一下 ↗</a><button class="btn-danger" :disabled="knowledgeLoading" @click="deleteKnowledge">删除知识库</button></div>
+                </div>
+
                 <div v-if="selectedKnowledgeId" class="upload-section">
                     <h3><i class="fas fa-upload"></i> 上传文档</h3>
+                    <p class="upload-limits">支持 {{ knowledgeSettings.allowed_extensions.join('、') || 'PDF、Word、Excel' }}；单文件上限 {{ uploadLimitLabel() }}。</p>
                     <div class="upload-area">
                         <input 
                             type="file" 
@@ -126,6 +136,7 @@
 
                 <div v-if="selectedKnowledgeId" class="documents-section">
                     <h3><i class="fas fa-list"></i> 已上传文档</h3>
+                    <input ref="replaceInput" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx" style="display:none" @change="replaceDocument" />
                     <button @click="loadDocuments" class="btn-secondary">
                         <i class="fas fa-sync"></i> 刷新列表
                     </button>
@@ -153,13 +164,16 @@
                                     <div class="document-name">{{ doc.filename }}</div>
                                     <div class="document-meta">
                                         <span>{{ doc.file_type }}</span>
-                                        <span>{{ documentStatusLabel(doc.status) }}</span>
+                                        <span>{{ new Date(doc.created_at).toLocaleString() }}</span>
+                                        <span :class="['status-chip', 'status-' + doc.status]">{{ documentStatusLabel(doc.status) }}</span>
                                         <span v-if="doc.error_summary">{{ doc.error_summary }}</span>
                                     </div>
                                 </div>
                             </div>
-                            <button v-if="doc.status === 'failed'" @click="retryDocument(doc)" class="btn-secondary" title="重试处理">重试</button>
+                            <button v-if="doc.status === 'failed'" :disabled="documentBusyId === doc.id" @click="retryDocument(doc)" class="btn-secondary" title="重试处理">重试</button>
+                            <button v-if="['ready', 'failed'].includes(doc.status)" :disabled="documentBusyId === doc.id" @click="chooseReplacement(doc)" class="btn-secondary" title="替换文件">替换</button>
                             <button 
+                                :disabled="documentBusyId === doc.id || ['processing', 'replacing'].includes(doc.status)"
                                 @click="deleteDocument(doc)"
                                 class="btn-danger"
                                 title="删除文档"

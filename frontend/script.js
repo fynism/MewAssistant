@@ -19,6 +19,15 @@ createApp({
             documentsLoading: false,
             knowledges: [],
             selectedKnowledgeId: '',
+            selectedKnowledgeIds: [],
+            scopeInitialized: false,
+            knowledgeEdit: { name: '', description: '' },
+            knowledgeSettings: { allowed_extensions: [], max_upload_bytes: 0 },
+            notice: '',
+            documentPollTimer: null,
+            documentRequestId: 0,
+            documentBusyId: '',
+            replacingDocumentId: '',
             newKnowledgeName: '',
             knowledgeLoading: false,
             selectedFile: null,
@@ -45,6 +54,13 @@ createApp({
         },
         isProtectedPage() {
             return ['/account', '/knowledges', '/try'].includes(this.page);
+        },
+        selectedKnowledge() {
+            return this.knowledges.find(item => item.id === this.selectedKnowledgeId) || null;
+        },
+        selectedScopeLabel() {
+            if (!this.selectedKnowledgeIds.length) return '未选择知识库（空范围）';
+            return this.selectedKnowledgeIds.map(id => this.knowledges.find(item => item.id === id)?.name || '已删除的知识库').join('、');
         }
     },
     async mounted() {
@@ -61,19 +77,29 @@ createApp({
     },
     beforeUnmount() {
         window.removeEventListener('popstate', this.syncRoute);
+        this.stopDocumentPolling();
     },
     methods: {
         syncRoute() {
             const path = window.location.pathname.replace(/\/$/, '') || '/';
             this.page = ['/', '/services/knowledge', '/account', '/knowledges', '/try'].includes(path) ? path : '/';
             if (this.page === '/knowledges' || this.page === '/try') this.loadKnowledges();
-            else this.showHistorySidebar = false;
+            if (this.page !== '/knowledges') this.stopDocumentPolling();
+            if (this.page !== '/try') this.showHistorySidebar = false;
         },
         navigate(path) {
             if (this.page !== path) window.history.pushState({}, '', path);
             this.syncRoute();
         },
         openLogin() { this.showAuth = true; },
+        apiError(response, payload, fallback) {
+            const detail = typeof payload.detail === 'string' ? payload.detail : fallback;
+            if (response.status === 409) return `操作冲突：${detail}。请稍后重试。`;
+            if (response.status === 413) return `文件超过大小限制。${detail}`;
+            if (response.status === 403 || response.status === 404) return '资源已删除或无权访问，请刷新列表。';
+            return detail;
+        },
+        setNotice(message) { this.notice = message; },
         configureMarked() {
             marked.setOptions({
                 highlight: function(code, lang) {
@@ -179,6 +205,9 @@ createApp({
             this.documents = [];
             this.knowledges = [];
             this.selectedKnowledgeId = '';
+            this.selectedKnowledgeIds = [];
+            this.scopeInitialized = false;
+            this.stopDocumentPolling();
             this.newKnowledgeName = '';
             this.activeNav = 'newChat';
             this.showHistorySidebar = false;
@@ -437,19 +466,78 @@ createApp({
         async loadKnowledges() {
             this.knowledgeLoading = true;
             try {
+                if (!this.knowledgeSettings.max_upload_bytes) {
+                    const settingsResponse = await fetch('/knowledge-settings');
+                    if (settingsResponse.ok) this.knowledgeSettings = await settingsResponse.json();
+                }
                 const response = await this.authFetch('/knowledges');
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.detail || '加载知识库失败');
                 this.knowledges = data.knowledges || [];
+                const availableIds = new Set(this.knowledges.map(item => item.id));
+                if (!this.scopeInitialized) {
+                    const preselected = new URLSearchParams(window.location.search).get('knowledge');
+                    this.selectedKnowledgeIds = preselected && availableIds.has(preselected) ? [preselected] : this.knowledges.filter(item => item.has_ready_documents).map(item => item.id);
+                    this.scopeInitialized = true;
+                } else {
+                    this.selectedKnowledgeIds = this.selectedKnowledgeIds.filter(id => availableIds.has(id));
+                }
                 if (!this.knowledges.some(item => item.id === this.selectedKnowledgeId)) {
                     this.selectedKnowledgeId = this.knowledges[0]?.id || '';
                 }
-                await this.loadDocuments();
+                this.syncKnowledgeEdit();
+                if (this.page === '/knowledges') await this.loadDocuments();
             } catch (error) {
-                alert('加载知识库失败：' + error.message);
+                this.setNotice('加载知识库失败：' + error.message);
             } finally {
                 this.knowledgeLoading = false;
             }
+        },
+        syncKnowledgeEdit() {
+            this.knowledgeEdit = { name: this.selectedKnowledge?.name || '', description: this.selectedKnowledge?.description || '' };
+        },
+        selectKnowledge() {
+            this.stopDocumentPolling();
+            this.selectedFile = null;
+            this.syncKnowledgeEdit();
+            this.loadDocuments();
+        },
+        openTryWithKnowledge(id) {
+            this.selectedKnowledgeIds = [id];
+            window.history.pushState({}, '', `/try?knowledge=${encodeURIComponent(id)}`);
+            this.syncRoute();
+        },
+        async updateKnowledge() {
+            const id = this.selectedKnowledgeId;
+            const name = this.knowledgeEdit.name.trim();
+            if (!id || !name || this.knowledgeLoading) return;
+            this.knowledgeLoading = true;
+            try {
+                const response = await this.authFetch(`/knowledges/${encodeURIComponent(id)}`, {method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name, description: this.knowledgeEdit.description.trim()})});
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(this.apiError(response, data, '更新失败'));
+                this.knowledges = this.knowledges.map(item => item.id === id ? data : item);
+                this.setNotice('知识库信息已保存。');
+            } catch (error) { this.setNotice(error.message); }
+            finally { this.knowledgeLoading = false; }
+        },
+        async deleteKnowledge() {
+            const id = this.selectedKnowledgeId;
+            const name = this.selectedKnowledge?.name;
+            if (!id || !confirm(`确定删除知识库“${name}”吗？库内文件和索引会一并删除，此操作不可恢复。`)) return;
+            this.knowledgeLoading = true;
+            try {
+                const response = await this.authFetch(`/knowledges/${encodeURIComponent(id)}`, {method: 'DELETE'});
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(this.apiError(response, data, '删除失败'));
+                this.knowledges = this.knowledges.filter(item => item.id !== id);
+                this.selectedKnowledgeIds = this.selectedKnowledgeIds.filter(item => item !== id);
+                this.selectedKnowledgeId = this.knowledges[0]?.id || '';
+                this.syncKnowledgeEdit();
+                await this.loadDocuments();
+                this.setNotice('知识库已删除。现有会话的历史内容仍可查看；后续提问需重新选择知识库。');
+            } catch (error) { this.setNotice(error.message); }
+            finally { this.knowledgeLoading = false; }
         },
 
         async createKnowledge() {
@@ -467,40 +555,68 @@ createApp({
                 this.newKnowledgeName = '';
                 this.knowledges.unshift(data);
                 this.selectedKnowledgeId = data.id;
+                this.syncKnowledgeEdit();
                 await this.loadDocuments();
             } catch (error) {
-                alert('创建知识库失败：' + error.message);
+                this.setNotice('创建知识库失败：' + error.message);
             } finally {
                 this.knowledgeLoading = false;
             }
         },
 
         async loadDocuments() {
-            if (!this.selectedKnowledgeId) {
+            const knowledgeId = this.selectedKnowledgeId;
+            const requestId = ++this.documentRequestId;
+            this.stopDocumentPolling();
+            if (!knowledgeId) {
                 this.documents = [];
                 return;
             }
             this.documentsLoading = true;
             try {
-                const response = await this.authFetch(`/knowledges/${encodeURIComponent(this.selectedKnowledgeId)}/documents`);
+                const response = await this.authFetch(`/knowledges/${encodeURIComponent(knowledgeId)}/documents`);
                 if (!response.ok) {
                     const data = await response.json().catch(() => ({}));
-                    throw new Error(data.detail || 'Failed to load documents');
+                    throw new Error(this.apiError(response, data, '加载文档失败'));
                 }
                 const data = await response.json();
-                this.documents = data.documents;
+                if (this.selectedKnowledgeId !== knowledgeId || requestId !== this.documentRequestId) return;
+                this.documents = data.documents || [];
+                const knowledge = this.knowledges.find(item => item.id === knowledgeId);
+                if (knowledge) {
+                    knowledge.ready_document_count = this.documents.filter(item => item.status === 'ready').length;
+                    knowledge.has_ready_documents = knowledge.ready_document_count > 0;
+                }
+                if (this.page === '/knowledges' && this.documents.some(item => ['pending', 'processing', 'replacing', 'deleting'].includes(item.status))) {
+                    this.documentPollTimer = setTimeout(() => this.loadDocuments(), 2500);
+                }
             } catch (error) {
-                alert('加载文档列表失败：' + error.message);
+                if (this.selectedKnowledgeId === knowledgeId) this.setNotice('加载文档列表失败：' + error.message);
             } finally {
-                this.documentsLoading = false;
+                if (this.selectedKnowledgeId === knowledgeId && requestId === this.documentRequestId) this.documentsLoading = false;
             }
+        },
+        stopDocumentPolling() {
+            if (this.documentPollTimer) clearTimeout(this.documentPollTimer);
+            this.documentPollTimer = null;
+        },
+        validateFile(file) {
+            const ext = '.' + (file.name.split('.').pop() || '').toLowerCase();
+            const allowed = this.knowledgeSettings.allowed_extensions || [];
+            if (allowed.length && !allowed.includes(ext)) return `仅支持 ${allowed.join('、')} 文件。`;
+            if (this.knowledgeSettings.max_upload_bytes && file.size > this.knowledgeSettings.max_upload_bytes) return `文件不能超过 ${this.uploadLimitLabel()}。`;
+            return '';
+        },
+        uploadLimitLabel() {
+            return this.knowledgeSettings.max_upload_bytes ? `${Math.round(this.knowledgeSettings.max_upload_bytes / 1024 / 1024)} MB` : '服务端限制';
         },
 
         handleFileSelect(event) {
             const files = event.target.files;
             if (files && files.length > 0) {
-                this.selectedFile = files[0];
-                this.uploadProgress = '';
+                const error = this.validateFile(files[0]);
+                this.selectedFile = error ? null : files[0];
+                this.uploadProgress = error;
             }
         },
 
@@ -514,31 +630,35 @@ createApp({
                 return;
             }
 
+            const knowledgeId = this.selectedKnowledgeId;
+            const file = this.selectedFile;
+            const validationError = this.validateFile(file);
+            if (validationError) { this.uploadProgress = validationError; return; }
             this.isUploading = true;
             this.uploadProgress = '正在上传...';
 
             try {
                 const formData = new FormData();
-                formData.append('file', this.selectedFile);
+                formData.append('file', file);
 
-                const response = await this.authFetch(`/knowledges/${encodeURIComponent(this.selectedKnowledgeId)}/documents`, {
+                const response = await this.authFetch(`/knowledges/${encodeURIComponent(knowledgeId)}/documents`, {
                     method: 'POST',
                     body: formData
                 });
 
                 if (!response.ok) {
                     const error = await response.json().catch(() => ({}));
-                    throw new Error(error.detail || 'Upload failed');
+                    throw new Error(this.apiError(response, error, '上传失败'));
                 }
 
-                this.uploadProgress = '文件已上传，正在处理；可点击刷新列表查看状态。';
+                this.uploadProgress = '文件已上传，正在处理。状态会自动更新。';
 
                 this.selectedFile = null;
                 if (this.$refs.fileInput) {
                     this.$refs.fileInput.value = '';
                 }
 
-                await this.loadDocuments();
+                if (this.selectedKnowledgeId === knowledgeId) await this.loadDocuments();
 
                 setTimeout(() => {
                     this.uploadProgress = '';
@@ -555,41 +675,69 @@ createApp({
             if (!confirm(`确定要删除文档 "${doc.filename}" 吗？`)) {
                 return;
             }
-
+            const knowledgeId = this.selectedKnowledgeId;
+            this.documentBusyId = doc.id;
             try {
-                const response = await this.authFetch(`/knowledges/${encodeURIComponent(this.selectedKnowledgeId)}/documents/${encodeURIComponent(doc.id)}`, {
+                const response = await this.authFetch(`/knowledges/${encodeURIComponent(knowledgeId)}/documents/${encodeURIComponent(doc.id)}`, {
                     method: 'DELETE'
                 });
 
                 if (!response.ok) {
                     const error = await response.json().catch(() => ({}));
-                    throw new Error(error.detail || 'Delete failed');
+                    throw new Error(this.apiError(response, error, '删除失败'));
                 }
 
-                await this.loadDocuments();
+                if (this.selectedKnowledgeId === knowledgeId) await this.loadDocuments();
 
             } catch (error) {
-                alert('删除文档失败：' + error.message);
-            }
+                this.setNotice('删除文档失败：' + error.message);
+            } finally { this.documentBusyId = ''; }
+        },
+
+        chooseReplacement(doc) {
+            this.replacingDocumentId = doc.id;
+            this.$nextTick(() => this.$refs.replaceInput?.click());
+        },
+        async replaceDocument(event) {
+            const file = event.target.files?.[0];
+            const documentId = this.replacingDocumentId;
+            const knowledgeId = this.selectedKnowledgeId;
+            event.target.value = '';
+            if (!file || !documentId || !knowledgeId) return;
+            const validationError = this.validateFile(file);
+            if (validationError) { this.setNotice(validationError); return; }
+            if (!confirm(`确定用“${file.name}”替换此文档吗？替换开始后旧内容立即退出检索。`)) return;
+            this.documentBusyId = documentId;
+            try {
+                const body = new FormData(); body.append('file', file);
+                const response = await this.authFetch(`/knowledges/${encodeURIComponent(knowledgeId)}/documents/${encodeURIComponent(documentId)}/content`, {method: 'PUT', body});
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(this.apiError(response, data, '替换失败'));
+                this.setNotice('替换任务已开始，旧内容已退出检索；状态会自动更新。');
+                if (this.selectedKnowledgeId === knowledgeId) await this.loadDocuments();
+            } catch (error) { this.setNotice(error.message); }
+            finally { this.documentBusyId = ''; this.replacingDocumentId = ''; }
         },
 
         async retryDocument(doc) {
+            const knowledgeId = this.selectedKnowledgeId;
+            this.documentBusyId = doc.id;
             try {
-                const response = await this.authFetch(`/knowledges/${encodeURIComponent(this.selectedKnowledgeId)}/documents/${encodeURIComponent(doc.id)}/retry`, {
+                const response = await this.authFetch(`/knowledges/${encodeURIComponent(knowledgeId)}/documents/${encodeURIComponent(doc.id)}/retry`, {
                     method: 'POST'
                 });
                 const data = await response.json();
-                if (!response.ok) throw new Error(data.detail || '重试失败');
-                await this.loadDocuments();
+                if (!response.ok) throw new Error(this.apiError(response, data, '重试失败'));
+                if (this.selectedKnowledgeId === knowledgeId) await this.loadDocuments();
             } catch (error) {
-                alert('重试处理失败：' + error.message);
-            }
+                this.setNotice('重试处理失败：' + error.message);
+            } finally { this.documentBusyId = ''; }
         },
 
         documentStatusLabel(status) {
             return {
                 pending: '等待处理', processing: '处理中', ready: '可检索',
-                failed: '处理失败', deleting: '删除中'
+                failed: '处理失败', deleting: '删除中', replacing: '替换中'
             }[status] || status;
         },
 
