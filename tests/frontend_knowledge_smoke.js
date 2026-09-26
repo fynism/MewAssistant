@@ -61,8 +61,12 @@ app.authFetch = async (url, options = {}) => {
   app.selectedKnowledgeIds = [];
   app.debugQuery = '测试检索';
   await app.runDebug('retrieve');
+  assert.equal(payloads.length, 1);
+  assert.equal(app.debugError, '请至少选择一个知识库。');
+  app.selectedKnowledgeIds = [knowledgeId];
+  await app.runDebug('retrieve');
   assert.equal(payloads[1][0], '/tools/debug/retrieve');
-  assert.deepEqual(JSON.parse(JSON.stringify(payloads[1][1].knowledgeIds)), []);
+  assert.deepEqual(JSON.parse(JSON.stringify(payloads[1][1].knowledgeIds)), [knowledgeId]);
   assert.equal(app.debugResult.status, 'no_match');
   console.log('Frontend knowledge attachment smoke passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

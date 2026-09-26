@@ -108,6 +108,7 @@ createApp({
             if (this.debugLoading) return;
             const query = this.debugQuery.trim();
             if (tool === 'retrieve' && !query) { this.debugError = '请输入检索问题。'; return; }
+            if (tool === 'retrieve' && !this.selectedKnowledgeIds.length) { this.debugError = '请至少选择一个知识库。'; return; }
             this.debugTool = tool;
             this.debugResult = null;
             this.debugError = '';

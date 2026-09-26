@@ -154,6 +154,11 @@ body { display: block; height: 100vh; overflow: hidden; background: var(--paper)
 .debug-card p { font-size: 12px; color: #687f70; margin-bottom: 30px; }
 .debug-card label { display: flex; flex-direction: column; gap: 6px; font-size: 11px; font-weight: 700; color: #54705b; margin: 12px 0; }
 .debug-card input { border: 1px solid var(--line); border-radius: 6px; padding: 10px; font: inherit; color: var(--ink); }
+.debug-card fieldset { margin: 16px 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
+.debug-card legend { padding: 0 6px; color: #54705b; font-size: 11px; font-weight: 700; }
+.debug-card .scope-options label { display: inline-flex; flex-direction: row; align-items: center; gap: 7px; margin: 0; max-width: 100%; }
+.debug-card .scope-options input { flex: none; margin: 0; padding: 0; }
+.debug-card .scope-options small { overflow-wrap: anywhere; }
 .debug-card .btn-primary { margin-top: 7px; }
 .debug-result { margin-top: 15px; }
 .debug-empty { color: #718176; font-size: 13px; padding: 17px; background: #f5f7f3; border-radius: 7px; }

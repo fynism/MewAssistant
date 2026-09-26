@@ -61,11 +61,14 @@ class M2ToolTests(unittest.TestCase):
         self.assertEqual(self.client.post("/tools/debug/listKnowledges", headers=self.alice,
             json={"cursor": "%%%"}).status_code, 422)
 
-    def test_retrieve_scope_empty_foreign_success_and_failure(self):
+    def test_retrieve_requires_scope_and_rejects_foreign_knowledge(self):
         endpoint = "/tools/debug/retrieve"
         self.assertEqual(self.client.post(endpoint, headers=self.alice,
-            json={"query": "secret", "knowledgeIds": []}).json(),
-            {"status": "no_documents", "results": []})
+            json={"query": "secret"}).status_code, 422)
+        self.assertEqual(self.client.post(endpoint, headers=self.alice,
+            json={"query": "secret", "knowledgeIds": []}).status_code, 422)
+        self.assertEqual(self.client.post(endpoint, headers=self.alice,
+            json={"query": "secret", "knowledgeIds": ["alice-kb", "alice-kb"]}).status_code, 422)
         self.assertEqual(self.client.post(endpoint, headers=self.alice,
             json={"query": "secret", "knowledgeIds": ["bob-kb"]}).status_code, 404)
         self.assertEqual(self.client.post(endpoint, headers=self.alice,
@@ -90,11 +93,11 @@ class M2ToolTests(unittest.TestCase):
         with patch("backend.rag.retrieval.retrieve_documents",
                    return_value={"docs": [], "meta": {"retrieval_mode": "hybrid"}}):
             self.assertEqual(self.client.post(endpoint, headers=self.alice,
-                json={"query": "missing"}).json()["status"], "no_match")
+                json={"query": "missing", "knowledgeIds": ["alice-kb"]}).json()["status"], "no_match")
         with patch("backend.rag.retrieval.retrieve_documents",
                    return_value={"docs": [], "meta": {"retrieval_mode": "failed"}}):
             self.assertEqual(self.client.post(endpoint, headers=self.alice,
-                json={"query": "error"}).status_code, 503)
+                json={"query": "error", "knowledgeIds": ["alice-kb"]}).status_code, 503)
 
 
 if __name__ == "__main__":

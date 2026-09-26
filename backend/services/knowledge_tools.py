@@ -49,7 +49,7 @@ def list_knowledges(db: Session, owner_id: int, limit: int = 50,
 
 
 def retrieve(db: Session, owner_id: int, query: str,
-             knowledge_ids: list[str] | None = None, top_k: int = 5) -> dict:
+             knowledge_ids: list[str], top_k: int = 5) -> dict:
     if not owner_id:
         raise HTTPException(status_code=401, detail="请先登录")
     query = query.strip()
@@ -57,6 +57,10 @@ def retrieve(db: Session, owner_id: int, query: str,
         raise HTTPException(status_code=422, detail="query 长度必须为 1 到 500 字")
     if not 1 <= top_k <= 20:
         raise HTTPException(status_code=422, detail="topK 必须在 1 到 20 之间")
+    if (not knowledge_ids or len(knowledge_ids) > 20
+            or any(not item or item != item.strip() for item in knowledge_ids)
+            or len(set(knowledge_ids)) != len(knowledge_ids)):
+        raise HTTPException(status_code=422, detail="knowledgeIds 必须包含 1 到 20 个不重复的知识库 ID")
     document_ids = visible_document_ids(db, owner_id, knowledge_ids)
     if not document_ids:
         return {"status": "no_documents", "results": []}

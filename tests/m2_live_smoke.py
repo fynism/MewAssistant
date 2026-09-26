@@ -120,8 +120,8 @@ def main() -> None:
                 listed2 = check(client.post("/tools/debug/listKnowledges", headers=alice,
                     json={"limit": 1, "cursor": listed["nextCursor"]}))
                 assert {listed["items"][0]["id"], listed2["items"][0]["id"]} == {a1, a2}
-                assert check(client.post("/tools/debug/retrieve", headers=alice,
-                    json={"query": "sapphire dragon", "knowledgeIds": [], "topK": 5}))["status"] == "no_documents"
+                assert client.post("/tools/debug/retrieve", headers=alice,
+                    json={"query": "sapphire dragon", "knowledgeIds": [], "topK": 5}).status_code == 422
                 assert client.post("/tools/debug/retrieve", headers=alice,
                     json={"query": "emerald tiger", "knowledgeIds": [a1, b1]}).status_code == 404
                 hit = check(client.post("/tools/debug/retrieve", headers=alice,
