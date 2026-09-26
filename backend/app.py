@@ -12,6 +12,7 @@ from backend.observability import logger, request_id
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
+FRONTEND_ROUTES = {"services/knowledge", "account", "knowledges", "try"}
 
 
 def create_app() -> FastAPI:
@@ -41,7 +42,7 @@ def create_app() -> FastAPI:
             response = await call_next(request)
             status_code = response.status_code
             response.headers["X-Request-ID"] = current_id
-            if path == "/" or path.endswith((".html", ".js", ".css")):
+            if path == "/" or path.lstrip("/") in FRONTEND_ROUTES or path.endswith((".html", ".js", ".css")):
                 response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
                 response.headers["Pragma"] = "no-cache"
                 response.headers["Expires"] = "0"
@@ -68,6 +69,8 @@ def create_app() -> FastAPI:
 
         @app.get("/{full_path:path}", include_in_schema=False)
         async def serve_frontend(full_path: str):
+            if full_path.rstrip("/") in FRONTEND_ROUTES:
+                return FileResponse(str(FRONTEND_DIR / "index.html"))
             file_path = FRONTEND_DIR / full_path
             if file_path.is_file():
                 try:

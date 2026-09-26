@@ -7,6 +7,9 @@ createApp({
             userInput: '',
             isLoading: false,
             activeNav: 'newChat',
+            page: ['/', '/services/knowledge', '/account', '/knowledges', '/try'].includes(window.location.pathname.replace(/\/$/, '') || '/') ? (window.location.pathname.replace(/\/$/, '') || '/') : '/',
+            showAuth: false,
+            services: [{ id: 'knowledge', category: 'KNOWLEDGE', name: '知识库 MCP', description: '把私有文件转为可检索知识，先通过站内工具验证结果与来源。', tools: ['listKnowledges', 'retrieve'], path: '/services/knowledge' }],
             abortController: null,
             sessionId: 'session_' + Date.now(),
             sessions: [],
@@ -39,10 +42,14 @@ createApp({
         },
         isAdmin() {
             return this.currentUser?.role === 'admin';
+        },
+        isProtectedPage() {
+            return ['/account', '/knowledges', '/try'].includes(this.page);
         }
     },
     async mounted() {
         this.configureMarked();
+        window.addEventListener('popstate', this.syncRoute);
         if (this.token) {
             try {
                 await this.fetchMe();
@@ -50,8 +57,23 @@ createApp({
                 this.handleLogout();
             }
         }
+        if (this.isAuthenticated && ['/knowledges', '/try'].includes(this.page)) await this.loadKnowledges();
+    },
+    beforeUnmount() {
+        window.removeEventListener('popstate', this.syncRoute);
     },
     methods: {
+        syncRoute() {
+            const path = window.location.pathname.replace(/\/$/, '') || '/';
+            this.page = ['/', '/services/knowledge', '/account', '/knowledges', '/try'].includes(path) ? path : '/';
+            if (this.page === '/knowledges' || this.page === '/try') this.loadKnowledges();
+            else this.showHistorySidebar = false;
+        },
+        navigate(path) {
+            if (this.page !== path) window.history.pushState({}, '', path);
+            this.syncRoute();
+        },
+        openLogin() { this.showAuth = true; },
         configureMarked() {
             marked.setOptions({
                 highlight: function(code, lang) {
@@ -140,6 +162,8 @@ createApp({
                 this.messages = [];
                 this.sessionId = 'session_' + Date.now();
                 this.activeNav = 'newChat';
+                this.showAuth = false;
+                if (['/knowledges', '/try'].includes(this.page)) await this.loadKnowledges();
             } catch (error) {
                 alert(error.message);
             } finally {
@@ -159,6 +183,7 @@ createApp({
             this.activeNav = 'newChat';
             this.showHistorySidebar = false;
             this.showNotice = true;
+            this.showAuth = false;
             localStorage.removeItem('accessToken');
         },
 
@@ -399,14 +424,14 @@ createApp({
         },
 
         handleUploadClick() {
-            this.handleSettings();
+            this.navigate('/knowledges');
         },
 
         handleSettings() {
             if (!this.isAuthenticated) return;
             this.activeNav = 'settings';
             this.showHistorySidebar = false;
-            this.loadKnowledges();
+            this.navigate('/knowledges');
         },
 
         async loadKnowledges() {
