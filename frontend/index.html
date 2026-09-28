@@ -34,6 +34,7 @@
                 <a href="/workspace/knowledges" @click.prevent="navigate('/workspace/knowledges')" :class="['nav-btn', {active: page === '/workspace/knowledges'}]"><i class="fas fa-book-open"></i> 我的知识库</a>
                 <a href="/try" @click.prevent="navigate('/try')" :class="['nav-btn', {active: page === '/try'}]"><i class="fas fa-flask"></i> 试一下</a>
                 <a href="/account" @click.prevent="navigate('/account')" :class="['nav-btn', {active: page === '/account'}]"><i class="fas fa-user-circle"></i> 个人管理</a>
+                <template v-if="isAdmin"><span class="nav-caption">ADMIN</span><a href="/admin" @click.prevent="navigate('/admin')" :class="['nav-btn', {active: page === '/admin'}]"><i class="fas fa-ticket"></i> 邀请码管理</a></template>
             </nav>
             <div class="sidebar-footer">
                 <div v-if="isAuthenticated" class="user-badge">
@@ -60,6 +61,35 @@
 
             <div v-if="page === '/account' && isAuthenticated" class="platform-page account-page"><div class="eyebrow">WORKSPACE / ACCOUNT</div><div class="page-intro"><span class="pill">个人空间</span><h1>个人管理</h1><p>管理自己的登录身份与远程 MCP 访问凭证。</p></div><div class="account-card"><span class="kicker">ACCOUNT</span><div class="account-avatar">{{ currentUser.username.slice(0, 1).toUpperCase() }}</div><h2>{{ currentUser.username }}</h2><p>角色：{{ currentUser.role }}</p></div><section class="api-key-panel"><div class="section-heading"><div><span class="kicker">CREDENTIALS</span><h2>个人 API Key</h2></div></div><p>每个 Key 可以调用你的知识库 MCP。明文仅在创建时显示一次；首版不会自动到期，可随时撤销。</p><form class="key-create" @submit.prevent="createApiKey"><input v-model="apiKeyName" maxlength="100" placeholder="名称，例如 Codex 桌面端" aria-label="API Key 名称"><button class="btn-primary" type="submit" :disabled="apiKeyBusy || !apiKeyName.trim()">创建 API Key</button></form><p v-if="apiKeyError" class="key-error" role="alert">{{ apiKeyError }}</p><div v-if="createdApiKey" class="new-key" role="status"><strong>立即复制并妥善保存，此处关闭或刷新后无法再查看。</strong><div class="mcp-url"><code>{{ createdApiKey }}</code><button class="btn-secondary" @click="copyText(createdApiKey)">复制 Key</button></div><button class="text-link key-dismiss" @click="createdApiKey = ''">我已保存，关闭</button></div><div class="key-list"><p v-if="!apiKeys.length">尚无 API Key。</p><article v-for="item in apiKeys" :key="item.id" class="key-row"><div><strong>{{ item.name }}</strong><small>尾号 {{ item.suffix }} · 创建于 {{ new Date(item.createdAt).toLocaleString() }} · 最近使用 {{ item.lastUsedAt ? new Date(item.lastUsedAt).toLocaleString() : '暂无' }}</small></div><span v-if="item.revokedAt" class="key-revoked">已撤销</span><button v-else class="danger-btn" :disabled="apiKeyBusy" @click="revokeApiKey(item)">撤销</button></article></div><p class="mcp-note">轮换 Key：创建新 Key → 更新客户端环境变量 → 撤销旧 Key。网页登录凭证与 API Key 用途不同。</p></section></div>
 
+            <div v-if="page === '/admin' && isAdmin" class="platform-page admin-page">
+                <div class="eyebrow">OPERATIONS / INVITATIONS <span>ADMIN ONLY</span></div>
+                <div class="page-intro"><span class="pill">受邀开放</span><h1>邀请码管理</h1><p>创建邀请码并控制可用次数与有效期。完整邀请码仅在创建后展示一次。</p></div>
+                <section class="invitation-panel"><div class="section-heading"><div><span class="kicker">ISSUE / NEW CODE</span><h2>创建邀请码</h2></div></div>
+                    <form class="invitation-form" @submit.prevent="createInvitation">
+                        <label>可使用次数<input v-model.number="invitationForm.max_uses" type="number" min="1" max="100" step="1" required></label>
+                        <label>过期时间 <small>可留空</small><input v-model="invitationForm.expires_at" type="datetime-local"></label>
+                        <button class="btn-primary" type="submit" :disabled="invitationBusy">{{ invitationBusy ? '创建中…' : '创建邀请码' }}</button>
+                    </form>
+                    <p v-if="invitationError" class="key-error" role="alert">{{ invitationError }}</p>
+                    <div v-if="createdInvitationCode" class="new-key" role="status"><strong>请立即复制并保存。关闭或刷新后无法再次查看完整邀请码。</strong><div class="mcp-url"><code>{{ createdInvitationCode }}</code><button class="btn-secondary" @click="copyText(createdInvitationCode)">复制邀请码</button></div><button class="text-link key-dismiss" @click="createdInvitationCode = ''">我已保存，关闭</button></div>
+                </section>
+                <section class="invitation-panel"><div class="section-heading"><div><span class="kicker">ISSUED / OVERVIEW</span><h2>已创建的邀请码</h2></div><button class="btn-secondary" type="button" :disabled="invitationLoading" @click="loadInvitations">刷新</button></div>
+                    <p v-if="invitationLoading" class="invitation-empty">正在加载…</p><p v-else-if="!invitations.length" class="invitation-empty">暂无邀请码。</p>
+                    <div v-else class="key-list"><article v-for="item in invitations" :key="item.id" class="key-row invitation-row"><div><strong>邀请码 · {{ item.id.slice(0, 8) }}</strong><small>已用 {{ item.used_count }} / {{ item.max_uses }} 次 · 创建于 {{ utcDate(item.created_at).toLocaleString() }} · 过期时间 {{ item.expires_at ? utcDate(item.expires_at).toLocaleString() : '不设置' }}</small></div><span :class="['invitation-status', { 'invitation-status-active': invitationStatus(item) === '可使用' }]">{{ invitationStatus(item) }}</span><button v-if="invitationStatus(item) === '可使用'" class="danger-btn" type="button" :disabled="invitationBusy" @click="revokeInvitation(item)">停用</button></article></div>
+                    <p class="mcp-note">列表只展示状态与使用情况，完整邀请码无法从服务端再次读取。</p>
+                </section>
+                <section class="invitation-panel operations-panel"><div class="section-heading"><div><span class="kicker">MCP / LAST 24 HOURS</span><h2>服务调用概况</h2></div><button class="btn-secondary" type="button" @click="loadOperations">刷新</button></div>
+                    <p v-if="operationsError" class="key-error" role="alert">{{ operationsError }}</p>
+                    <template v-if="operations"><div class="operations-stats"><div><strong>{{ operations.calls }}</strong><span>工具及拒绝调用</span></div><div><strong>{{ operations.errors }}</strong><span>异常调用</span></div><div><strong>{{ operations.averageDurationMs }} <small>ms</small></strong><span>平均耗时</span></div></div>
+                    <div class="operations-breakdown"><span v-for="item in operations.byOperation" :key="item.name">{{ item.name }} <b>{{ item.count }}</b></span></div>
+                    <h3 class="operations-subtitle">文件处理队列</h3><div class="operations-breakdown"><span>待处理 <b>{{ operations.documents.pending }}</b></span><span>处理中 <b>{{ operations.documents.processing }}</b></span><span>失败 <b>{{ operations.documents.failed }}</b></span></div>
+                    <div v-if="operations.failedDocuments.length" class="key-list operations-failed-files"><article v-for="item in operations.failedDocuments" :key="item.id" class="key-row invitation-row"><div><strong>文件 {{ item.id.slice(0, 8) }} · 用户 {{ item.ownerId }}</strong><small>知识库 {{ item.knowledgeId }} · {{ utcDate(item.updatedAt).toLocaleString() }}</small></div></article></div>
+                    <h3 class="operations-subtitle">最近异常</h3><p v-if="!operations.recentFailures.length" class="invitation-empty">近 24 小时没有异常调用。</p>
+                    <div v-else class="key-list"><article v-for="item in operations.recentFailures" :key="item.requestId + item.createdAt" class="key-row invitation-row"><div><strong>{{ item.operation }} · {{ item.category }}</strong><small>{{ utcDate(item.createdAt).toLocaleString() }} · 用户 {{ item.ownerId ?? '未知' }} · Key {{ item.keyId ? item.keyId.slice(0, 8) : '—' }} · 请求 {{ item.requestId }}</small></div></article></div></template>
+                    <p class="mcp-note">仅展示调用元数据，不保存查询原文、文件内容或完整 API Key。审计记录保留 90 天。</p>
+                </section>
+            </div>
+            <div v-if="page === '/admin' && isAuthenticated && !isAdmin" class="platform-page gate-page"><div class="eyebrow">ADMIN ONLY</div><h1>仅管理员可访问</h1><p>此页面需要管理员身份。</p></div>
             <div v-if="isProtectedPage && !isAuthenticated" class="platform-page gate-page"><div class="eyebrow">PRIVATE WORKSPACE</div><h1>登录后继续</h1><p>当前页面只向受邀用户开放。登录后会保留你要访问的页面。</p><button class="btn-primary" @click="openLogin">登录 / 邀请注册 <i class="fas fa-arrow-right"></i></button></div>
 
             <div v-if="showAuth && !isAuthenticated" class="auth-overlay" @click.self="showAuth = false"><div class="auth-panel">

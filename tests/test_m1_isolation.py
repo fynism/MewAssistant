@@ -75,6 +75,24 @@ class M1IsolationTests(unittest.TestCase):
         payload["username"] = "mallory"
         self.assertEqual(self.client.post("/auth/register", json=payload).status_code, 403)
 
+    def test_invitation_management_is_admin_only_and_code_is_shown_once(self):
+        payload = {"max_uses": 2}
+        self.assertEqual(self.client.post("/admin/invitations", headers=self.alice, json=payload).status_code, 403)
+        self.assertEqual(self.client.get("/admin/invitations", headers=self.alice).status_code, 403)
+        created = self.client.post("/admin/invitations", headers=self.admin, json=payload)
+        self.assertEqual(created.status_code, 200, created.text)
+        self.assertTrue(created.json()["invite_code"])
+        invitation_id = created.json()["id"]
+        listed = self.client.get("/admin/invitations", headers=self.admin)
+        self.assertEqual(listed.status_code, 200, listed.text)
+        self.assertEqual(listed.json()[0]["id"], invitation_id)
+        self.assertIn("created_at", listed.json()[0])
+        self.assertNotIn("invite_code", listed.json()[0])
+        revoke_url = f"/admin/invitations/{invitation_id}/revoke"
+        self.assertEqual(self.client.post(revoke_url, headers=self.alice).status_code, 403)
+        self.assertEqual(self.client.post(revoke_url, headers=self.admin).status_code, 200)
+        self.assertIsNotNone(self.client.get("/admin/invitations", headers=self.admin).json()[0]["revoked_at"])
+
     def test_private_knowledge_and_same_name_documents(self):
         a = self.client.post("/knowledges", headers=self.alice, json={"name": "A"})
         b = self.client.post("/knowledges", headers=self.bob, json={"name": "B"})
@@ -102,14 +120,13 @@ class M1IsolationTests(unittest.TestCase):
         self.assertEqual(self.client.get(f"/knowledges/{b_id}/documents/b-doc", headers=self.alice).status_code, 404)
 
     def test_upload_same_filename_uses_distinct_private_storage(self):
-        from backend.routers import knowledges
         from backend.services import knowledge_service
 
         a_id = self.client.post("/knowledges", headers=self.alice, json={"name": "A"}).json()["id"]
         b_id = self.client.post("/knowledges", headers=self.bob, json={"name": "B"}).json()["id"]
         private_dir = Path(self.temp.name) / "uploads"
         with (patch.object(knowledge_service, "STORAGE_DIR", private_dir),
-              patch.object(knowledges, "process_document")):
+              patch("backend.routers.knowledges.enforce_rate_limits", lambda *_: None)):
             upload = lambda kid, headers: self.client.post(
                 f"/knowledges/{kid}/documents", headers=headers,
                 files={"file": ("same.pdf", b"%PDF-1.4\nprivate", "application/pdf")})

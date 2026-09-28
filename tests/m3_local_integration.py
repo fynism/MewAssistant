@@ -134,6 +134,15 @@ def main():
                     call_tools(endpoint, bob_key, "m3-bob-kb", "m3-alice-kb",
                                "emerald tiger password" if use_milvus else "test",
                                "emerald tiger" if use_milvus else None), timeout=60))
+                if use_milvus:
+                    from backend.models import KnowledgeDocument
+                    from backend.services import knowledge_service
+                    with SessionLocal() as db:
+                        item = db.query(KnowledgeDocument).filter(
+                            KnowledgeDocument.knowledge_id == "m3-alice-kb").one()
+                        knowledge_service.delete_document(db, item)
+                    asyncio.run(asyncio.wait_for(
+                        call_tools(endpoint, alice_key, "m3-alice-kb", "m3-bob-kb"), timeout=60))
                 with SessionLocal() as db:
                     item = db.get(PersonalApiKey, alice_key_id)
                     from datetime import datetime

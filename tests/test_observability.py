@@ -36,6 +36,17 @@ class SQLLoggingTests(unittest.TestCase):
         self.assertIn("sql_error request_id=-", "\n".join(captured.output))
         self.assertIn("OperationalError", "\n".join(captured.output))
 
+    def test_sql_logging_never_emits_bound_values_even_with_legacy_flag(self):
+        engine = create_engine("sqlite:///:memory:")
+        enable_sql_logging(engine, include_parameters=True)
+        try:
+            with self.assertLogs("uvicorn.error", level="INFO") as captured:
+                with engine.connect() as connection:
+                    connection.execute(text("SELECT :private_value"), {"private_value": "private-query"})
+        finally:
+            engine.dispose()
+        self.assertNotIn("private-query", "\n".join(captured.output))
+
 
 if __name__ == "__main__":
     unittest.main()

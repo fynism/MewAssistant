@@ -13,7 +13,7 @@ logger = logging.getLogger("uvicorn.error")
 
 
 def enable_sql_logging(engine: Engine, include_parameters: bool = False) -> None:
-    """Log SQL templates and duration; bound values require explicit opt-in."""
+    """Log SQL templates and duration, never user-supplied bound values."""
 
     @event.listens_for(engine, "before_cursor_execute")
     def before_execute(_connection, _cursor, _statement, _parameters, context, _executemany):
@@ -22,12 +22,9 @@ def enable_sql_logging(engine: Engine, include_parameters: bool = False) -> None
     @event.listens_for(engine, "after_cursor_execute")
     def after_execute(_connection, _cursor, statement, parameters, context, _executemany):
         elapsed_ms = (time.perf_counter() - context._supermew_query_started) * 1000
-        details = ""
-        if include_parameters:
-            details = f" parameters={parameters!r}"[:2000]
         logger.info(
-            "sql request_id=%s duration_ms=%.1f statement=%s%s",
-            request_id.get(), elapsed_ms, " ".join(statement.split())[:2000], details,
+            "sql request_id=%s duration_ms=%.1f statement=%s",
+            request_id.get(), elapsed_ms, " ".join(statement.split())[:2000],
         )
 
     @event.listens_for(engine, "handle_error")

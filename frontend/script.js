@@ -7,7 +7,7 @@ createApp({
             userInput: '',
             isLoading: false,
             activeNav: 'newChat',
-            page: ['/', '/services/knowledge', '/account', '/workspace/knowledges', '/try'].includes(window.location.pathname.replace(/\/$/, '') || '/') ? (window.location.pathname.replace(/\/$/, '') || '/') : '/',
+            page: ['/', '/services/knowledge', '/account', '/admin', '/workspace/knowledges', '/try'].includes(window.location.pathname.replace(/\/$/, '') || '/') ? (window.location.pathname.replace(/\/$/, '') || '/') : '/',
             showAuth: false,
             serviceInfo: { externalAvailable: false, endpoint: null },
             apiKeys: [],
@@ -15,6 +15,14 @@ createApp({
             createdApiKey: '',
             apiKeyBusy: false,
             apiKeyError: '',
+            invitations: [],
+            invitationForm: { max_uses: 1, expires_at: '' },
+            createdInvitationCode: '',
+            invitationBusy: false,
+            invitationLoading: false,
+            invitationError: '',
+            operations: null,
+            operationsError: '',
             services: [{ id: 'knowledge', category: 'KNOWLEDGE', name: '知识库 MCP', description: '把私有文件转为可检索知识，通过站内试用和标准 MCP 工具接入。', tools: ['listKnowledges', 'retrieve'], path: '/services/knowledge' }],
             abortController: null,
             sessionId: 'session_' + Date.now(),
@@ -66,7 +74,7 @@ createApp({
             return this.currentUser?.role === 'admin';
         },
         isProtectedPage() {
-            return ['/account', '/workspace/knowledges', '/try'].includes(this.page);
+            return ['/account', '/admin', '/workspace/knowledges', '/try'].includes(this.page);
         },
         selectedKnowledge() {
             return this.knowledges.find(item => item.id === this.selectedKnowledgeId) || null;
@@ -93,6 +101,7 @@ createApp({
         }
         if (this.isAuthenticated && ['/workspace/knowledges', '/try'].includes(this.page)) await this.loadKnowledges();
         if (this.isAuthenticated && this.page === '/account') await this.loadApiKeys();
+        if (this.isAdmin && this.page === '/admin') await Promise.all([this.loadInvitations(), this.loadOperations()]);
     },
     beforeUnmount() {
         window.removeEventListener('popstate', this.syncRoute);
@@ -101,9 +110,11 @@ createApp({
     methods: {
         syncRoute() {
             const path = window.location.pathname.replace(/\/$/, '') || '/';
-            this.page = ['/', '/services/knowledge', '/account', '/workspace/knowledges', '/try'].includes(path) ? path : '/';
+            this.page = ['/', '/services/knowledge', '/account', '/admin', '/workspace/knowledges', '/try'].includes(path) ? path : '/';
             if (this.page === '/account' && this.isAuthenticated) this.loadApiKeys();
             if (this.page !== '/account') this.createdApiKey = '';
+            if (this.page === '/admin' && this.isAdmin) { this.loadInvitations(); this.loadOperations(); }
+            if (this.page !== '/admin') this.createdInvitationCode = '';
             if (this.page === '/workspace/knowledges' || this.page === '/try') this.loadKnowledges();
             if (this.page !== '/workspace/knowledges') this.stopDocumentPolling();
             if (this.page !== '/try') this.showHistorySidebar = false;
@@ -159,6 +170,79 @@ createApp({
                 this.apiKeys = data.items;
                 this.apiKeyError = '';
             } catch (error) { this.apiKeyError = error.message; }
+        },
+        utcDate(value) {
+            if (!value) return null;
+            return new Date(/[zZ]|[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`);
+        },
+        invitationStatus(item) {
+            if (item.revoked_at) return '已停用';
+            if (item.used_count >= item.max_uses) return '已用尽';
+            if (item.expires_at && this.utcDate(item.expires_at) <= new Date()) return '已过期';
+            return '可使用';
+        },
+        async loadInvitations() {
+            if (!this.isAdmin) return;
+            this.invitationLoading = true;
+            try {
+                const response = await this.authFetch('/admin/invitations');
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(this.apiError(response, data, '加载邀请码失败'));
+                this.invitations = data;
+                this.invitationError = '';
+            } catch (error) { this.invitationError = error.message; }
+            finally { this.invitationLoading = false; }
+        },
+        async loadOperations() {
+            if (!this.isAdmin) return;
+            try {
+                const response = await this.authFetch('/admin/operations');
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(this.apiError(response, data, '加载调用概况失败'));
+                this.operations = data;
+                this.operationsError = '';
+            } catch (error) { this.operationsError = error.message; }
+        },
+        async createInvitation() {
+            if (!this.isAdmin || this.invitationBusy) return;
+            const maxUses = Number(this.invitationForm.max_uses);
+            if (!Number.isInteger(maxUses) || maxUses < 1 || maxUses > 100) {
+                this.invitationError = '使用次数须为 1–100 的整数。';
+                return;
+            }
+            const expiry = this.invitationForm.expires_at;
+            if (expiry && (!Number.isFinite(new Date(expiry).getTime()) || new Date(expiry) <= new Date())) {
+                this.invitationError = '过期时间必须晚于当前时间。';
+                return;
+            }
+            this.invitationBusy = true;
+            this.invitationError = '';
+            this.createdInvitationCode = '';
+            try {
+                const response = await this.authFetch('/admin/invitations', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({max_uses: maxUses, expires_at: expiry ? new Date(expiry).toISOString() : null})
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(this.apiError(response, data, '创建邀请码失败'));
+                this.createdInvitationCode = data.invite_code;
+                this.invitationForm = { max_uses: 1, expires_at: '' };
+                await this.loadInvitations();
+            } catch (error) { this.invitationError = error.message; }
+            finally { this.invitationBusy = false; }
+        },
+        async revokeInvitation(item) {
+            if (!this.isAdmin || this.invitationBusy || this.invitationStatus(item) !== '可使用' ||
+                !window.confirm('停用此邀请码？尚未使用的次数将立即失效。')) return;
+            this.invitationBusy = true;
+            this.invitationError = '';
+            try {
+                const response = await this.authFetch(`/admin/invitations/${encodeURIComponent(item.id)}/revoke`, {method: 'POST'});
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(this.apiError(response, data, '停用邀请码失败'));
+                await this.loadInvitations();
+            } catch (error) { this.invitationError = error.message; }
+            finally { this.invitationBusy = false; }
         },
         async createApiKey() {
             const name = this.apiKeyName.trim();
@@ -284,6 +368,7 @@ createApp({
                 this.showAuth = false;
                 if (['/workspace/knowledges', '/try'].includes(this.page)) await this.loadKnowledges();
                 if (this.page === '/account') await this.loadApiKeys();
+                if (this.page === '/admin' && this.isAdmin) await Promise.all([this.loadInvitations(), this.loadOperations()]);
             } catch (error) {
                 alert(error.message);
             } finally {
@@ -293,6 +378,11 @@ createApp({
 
         handleLogout() {
             this.createdApiKey = '';
+            this.createdInvitationCode = '';
+            this.invitations = [];
+            this.invitationError = '';
+            this.operations = null;
+            this.operationsError = '';
             this.apiKeys = [];
             this.apiKeyName = '';
             this.token = '';

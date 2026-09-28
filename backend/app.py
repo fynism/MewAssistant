@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pathlib import Path
 from contextlib import asynccontextmanager
+import asyncio
 import time
 from uuid import uuid4
 
@@ -11,18 +12,24 @@ from backend.core.config import settings
 from backend.database import init_db
 from backend.mcp_knowledge import create_knowledge_mcp_app, knowledge_mcp
 from backend.observability import logger, request_id
+from backend.workers.maintenance import run_document_maintenance
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
-FRONTEND_ROUTES = {"services/knowledge", "account", "workspace/knowledges", "try"}
+FRONTEND_ROUTES = {"services/knowledge", "account", "admin", "workspace/knowledges", "try"}
 
 
 def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app):
         init_db()
+        maintenance = asyncio.create_task(run_document_maintenance())
         async with knowledge_mcp.session_manager.run():
-            yield
+            try:
+                yield
+            finally:
+                maintenance.cancel()
+                await asyncio.gather(maintenance, return_exceptions=True)
 
     app = FastAPI(title="呆猫助手 API", lifespan=lifespan)
 

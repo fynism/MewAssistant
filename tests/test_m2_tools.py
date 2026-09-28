@@ -23,6 +23,8 @@ class M2ToolTests(unittest.TestCase):
         self.engine = create_engine(f"sqlite:///{Path(self.temp.name) / 'db.sqlite'}")
         Base.metadata.create_all(self.engine)
         self.factory = sessionmaker(bind=self.engine, expire_on_commit=False)
+        self.rate_patch = patch("backend.routers.tool_debug.enforce_rate_limits", lambda *_: None)
+        self.rate_patch.start()
 
         def db_override():
             with self.factory() as db:
@@ -46,6 +48,7 @@ class M2ToolTests(unittest.TestCase):
         self.bob = {"Authorization": "Bearer " + create_access_token("bob", "user")}
 
     def tearDown(self):
+        self.rate_patch.stop()
         self.client.close()
         self.app.dependency_overrides.clear()
         self.engine.dispose()
