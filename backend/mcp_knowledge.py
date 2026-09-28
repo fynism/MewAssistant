@@ -98,7 +98,8 @@ async def mcp_list_knowledges(ctx: Context, limit: int = Field(default=50, ge=1,
 async def mcp_retrieve(ctx: Context, query: str = Field(min_length=1, max_length=500),
                        knowledgeIds: list[str] = Field(min_length=1, max_length=20,
                                                        json_schema_extra={"uniqueItems": True}),
-                       topK: int = Field(default=5, ge=1, le=20)) -> RetrievalResult:
+                       topK: int = Field(default=min(5, settings.max_retrieval_results), ge=1,
+                                         le=settings.max_retrieval_results)) -> RetrievalResult:
     if len(set(knowledgeIds)) != len(knowledgeIds):
         raise ToolError("knowledgeIds 不能重复")
     data = await run_in_threadpool(_invoke, ctx.headers, retrieve,
@@ -165,10 +166,16 @@ class ApiKeyMcpAuth:
 
     @staticmethod
     async def _reject(send, status):
-        body = b'{"error":"MCP access denied"}'
+        messages = {401: b'{"error":"Authentication required"}',
+                    403: b'{"error":"Origin not allowed"}',
+                    429: b'{"error":"Rate limit exceeded"}',
+                    503: b'{"error":"MCP service temporarily unavailable"}'}
+        body = messages.get(status, b'{"error":"MCP access denied"}')
         headers = [(b"content-type", b"application/json")]
         if status == 401:
             headers.append((b"www-authenticate", b"Bearer"))
+        if status == 429:
+            headers.append((b"retry-after", b"60"))
         await send({"type": "http.response.start", "status": status, "headers": headers})
         await send({"type": "http.response.body", "body": body})
 

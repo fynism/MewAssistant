@@ -121,6 +121,7 @@ body { display: block; height: 100vh; overflow: hidden; background: var(--paper)
 .operations-breakdown span { padding: 5px 9px; border-radius: 6px; background: #edf2e9; }
 .operations-breakdown b { margin-left: 5px; color: #274c36; }
 .operations-subtitle { margin: 24px 0 8px; font-size: 14px; color: #2e4b37; }
+.operations-failed-files { margin-top: 12px; }
 .gate-page { padding-top: 100px; }
 .gate-page h1 { font-size: 48px; }
 .gate-page .btn-primary { margin-top: 27px; }

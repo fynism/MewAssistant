@@ -120,14 +120,13 @@ class M1IsolationTests(unittest.TestCase):
         self.assertEqual(self.client.get(f"/knowledges/{b_id}/documents/b-doc", headers=self.alice).status_code, 404)
 
     def test_upload_same_filename_uses_distinct_private_storage(self):
-        from backend.routers import knowledges
         from backend.services import knowledge_service
 
         a_id = self.client.post("/knowledges", headers=self.alice, json={"name": "A"}).json()["id"]
         b_id = self.client.post("/knowledges", headers=self.bob, json={"name": "B"}).json()["id"]
         private_dir = Path(self.temp.name) / "uploads"
         with (patch.object(knowledge_service, "STORAGE_DIR", private_dir),
-              patch.object(knowledges, "process_document")):
+              patch("backend.routers.knowledges.enforce_rate_limits", lambda *_: None)):
             upload = lambda kid, headers: self.client.post(
                 f"/knowledges/{kid}/documents", headers=headers,
                 files={"file": ("same.pdf", b"%PDF-1.4\nprivate", "application/pdf")})

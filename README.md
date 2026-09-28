@@ -20,6 +20,14 @@ bearer_token_env_var = "SUPERMEW_MCP_API_KEY"
 
 本地验收：`uv run python tests/m3_local_integration.py` 会在临时数据库运行迁移、启动 HTTP 服务，用官方 SDK 验证双用户隔离、两个工具和撤销。Docker 中的 Milvus 可用时追加 `--milvus`，会在随机测试 collection 中上传并检索两份同名文件。真实部署后可用 `MCP_URL`、`MCP_API_KEY` 环境变量运行 `uv run python tests/m3_sdk_smoke.py`。服务端默认关闭远程入口；未完成 HTTPS 发布验收时保持关闭。
 
+## M4 上线边界与运行维护
+
+先备份数据库和 `data/`，再运行 `uv run alembic upgrade head`，最后启动服务。应用固定使用单个 Web worker（仓库 Dockerfile 已设置 `--workers 1`）：同一进程内的扫描器每 2 秒读取数据库中的待处理文件，最多并行处理 2 个；进程重启后会将中断时的 `processing` 文件重新排队，重建前清理残留索引。不要同时启动多个应用实例或手动恢复脚本，否则无法保证单机任务所有权。
+
+可在 `.env` 调整以下初始运营边界，数值需按实际负载复核：`MAX_UPLOAD_BYTES`（默认 20 MiB）、`MAX_USER_DOCUMENTS`（100）、`MAX_USER_STORAGE_BYTES`（1 GiB）、`UPLOAD_RATE_PER_MINUTE`（10）、`RETRIEVAL_RATE_PER_MINUTE`（30）、`MAX_RETRIEVAL_RESULTS`（20）、`MCP_USER_RATE_PER_MINUTE`（60）、`MCP_KEY_RATE_PER_MINUTE`（30）、`MAX_DOCUMENT_PROCESSING`（2）和 `DOCUMENT_SCAN_INTERVAL_SECONDS`（2）。频率限制由 Redis 原子计数，超限返回 HTTP 429；容量超限返回 413；Redis 故障时调用返回 503。站内上传接口返回 202 后，文件状态先是 `pending`，可在知识库页面轮询到 `ready` 或 `failed`。
+
+管理员在“邀请码管理”页可查看近 24 小时工具调用、异常类别、耗时及文件处理队列。审计仅保留用户/Key 标识、操作、时间、耗时、请求 ID 和结果类别，每 24 小时自动清理超过 90 天的数据，不保存查询全文、文件正文或完整 Key。排障时用响应头 `X-Request-ID` 对照服务日志。单用户无法读取其他用户知识库；删除文件后，新检索不会再返回该文件。对外发布前仍需在真实 HTTPS 环境复核代理请求头、密钥撤销、限流以及上传到检索闭环。
+
 [![zread](https://img.shields.io/badge/Ask_Zread-_.svg?style=plastic&color=00b0aa&labelColor=000000&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQuOTYxNTYgMS42MDAxSDIuMjQxNTZDMS44ODgxIDEuNjAwMSAxLjYwMTU2IDEuODg2NjQgMS42MDE1NiAyLjI0MDFWNC45NjAxQzEuNjAxNTYgNS4zMTM1NiAxLjg4ODEgNS42MDAxIDIuMjQxNTYgNS42MDAxSDQuOTYxNTZDNS4zMTUwMiA1LjYwMDEgNS42MDE1NiA1LjMxMzU2IDUuNjAxNTYgNC45NjAxVjIuMjQwMUM1LjYwMTU2IDEuODg2NjQgNS4zMTUwMiAxLjYwMDEgNC45NjE1NiAxLjYwMDFaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00Ljk2MTU2IDEwLjM5OTlIMi4yNDE1NkMxLjg4ODEgMTAuMzk5OSAxLjYwMTU2IDEwLjY4NjQgMS42MDE1NiAxMS4wMzk5VjEzLjc1OTlDMS42MDE1NiAxNC4xMTM0IDEuODg4MSAxNC4zOTk5IDIuMjQxNTYgMTQuMzk5OUg0Ljk2MTU2QzUuMzE1MDIgMTQuMzk5OSA1LjYwMTU2IDE0LjExMzQgNS42MDE1NiAxMy43NTk5VjExLjAzOTlDNS42MDE1NiAxMC42ODY0IDUuMzE1MDIgMTAuMzk5OSA0Ljk2MTU2IDEwLjM5OTlaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik0xMy43NTg0IDEuNjAwMUgxMS4wMzg0QzEwLjY4NSAxLjYwMDEgMTAuMzk4NCAxLjg4NjY0IDEwLjM5ODQgMi4yNDAxVjQuOTYwMUMxMC4zOTg0IDUuMzEzNTYgMTAuNjg1IDUuNjAwMSAxMS4wMzg0IDUuNjAwMUgxMy43NTg0QzE0LjExMTkgNS42MDAxIDE0LjM5ODQgNS4zMTM1NiAxNC4zOTg0IDQuOTYwMVYyLjI0MDFDMTQuMzk4NCAxLjg4NjY0IDE0LjExMTkgMS42MDAxIDEzLjc1ODQgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8cGF0aCBkPSJNNCAxMkwxMiA0TDQgMTJaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00IDEyTDEyIDQiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K&logoColor=ffffff)](https://zread.ai/fynism/MewAssistant)
 
 ## 本地部署

@@ -4,14 +4,19 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from backend.database import Base
+from backend.auth import get_current_user, get_db
 from backend.models import CallAudit, User
 from backend.observability import request_id
 from backend.routers.operations import operations
+from backend.routers.operations import router as operations_router
 from backend.services.call_audit import prune_expired_audits, record_call
+from backend.services.api_keys import create_key
 
 
 class CallAuditTests(unittest.TestCase):
@@ -48,6 +53,42 @@ class CallAuditTests(unittest.TestCase):
                 self.assertEqual(dashboard["recentFailures"][0]["requestId"], "req-123")
                 self.assertEqual(prune_expired_audits(), 1)
                 self.assertEqual(db.query(CallAudit).count(), 2)
+
+    def test_operations_endpoint_requires_admin(self):
+        app = FastAPI()
+        app.include_router(operations_router)
+
+        def db_session():
+            with self.factory() as db:
+                yield db
+
+        app.dependency_overrides[get_db] = db_session
+        app.dependency_overrides[get_current_user] = lambda: User(id=2, username="user", role="user")
+        with TestClient(app) as client:
+            self.assertEqual(client.get("/admin/operations").status_code, 403)
+            app.dependency_overrides[get_current_user] = lambda: User(id=1, username="admin", role="admin")
+            self.assertEqual(client.get("/admin/operations").status_code, 200)
+
+    def test_mcp_tool_call_persists_only_metadata(self):
+        from backend.mcp_knowledge import _invoke
+        from backend.services.knowledge_tools import list_knowledges
+
+        with self.factory() as db:
+            _, key = create_key(db, 1, "Codex")
+        token = request_id.set("mcp-req")
+        try:
+            with (patch("backend.mcp_knowledge.SessionLocal", self.factory),
+                  patch("backend.services.call_audit.SessionLocal", self.factory)):
+                result = _invoke({"authorization": "Bearer " + key}, list_knowledges)
+        finally:
+            request_id.reset(token)
+        self.assertEqual(result["items"], [])
+        with self.factory() as db:
+            audit = db.query(CallAudit).one()
+            self.assertEqual((audit.operation, audit.result_category, audit.request_id),
+                             ("listKnowledges", "success", "mcp-req"))
+            self.assertEqual(audit.owner_id, 1)
+            self.assertNotIn(key, repr(audit.__dict__))
 
 
 if __name__ == "__main__":

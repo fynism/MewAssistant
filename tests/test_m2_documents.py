@@ -14,6 +14,7 @@ from backend.database import Base
 from backend.models import KnowledgeBase, KnowledgeDocument, User
 from backend.routers import knowledges as routes
 from backend.services import knowledge_service as service
+from backend.services.knowledge_tools import retrieve
 
 
 class M2DocumentTests(unittest.TestCase):
@@ -137,6 +138,33 @@ class M2DocumentTests(unittest.TestCase):
                 asyncio.run(service.replace_document(self.db, 1, "alice-kb", "alice-doc", self.upload()))
         self.assertEqual(full.exception.status_code, 413)
         self.assertEqual(self.db.query(KnowledgeDocument).one().status, "ready")
+
+        item = self.db.get(KnowledgeDocument, "alice-doc")
+        item.status = "deleting"
+        self.db.commit()
+        with patch.object(service, "settings", replace(service.settings, max_user_documents=1)):
+            with self.assertRaises(HTTPException) as occupied:
+                asyncio.run(service.save_upload(self.db, 1, "alice-kb", self.upload()))
+        self.assertEqual(occupied.exception.status_code, 413)
+
+    def test_deleted_document_is_immediately_invisible_to_retrieval(self):
+        class Milvus:
+            def init_collection(self):
+                pass
+
+            def query_all(self, **_kwargs):
+                return []
+
+            def delete(self, _expression):
+                pass
+
+        with (patch.object(service, "milvus_manager", Milvus()),
+              patch("backend.rag.retrieval.retrieve_documents") as search):
+            service.delete_document(self.db, self.db.get(KnowledgeDocument, "alice-doc"))
+            self.assertEqual(retrieve(self.db, 1, "old", ["alice-kb"]),
+                             {"status": "no_documents", "results": []})
+            search.assert_not_called()
+        self.assertFalse((self.storage / "old.pdf").exists())
 
 
 if __name__ == "__main__":

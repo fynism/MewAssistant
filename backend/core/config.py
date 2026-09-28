@@ -16,7 +16,6 @@ class Settings:
     port: int = int(os.getenv("PORT", "8000"))
     log_requests: bool = os.getenv("LOG_REQUESTS", "true").lower() == "true"
     log_sql: bool = os.getenv("LOG_SQL", "false").lower() == "true"
-    log_sql_parameters: bool = os.getenv("LOG_SQL_PARAMETERS", "false").lower() == "true"
 
     database_url: str = os.getenv(
         "DATABASE_URL",
@@ -58,9 +57,11 @@ class Settings:
     max_user_storage_bytes: int = int(os.getenv("MAX_USER_STORAGE_BYTES", str(1024 * 1024 * 1024)))
     upload_rate_per_minute: int = int(os.getenv("UPLOAD_RATE_PER_MINUTE", "10"))
     retrieval_rate_per_minute: int = int(os.getenv("RETRIEVAL_RATE_PER_MINUTE", "30"))
+    max_retrieval_results: int = int(os.getenv("MAX_RETRIEVAL_RESULTS", "20"))
     mcp_user_rate_per_minute: int = int(os.getenv("MCP_USER_RATE_PER_MINUTE", "60"))
     mcp_key_rate_per_minute: int = int(os.getenv("MCP_KEY_RATE_PER_MINUTE", "30"))
     max_document_processing: int = int(os.getenv("MAX_DOCUMENT_PROCESSING", "2"))
+    document_scan_interval_seconds: float = float(os.getenv("DOCUMENT_SCAN_INTERVAL_SECONDS", "2"))
 
     rerank_model: str | None = os.getenv("RERANK_MODEL")
     rerank_binding_host: str | None = os.getenv("RERANK_BINDING_HOST")

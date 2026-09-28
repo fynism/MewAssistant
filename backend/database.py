@@ -11,7 +11,7 @@ engine = create_engine(
     pool_pre_ping=True,
 )
 if settings.log_sql:
-    enable_sql_logging(engine, include_parameters=settings.log_sql_parameters)
+    enable_sql_logging(engine)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 Base = declarative_base()
 

@@ -1,7 +1,7 @@
 """Private knowledge and document lifecycle. Legacy documents are never read here."""
 
 import ntpath
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -13,6 +13,7 @@ from backend.database import SessionLocal
 from backend.dependencies import document_loader, embedding_service, milvus_manager, milvus_writer
 from backend.models import KnowledgeBase, KnowledgeDocument, KnowledgeParentChunk
 from backend.models import User
+from backend.observability import logger
 
 STORAGE_DIR = Path(__file__).resolve().parents[2] / "data" / "knowledge_documents"
 ALLOWED_EXTENSIONS = {".pdf", ".doc", ".docx", ".xls", ".xlsx"}
@@ -87,7 +88,7 @@ def _check_user_capacity(db: Session, owner_id: int, incoming_bytes: int,
     # Lock the owner row so uploads to different knowledge bases share one quota decision.
     db.query(User.id).filter(User.id == owner_id).with_for_update().one()
     rows = db.query(KnowledgeDocument).join(KnowledgeBase).filter(
-        KnowledgeBase.owner_id == owner_id, KnowledgeDocument.status != "deleting").all()
+        KnowledgeBase.owner_id == owner_id).all()
     if replacing is None and len(rows) >= settings.max_user_documents:
         raise HTTPException(status_code=413, detail="已达到个人文件数量上限")
     def occupied_bytes(row: KnowledgeDocument) -> int:
@@ -192,6 +193,9 @@ def process_document(document_id: str) -> None:
         item = db.query(KnowledgeDocument).filter(KnowledgeDocument.id == document_id).with_for_update(skip_locked=True).first()
         if item is None or item.status not in {"pending", "failed", "replacing"}:
             return
+        knowledge = db.query(KnowledgeBase).filter(KnowledgeBase.id == item.knowledge_id).with_for_update().first()
+        if knowledge is None or knowledge.status != "active":
+            return
         item.status = "processing"
         item.error_summary = None
         item.updated_at = datetime.utcnow()
@@ -230,8 +234,10 @@ def process_document(document_id: str) -> None:
             item.status = "ready"
             item.updated_at = datetime.utcnow()
             db.commit()
-        except Exception:
+        except Exception as exc:
             db.rollback()
+            logger.error("document_processing_failed document_id=%s error_type=%s",
+                         document_id, type(exc).__name__)
             try:
                 _cleanup_vectors(db, item, remove_bm25=item.replacement_old_ready)
             except Exception:
@@ -248,13 +254,7 @@ def recover_pending_documents(include_stale_processing: bool = False) -> int:
     db = SessionLocal()
     try:
         if include_stale_processing:
-            # Only run this mode after stopping the web process. Elapsed time
-            # alone cannot prove an embedding job is no longer running.
-            stale = datetime.utcnow() - timedelta(minutes=10)
-            db.query(KnowledgeDocument).filter(
-                KnowledgeDocument.status == "processing",
-                KnowledgeDocument.updated_at < stale,
-            ).update({"status": "pending"}, synchronize_session=False)
+            reset_interrupted_documents(db)
         db.commit()
         ids = [row[0] for row in db.query(KnowledgeDocument.id).filter(
             KnowledgeDocument.status.in_(["pending", "replacing"])).all()]
@@ -263,6 +263,15 @@ def recover_pending_documents(include_stale_processing: bool = False) -> int:
     for document_id in ids:
         process_document(document_id)
     return len(ids)
+
+
+def reset_interrupted_documents(db: Session) -> int:
+    """Call only once on startup of the single web worker, before scheduling jobs."""
+    count = db.query(KnowledgeDocument).filter(
+        KnowledgeDocument.status == "processing",
+    ).update({"status": "pending", "updated_at": datetime.utcnow()}, synchronize_session=False)
+    db.commit()
+    return count
 
 
 def delete_document(db: Session, item: KnowledgeDocument) -> None:
@@ -287,13 +296,17 @@ def delete_document(db: Session, item: KnowledgeDocument) -> None:
 
 
 def delete_knowledge(db: Session, item: KnowledgeBase) -> None:
-    if db.query(KnowledgeDocument.id).filter(
-        KnowledgeDocument.knowledge_id == item.id,
-        KnowledgeDocument.status == "processing",
-    ).first():
-        raise HTTPException(status_code=409, detail="知识库有文件正在处理，请稍后重试删除")
-    item.status = "deleting"
-    db.commit()
+    item = db.query(KnowledgeBase).filter(KnowledgeBase.id == item.id).with_for_update().first()
+    if item is None or item.status not in {"active", "deleting"}:
+        raise HTTPException(status_code=404, detail="知识库不存在")
+    if item.status == "active":
+        if db.query(KnowledgeDocument.id).filter(
+            KnowledgeDocument.knowledge_id == item.id,
+            KnowledgeDocument.status == "processing",
+        ).first():
+            raise HTTPException(status_code=409, detail="知识库有文件正在处理，请稍后重试删除")
+        item.status = "deleting"
+        db.commit()
     for document in db.query(KnowledgeDocument).filter(KnowledgeDocument.knowledge_id == item.id).all():
         delete_document(db, document)
     db.delete(item)

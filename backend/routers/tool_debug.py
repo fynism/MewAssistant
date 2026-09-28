@@ -24,7 +24,8 @@ class RetrieveInput(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
     query: str = Field(min_length=1, max_length=500)
     knowledge_ids: list[str] = Field(min_length=1, max_length=20, alias="knowledgeIds")
-    top_k: int = Field(default=5, ge=1, le=20, alias="topK")
+    top_k: int = Field(default=min(5, settings.max_retrieval_results), ge=1,
+                       le=settings.max_retrieval_results, alias="topK")
 
 
 @router.post("/listKnowledges")

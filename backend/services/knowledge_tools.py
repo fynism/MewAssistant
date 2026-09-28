@@ -8,6 +8,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.models import KnowledgeBase, KnowledgeDocument
+from backend.core.config import settings
 from backend.services.knowledge_service import visible_document_ids
 
 
@@ -55,8 +56,8 @@ def retrieve(db: Session, owner_id: int, query: str,
     query = query.strip()
     if not query or len(query) > 500:
         raise HTTPException(status_code=422, detail="query 长度必须为 1 到 500 字")
-    if not 1 <= top_k <= 20:
-        raise HTTPException(status_code=422, detail="topK 必须在 1 到 20 之间")
+    if not 1 <= top_k <= settings.max_retrieval_results:
+        raise HTTPException(status_code=422, detail=f"topK 必须在 1 到 {settings.max_retrieval_results} 之间")
     if (not knowledge_ids or len(knowledge_ids) > 20
             or any(not item or item != item.strip() for item in knowledge_ids)
             or len(set(knowledge_ids)) != len(knowledge_ids)):

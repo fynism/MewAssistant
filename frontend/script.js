@@ -368,7 +368,7 @@ createApp({
                 this.showAuth = false;
                 if (['/workspace/knowledges', '/try'].includes(this.page)) await this.loadKnowledges();
                 if (this.page === '/account') await this.loadApiKeys();
-                if (this.page === '/admin' && this.isAdmin) await this.loadInvitations();
+                if (this.page === '/admin' && this.isAdmin) await Promise.all([this.loadInvitations(), this.loadOperations()]);
             } catch (error) {
                 alert(error.message);
             } finally {
@@ -381,6 +381,8 @@ createApp({
             this.createdInvitationCode = '';
             this.invitations = [];
             this.invitationError = '';
+            this.operations = null;
+            this.operationsError = '';
             this.apiKeys = [];
             this.apiKeyName = '';
             this.token = '';
