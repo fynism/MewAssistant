@@ -110,24 +110,12 @@ AMAP_API_KEY=your_amap_api_key
 ### 4) Docker 部署（应用 + 数据库 + 缓存 + 向量库）
 本地开发可只启动依赖：`docker compose up -d postgres redis etcd minio standalone`，然后运行 `uv run uvicorn backend.app:app --reload --host 127.0.0.1 --port 8000`。本地默认 PostgreSQL 密码为 `postgres`，Redis 不设密码；`DATABASE_URL` 和 `REDIS_URL` 应与之匹配。ECS 部署须使用 `.env.docker.example` 中的强密码及已推送的应用镜像。
 
-当前仓库的 `docker-compose.yml` 同时承载应用、业务依赖与 Milvus 依赖。ECS 部署采用开发机/CI 构建并推送 Docker Hub、服务器仅拉取镜像的方式。请先阅读 [DEPLOY_DOCKER.md](docs/deploy/DEPLOY_DOCKER.md)，复制 `.env.docker.example` 为 `.env` 并填入镜像标签和实际凭证：
+服务器部署请先阅读 [本地开发、测试环境与正式发布](docs/deploy/本地开发-测试环境-正式发布.md)。同一份 `docker-compose.yml` 通过不同项目名、私有配置文件、宿主机端口和数据目录运行测试与正式两套环境。应用镜像在开发机或 CI 构建并推送，服务器仅拉取同一个已验收版本。
 - 应用：`app`（FastAPI + 前端静态文件）
 - 业务依赖：`postgres`、`redis`
 - 向量依赖：`etcd`、`minio`、`standalone`；`attu` 仅在 `debug` profile 启动
 
-```bash
-# 从镜像仓库拉取并启动全套服务
-docker compose pull
-docker compose up -d --no-build
-
-# 查看服务状态
-docker compose ps
-
-# 查看应用日志（可选）
-docker compose logs -f app
-```
-
-应用 `8000`、PostgreSQL `5432`、Redis `6379`、Milvus `19530/9091` 仅绑定到宿主机 `127.0.0.1`；MinIO 不映射宿主机端口。Attu 仅调试时启用，端口 `8080` 也只绑定本机。
+发布命令：`bash deploy.sh staging /opt/supermew-config/staging.env <镜像标签或摘要>`；测试验收后使用相同镜像执行 `bash deploy.sh production /opt/supermew-config/production.env <镜像标签或摘要>`。应用、PostgreSQL、Redis、Milvus 和 Attu 的宿主机端口均只绑定 `127.0.0.1`；MinIO 不映射宿主机端口。
 
 ### 5) 访问应用
 Compose 会自动启动应用；在 ECS 上通过 Nginx/HTTPS 对外提供服务。本机可访问：

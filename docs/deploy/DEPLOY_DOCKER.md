@@ -1,5 +1,7 @@
 # 构建镜像并在单台 ECS 部署
 
+> 此文记录旧版单环境部署方式，命令不适用于现在的双环境配置。请使用 [本地开发、测试环境与正式发布](本地开发-测试环境-正式发布.md)；尤其不要运行下文的裸 `bash deploy.sh` 或 `docker compose up`。
+
 在开发机或 CI 构建应用镜像并推送 Docker Hub；ECS 只拉镜像并运行 Compose，不安装 Python，也不构建镜像。Compose 包含 FastAPI 应用、PostgreSQL、Redis、Milvus、etcd 和 MinIO。前端由 FastAPI 提供静态文件。Attu 只在 `debug` profile 启动。LLM 和可选的 rerank 仍通过外部 API 调用。
 
 ## 在开发机或 CI 构建并推送
