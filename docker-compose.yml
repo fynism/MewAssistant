@@ -1,7 +1,14 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "3"
+
 services:
   app:
     image: ${SUPERMEW_APP_IMAGE:-supermew-app:dev}
     restart: unless-stopped
+    logging: *default-logging
     env_file: ${SUPERMEW_ENV_FILE:-.env}
     environment:
       EMBEDDING_DEVICE: cpu
@@ -28,6 +35,7 @@ services:
   postgres:
     image: ${POSTGRES_IMAGE:-postgres:15}
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_DB: langchain_app
       POSTGRES_USER: postgres
@@ -45,6 +53,7 @@ services:
   redis:
     image: ${REDIS_IMAGE:-redis:7-alpine}
     restart: unless-stopped
+    logging: *default-logging
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD-}
     command: ["sh", "-c", "if [ -n \"$${REDIS_PASSWORD}\" ]; then exec redis-server --appendonly yes --requirepass \"$${REDIS_PASSWORD}\"; else exec redis-server --appendonly yes; fi"]
@@ -61,6 +70,7 @@ services:
   etcd:
     image: ${ETCD_IMAGE:-quay.io/coreos/etcd:v3.5.18}
     restart: unless-stopped
+    logging: *default-logging
     environment:
       - ETCD_AUTO_COMPACTION_MODE=revision
       - ETCD_AUTO_COMPACTION_RETENTION=1000
@@ -78,6 +88,7 @@ services:
   minio:
     image: ${MINIO_IMAGE:-jumpserver/minio:RELEASE.2024-05-28T17-19-04Z@sha256:7acff8117e16e8b26b0ff2e3acdd4d4d1cef340a1b7364050b37b4a80b6636d4}
     restart: unless-stopped
+    logging: *default-logging
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
@@ -93,6 +104,7 @@ services:
   standalone:
     image: ${MILVUS_IMAGE:-milvusdb/milvus:v2.5.14}
     restart: unless-stopped
+    logging: *default-logging
     command: ["milvus", "run", "standalone"]
     security_opt:
       - seccomp:unconfined
@@ -122,6 +134,7 @@ services:
     image: ${ATTU_IMAGE:-zilliz/attu:v2.5.11}
     profiles: ["debug"]
     restart: unless-stopped
+    logging: *default-logging
     environment:
       - MILVUS_URL=standalone:19530  
       - PORT=3000
