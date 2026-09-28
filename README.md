@@ -110,7 +110,7 @@ AMAP_API_KEY=your_amap_api_key
 ### 4) Docker 部署（应用 + 数据库 + 缓存 + 向量库）
 本地开发可只启动依赖：`docker compose up -d postgres redis etcd minio standalone`，然后运行 `uv run uvicorn backend.app:app --reload --host 127.0.0.1 --port 8000`。本地默认 PostgreSQL 密码为 `postgres`，Redis 不设密码；`DATABASE_URL` 和 `REDIS_URL` 应与之匹配。ECS 部署须使用 `.env.docker.example` 中的强密码及已推送的应用镜像。
 
-服务器部署请先阅读 [本地开发、测试环境与正式发布](docs/deploy/本地开发-测试环境-正式发布.md)。同一份 `docker-compose.yml` 通过不同项目名、私有配置文件、宿主机端口和数据目录运行测试与正式两套环境。应用镜像在开发机或 CI 构建并推送，服务器仅拉取同一个已验收版本。
+服务器部署请先阅读 [本地开发、测试环境与正式发布](docs/deploy/本地开发-测试环境-正式发布.md)。同一份 `docker-compose.yml` 通过不同项目名、私有配置文件、宿主机端口和数据目录运行测试与正式两套环境。应用镜像在开发机或 CI 构建并推送；服务器只需部署目录中的 `docker-compose.yml`、`deploy.sh` 和私有环境配置，不必检出应用源码或运行 `git pull`。
 - 应用：`app`（FastAPI + 前端静态文件）
 - 业务依赖：`postgres`、`redis`
 - 向量依赖：`etcd`、`minio`、`standalone`；`attu` 仅在 `debug` profile 启动
