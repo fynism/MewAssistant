@@ -17,7 +17,9 @@ Vue 3 浏览器版 + Element Plus，HTML / CSS / JavaScript，无构建步骤。
 
 使用现有 `/auth/*`、`/knowledges/*`、`/knowledge-settings`、`/chat/stream`、`/sessions/*`、`/tools/debug/*`、`/account/api-keys/*` 与 `/admin/*`，未改变后端契约。
 
-知识库 MCP 地址为 `/mcp/knowledge`。首页和详情读取 `/platform/services/knowledge` 的部署状态及公共 HTTPS 地址，配置示例使用返回地址；当前部署未启用外部入口时明确提示。Codex 与 Claude Code 示例均从 `MCP_API_KEY` 环境变量读取个人 Key，不把真实 Key 写入示例。
+知识库 MCP 的正式地址为 `https://fyism.cn/mcp/knowledge`，首页和服务详情的地址与配置示例统一使用它。Codex 与 Claude Code 示例均从 `MCP_API_KEY` 环境变量读取个人 Key，不把真实 Key 写入示例。
+
+服务详情提供创建知识库、创建 API Key 的导航链接、客户端接入步骤与配置示例；“工具与接入”中的工具试用使用现有 `/tools/debug/*` 接口，登录后加载当前账号的知识库。`/try` 保留 Agent 对话和检索来源，详情中的“试用”链接指向该页面。
 
 站内对话继续支持流式内容、检索步骤与来源、停止回答、会话恢复、多知识库范围。Markdown 经 DOMPurify 清理后显示。完整 API Key / 邀请码只展示创建响应中的一次性内容，离开页面、退出登录或关闭后清除。
 

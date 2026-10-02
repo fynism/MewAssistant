@@ -4,7 +4,7 @@ Agent的项目记录，方便后续持续更新与展示。
 
 ## v0.2 前端
 
-前端已采用服务广场与工作空间布局，使用 Vue 3、Element Plus、官方图标、日夜主题和本地字体。首页提供 Codex / Claude Code 配置切换、高亮及复制，接入地址与部署状态从现有服务接口读取。知识库、文件处理、流式对话、历史会话、工具调试、个人 Key 和管理员页面均连接现有后端接口。无需前端构建或 npm 安装；启动后端后刷新网页即可。文件结构和检查命令见 [前端说明](frontend/README.md)。
+前端已采用服务广场与工作空间布局，使用 Vue 3、Element Plus、官方图标、日夜主题和本地字体。首页提供 Codex / Claude Code 配置切换、高亮及复制，配置示例统一使用正式地址 https://fyism.cn/mcp/knowledge。知识库、文件处理、流式对话、历史会话、工具调试、个人 Key 和管理员页面均连接现有后端接口。无需前端构建或 npm 安装；启动后端后刷新网页即可。文件结构和检查命令见 [前端说明](frontend/README.md)。
 
 > M1：注册使用管理员创建的一次性邀请码。旧 `.env` 中的 `ADMIN_INVITE_CODE` 已停用；首次管理员运行 `uv run python -m backend.admin_bootstrap --username admin` 创建，登录后调用 `POST /admin/invitations` 获取新的 `invite_code`。启动前先运行 `uv run alembic upgrade head`。
 

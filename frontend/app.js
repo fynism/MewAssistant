@@ -48,12 +48,12 @@
       const onMotion = event => {if (event.matches) brandAnimating.value = false;};
       systemTheme.addEventListener('change', onSystemTheme); motionQuery.addEventListener('change', onMotion);
 
-      const serviceInfo = ref(null), serviceError = ref(''), serviceLoading = ref(false), connectionClient = ref('codex');
-      const connectionEndpoint = computed(() => serviceInfo.value?.endpoint || new URL('/mcp/knowledge', location.origin).href);
-      const connectionNote = computed(() => serviceError.value ? '接入状态暂无法获取' : serviceLoading.value ? '正在获取接入状态' : serviceInfo.value?.externalAvailable ? 'Streamable HTTP · MCP_API_KEY 为个人 API Key 环境变量' : '当前部署未启用外部入口');
+      const connectionClient = ref('codex'), servicePanels = ref([]);
+      const connectionEndpoint = 'https://fyism.cn/mcp/knowledge';
+      const connectionNote = 'Streamable HTTP · MCP_API_KEY 为个人 API Key 环境变量';
       const connectionExamples = computed(() => [
-        {id:'codex',label:'Codex',language:'TOML',file:'~/.codex/config.toml',source:`[mcp_servers.meowconnect_knowledge]\nurl = ${JSON.stringify(connectionEndpoint.value)}\nbearer_token_env_var = "MCP_API_KEY"`},
-        {id:'claude',label:'Claude Code',language:'JSON',file:'.mcp.json',source:JSON.stringify({mcpServers:{meowconnect_knowledge:{type:'http',url:connectionEndpoint.value,headers:{Authorization:'Bearer ${MCP_API_KEY}'}}}},null,2)}
+        {id:'codex',label:'Codex',language:'TOML',file:'~/.codex/config.toml',source:`[mcp_servers.meowconnect_knowledge]\nurl = ${JSON.stringify(connectionEndpoint)}\nbearer_token_env_var = "MCP_API_KEY"`},
+        {id:'claude',label:'Claude Code',language:'JSON',file:'.mcp.json',source:JSON.stringify({mcpServers:{meowconnect_knowledge:{type:'http',url:connectionEndpoint,headers:{Authorization:'Bearer ${MCP_API_KEY}'}}}},null,2)}
       ].map(example => ({...example,tokens:tokenizeConfig(example.source,example.language)})));
 
       let identityEpoch = 0, documentEpoch = 0, knowledgeEpoch = 0, resultEpoch = 0, sessionEpoch = 0;
@@ -70,7 +70,7 @@
       const uploadLimitLabel = computed(() => knowledgeSettings.value.max_upload_bytes ? `${Math.round(knowledgeSettings.value.max_upload_bytes / 1048576)} MB` : '以服务端限制为准');
       const scopeLabel = computed(() => selectedKnowledgeIds.value.length ? scopeNames(selectedKnowledgeIds.value) : '未选择知识库');
       let documentTimer = null, scopeInitialized = false;
-      const tryMode = ref('chat'), toolName = ref('retrieve'), toolQuery = ref(''), topK = ref(5), toolLoading = ref(false), toolResult = ref(null), toolError = ref('');
+      const toolName = ref('retrieve'), toolQuery = ref(''), topK = ref(5), toolLoading = ref(false), toolResult = ref(null), toolError = ref('');
       const messages = ref([]), chatInput = ref(''), chatLoading = ref(false), chatLog = ref(null), isComposing = ref(false);
       const sessions = ref([]), sessionsOpen = ref(false), sessionsLoading = ref(false), sessionsError = ref('');
       let sessionId = newSessionId(), streamController = null;
@@ -99,10 +99,6 @@
       function report(error) {if (error.name !== 'AbortError') ElMessage.error(error.message);}
       async function confirmAction(message, title) {try {await ElMessageBox.confirm(message,title,{confirmButtonText:'确认',cancelButtonText:'取消',type:'warning',autofocus:false}); return true;} catch {return false;}}
       async function copyText(value) {try {await navigator.clipboard.writeText(value); ElMessage.success('已复制');} catch {ElMessage.warning('复制失败，请选中文本手动复制');}}
-      async function loadServiceInfo() {
-        serviceLoading.value = true; serviceError.value = '';
-        try {serviceInfo.value = await jsonRequest('/platform/services/knowledge', {}, false);} catch (error) {serviceError.value = error.message;} finally {serviceLoading.value = false;}
-      }
       function resetAuth() {authForm.password = ''; authForm.invite = ''; authError.value = ''; authFormRef.value?.clearValidate();}
       function openAuth(mode = 'login') {resetAuth(); authMode.value = mode; authOpen.value = true;}
       function switchAuth() {authMode.value = authMode.value === 'login' ? 'register' : 'login'; resetAuth();}
@@ -143,7 +139,7 @@
       const onPopState = () => {page.value = routePath(); mobileNav.value = false;};
       async function loadPageData() {
         if (!isAuthenticated.value) return;
-        if (page.value === '/workspace/knowledges' || page.value === '/try') await loadKnowledges();
+        if (['/workspace/knowledges', '/try', '/services/knowledge'].includes(page.value)) await loadKnowledges();
         else if (page.value === '/account') await loadKeys();
         else if (page.value === '/admin' && isAdmin.value) await Promise.all([loadInvites(),loadOperations()]);
       }
@@ -244,11 +240,13 @@
       function openTryWithKnowledge(id) {selectedKnowledgeIds.value = [id]; scopeInitialized = true; history.pushState({},'',`/try?knowledge=${encodeURIComponent(id)}`); page.value = '/try';}
       function scopeNames(ids) {return ids == null ? '历史会话未记录范围' : !ids.length ? '空范围' : ids.map(id => knowledges.value.find(kb => kb.id === id)?.name || '已删除的知识库').join('、');}
       async function runTool() {
+        if (!isAuthenticated.value) {openAuth(); return;}
+        if (page.value !== '/services/knowledge') return;
         if (toolLoading.value) return;
         const name = toolName.value, scope = [...selectedKnowledgeIds.value], query = toolQuery.value.trim();
         if (name === 'retrieve' && (!query || !scope.length)) {toolError.value = '请输入问题并选择至少一个知识库'; return;}
         const epoch = identityEpoch, call = ++resultEpoch; toolLoading.value = true; toolError.value = ''; toolResult.value = null;
-        try {const data = await jsonRequest(`/tools/debug/${name}`,jsonBody('POST',name === 'retrieve' ? {query,knowledgeIds:scope,topK:topK.value} : {limit:50})); if (epoch === identityEpoch && call === resultEpoch && page.value === '/try') toolResult.value = data;}
+        try {const data = await jsonRequest(`/tools/debug/${name}`,jsonBody('POST',name === 'retrieve' ? {query,knowledgeIds:scope,topK:topK.value} : {limit:50})); if (epoch === identityEpoch && call === resultEpoch && page.value === '/services/knowledge') toolResult.value = data;}
         catch (error) {if (epoch === identityEpoch && call === resultEpoch && error.name !== 'AbortError') toolError.value = error.message;}
         finally {if (epoch === identityEpoch && call === resultEpoch) toolLoading.value = false;}
       }
@@ -388,7 +386,7 @@
         document.getElementById('main')?.focus({preventScroll:true});
       });
       onMounted(async () => {
-        document.title = pageTitle.value + ' · MeowConnectPlatform'; playBrand(); window.addEventListener('popstate',onPopState); loadServiceInfo();
+        document.title = pageTitle.value + ' · MeowConnectPlatform'; playBrand(); window.addEventListener('popstate',onPopState);
         if (token.value) {
           try {currentUser.value = await jsonRequest('/auth/me');} catch (error) {if (error.name !== 'AbortError') report(error);}
           finally {authChecking.value = false;}
@@ -398,16 +396,21 @@
       onBeforeUnmount(() => {identityEpoch++; stopChat(); stopDocumentPolling(); clearTimeout(brandTimer); window.removeEventListener('popstate',onPopState); systemTheme.removeEventListener('change',onSystemTheme); motionQuery.removeEventListener('change',onMotion);});
       return {
         locale:ElementPlusLocaleZhCn,page,mobileNav,currentUser,authChecking,role,isAuthenticated,isAdmin,displayName,pageTitle,workspaceLinks,isExplore,isWorkspace,isDark,brandAnimating,brandWords,toggleTheme,go,accountCommand,
-        serviceInfo,serviceError,serviceLoading,connectionClient,connectionEndpoint,connectionNote,connectionExamples,loadServiceInfo,
+        connectionClient,servicePanels,connectionEndpoint,connectionNote,connectionExamples,
         authOpen,authMode,authLoading,authError,authForm,authFormRef,authRules,usernameInput,resetAuth,openAuth,switchAuth,focusAuth,submitAuth,logout,
         knowledges,selectedKnowledgeId,selectedKnowledgeIds,selectedKnowledge,knowledgeLoading,knowledgeError,loadKnowledges,selectKnowledge,createOpen,editOpen,knowledgeName,knowledgeDescription,knowledgeEdit,createKnowledge,openKnowledgeEdit,updateKnowledge,deleteKnowledge,
         documents,documentsLoading,documentsError,documentBusyId,loadDocuments,fileInput,replaceInput,isUploading,acceptedExtensions,uploadLimitLabel,uploadDocument,chooseReplacement,replaceDocument,documentAction,statusLabel,statusIcon,documentPending,openTryWithKnowledge,
-        scopeLabel,scopeNames,tryMode,toolName,toolQuery,topK,knowledgeSettings,toolLoading,toolResult,toolError,runTool,messages,chatInput,chatLoading,chatLog,isComposing,sendChat,stopChat,handleChatKey,parseMarkdown,traceFacts,traceGroups,newChat,sessions,sessionsOpen,sessionsLoading,sessionsError,loadSessions,loadSession,deleteSession,
+        scopeLabel,scopeNames,toolName,toolQuery,topK,knowledgeSettings,toolLoading,toolResult,toolError,runTool,messages,chatInput,chatLoading,chatLog,isComposing,sendChat,stopChat,handleChatKey,parseMarkdown,traceFacts,traceGroups,newChat,sessions,sessionsOpen,sessionsLoading,sessionsError,loadSessions,loadSession,deleteSession,
         keys,keyName,newKey,keysLoading,keyBusy,keyError,loadKeys,createKey,revokeKey,invites,newInvite,invitesLoading,inviteBusy,inviteError,invitationForm,loadInvites,createInvite,revokeInvite,invitationStatus,formatDate,operations,operationsLoading,operationsError,loadOperations,copyText
       };
     }
   });
   app.use(ElementPlus);
+  app.component('mcp-connection-example',{
+    props:{modelValue:String,examples:Array,note:String},
+    emits:['update:modelValue','copy'],
+    template:'#connection-example-template'
+  });
   app.component('mcp-icon',{props:{name:{type:String,required:true},size:{type:Number,default:20}},setup(props) {return () => Vue.h(ElementPlus.ElIcon,{size:props.size,'aria-hidden':'true'},() => Vue.h(ElementPlusIconsVue[props.name] || ElementPlusIconsVue.Document));}});
   app.mount('#app');
 })();

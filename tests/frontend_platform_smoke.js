@@ -54,7 +54,8 @@ vm.runInContext(fs.readFileSync(path.join(root,'frontend/app.js'),'utf8'),contex
 
 (async () => {
   await mounted(); await tick();
-  assert.equal(app.connectionEndpoint,'https://mcp.example/mcp/knowledge');
+  assert.equal(app.connectionEndpoint,'https://fyism.cn/mcp/knowledge');
+  assert.ok(!requests.some(item=>item.url==='/platform/services/knowledge'));
   assert.ok(app.connectionExamples[0].source.includes('/mcp/knowledge'));
   assert.equal(JSON.parse(app.connectionExamples[1].source).mcpServers.meowconnect_knowledge.headers.Authorization,'Bearer ${MCP_API_KEY}');
   for(const example of app.connectionExamples) assert.equal(example.tokens.map(token=>token.text).join(''),example.source);
@@ -80,12 +81,19 @@ vm.runInContext(fs.readFileSync(path.join(root,'frontend/app.js'),'utf8'),contex
   assert.equal(app.messages[1].text,'真实协议');
   assert.equal(app.messages[1].steps[0].label,'检索');
   assert.equal(app.messages[1].trace.retrieved_chunks[0].filename,'same.pdf');
+  const chatPageRequests = requests.length;
+  await app.runTool(); assert.equal(requests.length,chatPageRequests);
+  app.go('/services/knowledge'); await tick();
+  assert.equal(app.knowledges[0].id,knowledgeId);
   app.toolQuery = '测试检索'; await app.runTool();
   assert.equal(app.toolResult.status,'no_match');
   assert.deepEqual(JSON.parse(requests.find(item=>item.url==='/tools/debug/retrieve').body).knowledgeIds,[knowledgeId]);
   app.selectedKnowledgeIds = []; await tick();
   const before = requests.length; await app.runTool(); assert.equal(requests.length,before);
   assert.ok(app.toolError.includes('选择至少一个'));
+  app.toolName = 'listKnowledges'; await tick(); await app.runTool();
+  assert.ok(Array.isArray(app.toolResult.items));
+  app.go('/try'); await tick(); assert.equal(app.toolResult,null);
   await app.loadSessions(); await app.loadSession({session_id:'existing'});
   assert.equal(app.messages[0].text,'Earlier question'); assert.equal(app.selectedKnowledgeIds[0],knowledgeId);
   app.go('/account'); await tick(); app.keyName = 'CLI'; await app.createKey();
