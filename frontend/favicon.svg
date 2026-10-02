@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none">
+  <title>MeowConnectPlatform — 小猫与肉垫</title>
+  <defs>
+    <clipPath id="mcp-cat-eye-left">
+      <path d="M28 43C35 39 44 43 46 49C48 55 43 59 35 56C28 54 25 48 28 43Z"/>
+    </clipPath>
+    <clipPath id="mcp-cat-eye-right">
+      <path d="M56 50C63 46 72 50 75 56C78 62 70 66 62 63C55 61 52 55 56 50Z"/>
+    </clipPath>
+    <path id="mcp-cat-whiskers" d="M27 49C20 46 13 42 7 39M26 52C19 50 12 48 5 47M25 55C19 55 12 54 5 54M74 63C81 63 87 61 93 60M74 67C81 69 87 69 93 70M73 70C80 75 86 78 91 80"/>
+  </defs>
+  <!-- The body and raised paw form one silhouette, with room around the ears. -->
+  <path d="M24 51C20 47 21 38 27 31L31 12C32 7 35 6 39 10L54 27C65 28 73 30 80 34L90 36C95 38 94 41 91 45L79 59C80 66 77 71 73 76L82 92H28L23 80C15 77 10 70 12 62C13 56 18 51 24 51Z"
+        fill="#2C2E33" stroke="#F5F3ED" stroke-width="2.5" stroke-linejoin="round"/>
+  <!-- Warm ear interiors echo the paw pads. -->
+  <path d="M33 15L46 31L30 37L33 15Z" fill="#E7B5A5"/>
+  <path d="M78 39L89 39L78 52L75 44L78 39Z" fill="#E7B5A5"/>
+  <path d="M33 25L39 29L32 31" stroke="#F5F3ED" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Curved pupils taper to a point at both ends. -->
+  <g clip-path="url(#mcp-cat-eye-left)">
+    <path d="M28 43C35 39 44 43 46 49C48 55 43 59 35 56C28 54 25 48 28 43Z" fill="#FFFEFA"/>
+    <path d="M41 43C43 47 40 53 36 56C34 52 37 47 41 43Z" fill="#2C2E33"/>
+  </g>
+  <g clip-path="url(#mcp-cat-eye-right)">
+    <path d="M56 50C63 46 72 50 75 56C78 62 70 66 62 63C55 61 52 55 56 50Z" fill="#FFFEFA"/>
+    <path d="M67 50C69 55 66 60 62 63C60 59 63 54 67 50Z" fill="#2C2E33"/>
+  </g>
+  <!-- A fine dark edge keeps the light whiskers visible on either theme. -->
+  <g stroke-linecap="round" stroke-linejoin="round">
+    <use href="#mcp-cat-whiskers" stroke="#2C2E33" stroke-width="2"/>
+    <use href="#mcp-cat-whiskers" stroke="#F5F3ED" stroke-width="1.15"/>
+  </g>
+  <!-- The paw sits in front of the cheek, rather than beside the cat. -->
+  <path d="M24 51C17 52 12 57 12 64C12 71 17 76 23 80L28 91"
+        stroke="#F5F3ED" stroke-width="2.5" stroke-linecap="round"/>
+  <g fill="#E7B5A5">
+    <ellipse cx="19" cy="63" rx="3.2" ry="3.5" transform="rotate(-22 19 63)"/>
+    <ellipse cx="25" cy="59" rx="3.3" ry="3.5" transform="rotate(8 25 59)"/>
+    <ellipse cx="31" cy="63" rx="3.2" ry="3.5" transform="rotate(28 31 63)"/>
+    <path d="M20 71C18 69 20 67 23 66C24 65 26 65 27 67C31 68 33 71 30 73C28 75 25 72 23 73C21 74 19 73 20 71Z"/>
+  </g>
+</svg>

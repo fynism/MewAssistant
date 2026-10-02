@@ -1,478 +1,164 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SuperMew · MCP 开放平台</title>
-    <link rel="stylesheet" href="/style.css">
-    <link rel="stylesheet" href="/platform.css">
-    <!-- Fonts -->
-    <!-- Icons (bootcdn) -->
-    <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Markdown Parser (bootcdn) -->
-    <script src="https://cdn.bootcdn.net/ajax/libs/marked/9.1.2/marked.min.js"></script>
-    <!-- Syntax Highlighting (bootcdn) -->
-    <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/highlight.js/11.9.0/styles/atom-one-light.min.css">
-    <script src="https://cdn.bootcdn.net/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-    <!-- Vue 3 (bootcdn) -->
-    <script src="https://cdn.bootcdn.net/ajax/libs/vue/3.4.21/vue.global.prod.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="MeowConnectPlatform MCP 服务广场">
+  <title>MCP 服务广场 · MeowConnectPlatform</title>
+  <link rel="icon" href="/favicon.svg?v=cat-2" type="image/svg+xml" sizes="any">
+  <link rel="preload" href="/assets/fonts/AnthropicSans-Roman.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/assets/fonts/AnthropicSerif-Roman.woff2" as="font" type="font/woff2" crossorigin>
+  <script>
+    // Apply the preference before CSS paints. Storage is optional.
+    try { const t = localStorage.getItem('mcp-theme'); document.documentElement.classList.toggle('dark', t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches); }
+    catch { document.documentElement.classList.toggle('dark', matchMedia('(prefers-color-scheme: dark)').matches); }
+  </script>
+  <link rel="stylesheet" href="/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/vendor/element-plus/dark.css">
+  <link rel="stylesheet" href="/theme.css">
+  <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-    <div id="app" class="app-wrapper">
-
-        <!-- Platform navigation -->
-        <aside class="sidebar">
-            <div class="sidebar-header">
-                <div class="logo-icon">🐱</div>
-                <div><h2>SuperMew</h2><small>MCP 开放平台</small></div>
-            </div>
-            <nav class="sidebar-nav">
-                <span class="nav-caption">EXPLORE</span>
-                <a href="/" @click.prevent="navigate('/')" :class="['nav-btn', {active: page === '/'}]"><i class="fas fa-house"></i> 平台首页</a>
-                <a href="/services/knowledge" @click.prevent="navigate('/services/knowledge')" :class="['nav-btn', {active: page === '/services/knowledge'}]"><i class="fas fa-layer-group"></i> 知识库 MCP</a>
-                <span class="nav-caption">WORKSPACE</span>
-                <a href="/workspace/knowledges" @click.prevent="navigate('/workspace/knowledges')" :class="['nav-btn', {active: page === '/workspace/knowledges'}]"><i class="fas fa-book-open"></i> 我的知识库</a>
-                <a href="/try" @click.prevent="navigate('/try')" :class="['nav-btn', {active: page === '/try'}]"><i class="fas fa-flask"></i> 试一下</a>
-                <a href="/account" @click.prevent="navigate('/account')" :class="['nav-btn', {active: page === '/account'}]"><i class="fas fa-user-circle"></i> 个人管理</a>
-                <template v-if="isAdmin"><span class="nav-caption">ADMIN</span><a href="/admin" @click.prevent="navigate('/admin')" :class="['nav-btn', {active: page === '/admin'}]"><i class="fas fa-ticket"></i> 邀请码管理</a></template>
+  <noscript>Meow Connect Platform 需要启用 JavaScript。</noscript>
+  <div id="app" v-cloak>
+    <el-config-provider :locale="locale">
+      <div class="app-shell">
+        <a class="skip-link" href="#main">跳到内容</a>
+        <header class="site-header">
+          <div class="header-inner">
+            <a class="logo" href="/" @click.prevent="go('/')" aria-label="MeowConnectPlatform 首页"><img src="/favicon.svg" alt=""><span>M.C.P</span></a>
+            <nav class="desktop-nav" aria-label="主导航">
+              <a class="nav-link" :class="{active: isExplore}" :aria-current="isExplore ? 'page' : undefined" href="/" @click.prevent="go('/')">探索服务</a>
+              <a class="nav-link" :class="{active: isWorkspace}" :aria-current="isWorkspace ? 'page' : undefined" href="/workspace/knowledges" @click.prevent="go('/workspace/knowledges')">我的工作空间</a>
+              <a v-if="role === 'admin'" class="nav-link" :class="{active: page === '/admin'}" href="/admin" @click.prevent="go('/admin')">管理页面</a>
             </nav>
-            <div class="sidebar-footer">
-                <div v-if="isAuthenticated" class="user-badge">
-                    <span>{{ currentUser.username }}</span>
-                    <small>{{ currentUser.role }}</small>
+            <div class="header-actions">
+              <el-tooltip :content="isDark ? '切换日间模式' : '切换夜间模式'">
+                <el-button circle @click="toggleTheme" :aria-label="isDark ? '切换日间模式' : '切换夜间模式'"><mcp-icon :name="isDark ? 'Sunny' : 'Moon'"></mcp-icon></el-button>
+              </el-tooltip>
+              <el-button v-if="authChecking" loading disabled aria-label="确认登录状态"></el-button>
+              <el-button v-else-if="!isAuthenticated" @click="openAuth('login')">登录</el-button>
+              <el-dropdown v-else @command="accountCommand" trigger="click">
+                <el-button><mcp-icon name="User"></mcp-icon>{{ displayName }}<mcp-icon name="ArrowDown" :size="12"></mcp-icon></el-button>
+                <template #dropdown><el-dropdown-menu><el-dropdown-item command="account">个人管理</el-dropdown-item><el-dropdown-item command="logout" divided>退出登录</el-dropdown-item></el-dropdown-menu></template>
+              </el-dropdown>
+              <el-button class="mobile-trigger" circle @click="mobileNav = true" aria-label="打开导航"><mcp-icon name="Operation"></mcp-icon></el-button>
+            </div>
+          </div>
+        </header>
+        <nav v-if="isWorkspace" class="workspace-subnav" aria-label="工作空间导航"><a v-for="link in workspaceLinks" :key="link.path" :href="link.path" :class="{active: page === link.path}" :aria-current="page === link.path ? 'page' : undefined" @click.prevent="go(link.path)">{{ link.label }}</a></nav>
+        <transition name="el-fade-in-linear" mode="out-in">
+          <main id="main" :key="page" class="main" :class="{'home-main': page === '/'}" tabindex="-1">
+            <template v-if="page === '/'">
+              <div class="home-hero">
+                <div class="brand-wordmark" :class="{'is-animating': brandAnimating}" role="img" aria-label="Meow Connect Platform">
+                  <span class="brand-word" v-for="word in brandWords" :key="word.initial" aria-hidden="true"><span class="brand-initial">{{ word.initial }}</span><span class="brand-letter" v-for="(letter, i) in word.suffix" :key="i" :style="{'--letter-order': word.offset + i}">{{ letter }}</span></span>
                 </div>
-                <button v-if="isAuthenticated" @click="handleLogout" class="danger-btn logout-btn">
-                    <i class="fas fa-right-from-bracket"></i> 退出登录
-                </button>
-                <button v-else @click="openLogin" class="btn-primary nav-login">登录 / 邀请注册</button>
-            </div>
-        </aside>
-
-        <!-- Platform pages -->
-        <main class="main-content">
-            <div v-if="page === '/'" class="platform-page home-page">
-                <div class="eyebrow">SUPERMew / OPEN PLATFORM <span>01—MCP SERVICES</span></div>
-                <section class="hero"><div><span class="pill">受邀开放 · {{ serviceInfo.externalAvailable ? '远程 MCP 可接入' : '站内试用' }}</span><h1>让你的知识，<br><em>成为可调用的能力。</em></h1><p>上传自己的文件，建立私有知识库，先在站内验证检索效果。通过标准 MCP 工具，在自己的知识库中发现并检索内容。</p><div class="hero-actions"><a href="/services/knowledge" @click.prevent="navigate('/services/knowledge')" class="btn-primary">探索知识库 MCP <i class="fas fa-arrow-right"></i></a><a href="/try" @click.prevent="navigate('/try')" class="text-link">进入试用工作台 ↗</a></div></div><div class="hero-visual"><div class="visual-index">01 / KNOWLEDGE</div><div class="visual-flow"><span>你的文件</span><i class="fas fa-arrow-down"></i><span>私有知识库</span><i class="fas fa-arrow-down"></i><strong>listKnowledges · retrieve</strong></div><div class="visual-foot">BUILD · RETRIEVE · VERIFY</div></div></section>
-                <section class="section-block"><div class="section-heading"><div><span class="kicker">SERVICE DIRECTORY</span><h2>已开放的服务</h2></div><span class="section-number">01 / 01</span></div><article v-for="service in services" :key="service.id" class="service-card"><div class="service-symbol"><i class="fas fa-book-open"></i></div><div><span class="card-tag">{{ service.category }} · {{ serviceInfo.externalAvailable ? '远程可接入' : '站内试用' }}</span><h3>{{ service.name }}</h3><p>{{ service.description }}</p><div class="tool-tags"><span v-for="tool in service.tools" :key="tool">{{ tool }}</span></div></div><a :href="service.path" @click.prevent="navigate(service.path)" class="card-arrow" :aria-label="'查看' + service.name"><i class="fas fa-arrow-up-right-from-square"></i></a></article></section>
-                <section class="path-strip"><div><b>01</b><span>受邀注册</span></div><div><b>02</b><span>上传资料</span></div><div><b>03</b><span>站内试用</span></div></section>
-            </div>
-
-            <div v-if="page === '/services/knowledge'" class="platform-page service-page"><div class="eyebrow">SERVICES / KNOWLEDGE <span>01</span></div><div class="page-intro"><span class="pill">{{ serviceInfo.externalAvailable ? '远程可接入' : '当前可站内试用' }}</span><h1>知识库 MCP</h1><p>为自己的文件建立可检索的私有知识库。你可以先在站内调用两个只读工具，查看知识库列表与原始检索片段。</p><div class="hero-actions"><a href="/workspace/knowledges" @click.prevent="navigate('/workspace/knowledges')" class="btn-primary">管理我的知识库 <i class="fas fa-arrow-right"></i></a><a href="/try" @click.prevent="navigate('/try')" class="text-link">试一下工具 ↗</a></div></div><div class="service-status"><i class="fas fa-circle-info"></i><div><strong>{{ serviceInfo.externalAvailable ? '远程 MCP 已开放' : '远程 MCP 接入待发布' }}</strong><p>{{ serviceInfo.externalAvailable ? '使用个人 API Key 连接 Codex；每个 Key 只读取你的私有知识库。' : '站内试用可用。公开 HTTPS 地址配置并完成客户端验收后开放远程接入。' }}</p></div></div><section v-if="serviceInfo.externalAvailable" class="mcp-connect"><div class="section-heading"><div><span class="kicker">CONNECT / CODEX</span><h2>接入远程服务</h2></div></div><p>先在个人管理页创建 API Key，立即保存明文，再把它设置为 Codex 运行环境中的 <code>SUPERMEW_MCP_API_KEY</code>。刷新 Codex 连接后发现工具。</p><div class="mcp-url"><code>{{ serviceInfo.endpoint }}</code><button class="btn-secondary" @click="copyText(serviceInfo.endpoint)">复制地址</button></div><pre>{{ codexConfig }}</pre><div class="detail-actions"><button class="btn-secondary" @click="copyText(codexConfig)">复制 Codex 配置</button><a href="/account" @click.prevent="navigate('/account')" class="text-link">创建 API Key ↗</a></div><p class="mcp-note">个人 API Key 使用平台 Bearer 鉴权；OAuth 自动授权暂未开放。401 表示 Key 无效或已撤销；403 表示 Origin 不被允许；工具错误通常表示参数或知识库范围不正确。</p></section><div class="section-heading"><div><span class="kicker">TOOLS</span><h2>两项基础能力</h2></div></div><div class="tool-grid"><article><span class="tool-no">01 / DISCOVER</span><h3>listKnowledges</h3><p>列出当前账号可用的知识库及可检索状态。</p><dl><dt>输入</dt><dd>可选 limit、cursor</dd><dt>输出</dt><dd>知识库列表、下一页游标</dd></dl></article><article><span class="tool-no">02 / RETRIEVE</span><h3>retrieve</h3><p>在所选知识库中查找相关片段，返回文件与位置来源。只返回检索结果，不生成回答。</p><dl><dt>输入</dt><dd>必填 query（1–500 字）、knowledgeIds（1–20 个不重复 ID）；可选 topK（默认 5，1–20）</dd><dt>输出</dt><dd>命中片段、知识库/文件来源、状态</dd></dl></article></div><div class="section-heading"><div><span class="kicker">GET STARTED</span><h2>三步开始</h2></div></div><div class="steps-grid"><div><b>01</b><h3>创建知识库</h3><p>为不同主题分别建库，资料只对自己可见。</p></div><div><b>02</b><h3>上传文件</h3><p>等待文件处理为“可检索”。</p></div><div><b>03</b><h3>试调工具</h3><p>在“试一下”查看原始结果或与 Agent 对话。</p></div></div></div>
-
-            <div v-if="page === '/account' && isAuthenticated" class="platform-page account-page"><div class="eyebrow">WORKSPACE / ACCOUNT</div><div class="page-intro"><span class="pill">个人空间</span><h1>个人管理</h1><p>管理自己的登录身份与远程 MCP 访问凭证。</p></div><div class="account-card"><span class="kicker">ACCOUNT</span><div class="account-avatar">{{ currentUser.username.slice(0, 1).toUpperCase() }}</div><h2>{{ currentUser.username }}</h2><p>角色：{{ currentUser.role }}</p></div><section class="api-key-panel"><div class="section-heading"><div><span class="kicker">CREDENTIALS</span><h2>个人 API Key</h2></div></div><p>每个 Key 可以调用你的知识库 MCP。明文仅在创建时显示一次；首版不会自动到期，可随时撤销。</p><form class="key-create" @submit.prevent="createApiKey"><input v-model="apiKeyName" maxlength="100" placeholder="名称，例如 Codex 桌面端" aria-label="API Key 名称"><button class="btn-primary" type="submit" :disabled="apiKeyBusy || !apiKeyName.trim()">创建 API Key</button></form><p v-if="apiKeyError" class="key-error" role="alert">{{ apiKeyError }}</p><div v-if="createdApiKey" class="new-key" role="status"><strong>立即复制并妥善保存，此处关闭或刷新后无法再查看。</strong><div class="mcp-url"><code>{{ createdApiKey }}</code><button class="btn-secondary" @click="copyText(createdApiKey)">复制 Key</button></div><button class="text-link key-dismiss" @click="createdApiKey = ''">我已保存，关闭</button></div><div class="key-list"><p v-if="!apiKeys.length">尚无 API Key。</p><article v-for="item in apiKeys" :key="item.id" class="key-row"><div><strong>{{ item.name }}</strong><small>尾号 {{ item.suffix }} · 创建于 {{ new Date(item.createdAt).toLocaleString() }} · 最近使用 {{ item.lastUsedAt ? new Date(item.lastUsedAt).toLocaleString() : '暂无' }}</small></div><span v-if="item.revokedAt" class="key-revoked">已撤销</span><button v-else class="danger-btn" :disabled="apiKeyBusy" @click="revokeApiKey(item)">撤销</button></article></div><p class="mcp-note">轮换 Key：创建新 Key → 更新客户端环境变量 → 撤销旧 Key。网页登录凭证与 API Key 用途不同。</p></section></div>
-
-            <div v-if="page === '/admin' && isAdmin" class="platform-page admin-page">
-                <div class="eyebrow">OPERATIONS / INVITATIONS <span>ADMIN ONLY</span></div>
-                <div class="page-intro"><span class="pill">受邀开放</span><h1>邀请码管理</h1><p>创建邀请码并控制可用次数与有效期。完整邀请码仅在创建后展示一次。</p></div>
-                <section class="invitation-panel"><div class="section-heading"><div><span class="kicker">ISSUE / NEW CODE</span><h2>创建邀请码</h2></div></div>
-                    <form class="invitation-form" @submit.prevent="createInvitation">
-                        <label>可使用次数<input v-model.number="invitationForm.max_uses" type="number" min="1" max="100" step="1" required></label>
-                        <label>过期时间 <small>可留空</small><input v-model="invitationForm.expires_at" type="datetime-local"></label>
-                        <button class="btn-primary" type="submit" :disabled="invitationBusy">{{ invitationBusy ? '创建中…' : '创建邀请码' }}</button>
-                    </form>
-                    <p v-if="invitationError" class="key-error" role="alert">{{ invitationError }}</p>
-                    <div v-if="createdInvitationCode" class="new-key" role="status"><strong>请立即复制并保存。关闭或刷新后无法再次查看完整邀请码。</strong><div class="mcp-url"><code>{{ createdInvitationCode }}</code><button class="btn-secondary" @click="copyText(createdInvitationCode)">复制邀请码</button></div><button class="text-link key-dismiss" @click="createdInvitationCode = ''">我已保存，关闭</button></div>
+                <section class="connection-example" aria-label="MCP 客户端配置示例">
+                  <el-tabs v-model="connectionClient" class="connection-tabs">
+                    <el-tab-pane v-for="example in connectionExamples" :key="example.id" :label="example.label" :name="example.id">
+                      <div class="connection-meta"><span>{{ example.file }}</span><el-button text size="small" @click="copyText(example.source)" :aria-label="'复制 ' + example.label + ' 配置'"><mcp-icon name="CopyDocument" :size="14"></mcp-icon>复制</el-button></div>
+                      <pre class="connection-code" tabindex="0" :aria-label="example.label + ' ' + example.language + ' 配置示例'"><code><span v-for="(token, i) in example.tokens" :key="i" :class="token.kind ? 'syntax-' + token.kind : undefined">{{ token.text }}</span></code></pre>
+                    </el-tab-pane>
+                  </el-tabs>
+                  <p class="connection-note">{{ connectionNote }}<el-button v-if="serviceError" link size="small" @click="loadServiceInfo">重试</el-button></p>
                 </section>
-                <section class="invitation-panel"><div class="section-heading"><div><span class="kicker">ISSUED / OVERVIEW</span><h2>已创建的邀请码</h2></div><button class="btn-secondary" type="button" :disabled="invitationLoading" @click="loadInvitations">刷新</button></div>
-                    <p v-if="invitationLoading" class="invitation-empty">正在加载…</p><p v-else-if="!invitations.length" class="invitation-empty">暂无邀请码。</p>
-                    <div v-else class="key-list"><article v-for="item in invitations" :key="item.id" class="key-row invitation-row"><div><strong>邀请码 · {{ item.id.slice(0, 8) }}</strong><small>已用 {{ item.used_count }} / {{ item.max_uses }} 次 · 创建于 {{ utcDate(item.created_at).toLocaleString() }} · 过期时间 {{ item.expires_at ? utcDate(item.expires_at).toLocaleString() : '不设置' }}</small></div><span :class="['invitation-status', { 'invitation-status-active': invitationStatus(item) === '可使用' }]">{{ invitationStatus(item) }}</span><button v-if="invitationStatus(item) === '可使用'" class="danger-btn" type="button" :disabled="invitationBusy" @click="revokeInvitation(item)">停用</button></article></div>
-                    <p class="mcp-note">列表只展示状态与使用情况，完整邀请码无法从服务端再次读取。</p>
+              </div>
+              <div class="home-intro"><h1>MCP 服务广场</h1><p>浏览平台已开放的 MCP 服务。</p></div>
+              <article class="service-entry">
+                <div class="service-icon"><mcp-icon name="Collection" :size="24"></mcp-icon></div>
+                <div class="service-copy"><h2>知识库检索 MCP</h2><p>上传文件建立私有知识库，检索相关片段并查看文件来源。</p><div class="service-status"><el-tag type="info" effect="plain">站内试用</el-tag><span class="small muted">{{ serviceInfo?.externalAvailable ? '支持外部 MCP 接入' : connectionNote }}</span></div></div>
+                <el-button @click="go('/services/knowledge')">查看详情<mcp-icon name="ArrowRight" :size="16"></mcp-icon></el-button>
+              </article>
+            </template>
+
+            <template v-else-if="page === '/services/knowledge'">
+              <a class="back-link" href="/" @click.prevent="go('/')"><mcp-icon name="ArrowLeft" :size="16"></mcp-icon>服务广场</a>
+              <div class="page-head"><div><h1>知识库检索 MCP</h1><p>检索私有资料中的相关片段，查看对应文件来源。</p></div></div>
+              <div class="detail-layout">
+                <div>
+                  <section class="detail-section"><h2>用途</h2><ul><li>查询产品手册、操作说明与内部文档。</li><li>为 Agent 回答提供相关资料和来源。</li><li>通过 MCP 客户端调用知识库工具。</li></ul></section>
+                  <section class="detail-section"><h2>使用步骤</h2><ol><li>创建知识库，上传文件。</li><li>等待文件状态变为可检索。</li><li>选择知识库进行站内试用，或创建个人 API Key 接入 MCP 客户端。</li></ol></section>
+                  <section class="detail-section"><h2>工具与接入</h2><p>通过 Streamable HTTP 提供 MCP 服务，使用个人 API Key 进行 Bearer 认证。</p><el-collapse><el-collapse-item title="工具说明" name="tools"><h3>listKnowledges</h3><p>列出当前账号的知识库、可检索状态及知识库 ID，支持 limit 与 cursor 分页。</p><h3 class="spaced-heading">retrieve</h3><p>使用 query、knowledgeIds 和 topK 检索指定知识库。knowledgeIds 为 1–20 个不重复的 ID，topK 上限由服务端设置。返回原始片段、文件来源和页码，不生成回答。</p><pre class="code">{{ JSON.stringify({query:'查询内容',knowledgeIds:['知识库 ID'],topK:5},null,2) }}</pre></el-collapse-item></el-collapse><p>在首页复制客户端配置，将个人 Key 设置为客户端进程的 MCP_API_KEY 环境变量。</p></section>
+                </div>
+                <aside class="detail-aside"><h3>接入信息</h3><dl class="info-list"><div><dt>协议</dt><dd>Streamable HTTP</dd></div><div><dt>认证</dt><dd>个人 API Key</dd></div><div><dt>知识库范围</dt><dd>当前账号</dd></div></dl><p class="section-note small">{{ connectionNote }}</p><code class="endpoint">{{ connectionEndpoint }}</code><div class="actions"><el-button @click="copyText(connectionEndpoint)">复制地址</el-button><el-button type="primary" @click="go('/account')">管理 API Key</el-button><el-button @click="go('/try')">站内试用</el-button></div></aside>
+              </div>
+            </template>
+
+            <template v-else-if="authChecking"><div class="panel empty-state"><mcp-icon name="Loading" class="processing-icon"></mcp-icon><p>正在确认登录状态</p></div></template>
+            <template v-else-if="!isAuthenticated">
+              <div class="page-head"><div><h1>{{ pageTitle }}</h1></div></div>
+              <div class="gate panel empty-state"><mcp-icon name="Lock"></mcp-icon><h2>登录后使用</h2><p>知识库、试用与凭证管理需要登录。登录后继续当前页面。</p><el-button type="primary" @click="openAuth('login')">登录</el-button><el-button @click="openAuth('register')">邀请注册</el-button></div>
+            </template>
+
+
+            <template v-else-if="page === '/workspace/knowledges'">
+              <div class="page-head"><div><h1>我的知识库</h1><p>管理资料与文件处理状态。</p></div><el-button type="primary" @click="createOpen = true"><mcp-icon name="Plus"></mcp-icon>创建知识库</el-button></div>
+              <el-alert v-if="knowledgeError" :title="knowledgeError" type="error" :closable="false" show-icon class="feedback"><template #default><el-button link @click="loadKnowledges">重试</el-button></template></el-alert>
+              <div v-if="knowledgeLoading && !knowledges.length" class="panel empty-state"><mcp-icon name="Loading" class="processing-icon"></mcp-icon><p>正在加载知识库</p></div>
+              <div v-else-if="!knowledges.length && !knowledgeError" class="panel empty-state"><mcp-icon name="FolderOpened"></mcp-icon><h2>还没有知识库</h2><p>创建知识库后上传文件。</p><el-button type="primary" @click="createOpen = true">创建知识库</el-button></div>
+              <div v-else-if="knowledges.length" class="workspace-grid">
+                <aside class="kb-nav"><ul class="kb-list"><li v-for="kb in knowledges" :key="kb.id"><a href="/workspace/knowledges" :class="{active:selectedKnowledgeId === kb.id}" @click.prevent="selectKnowledge(kb.id)"><mcp-icon name="Folder"></mcp-icon>{{ kb.name }}</a></li></ul></aside>
+                <section v-if="selectedKnowledge"><div class="file-toolbar"><div><h2>{{ selectedKnowledge.name }}</h2><p v-if="selectedKnowledge.description" class="muted small">{{ selectedKnowledge.description }}</p></div><div class="actions"><el-button @click="openKnowledgeEdit">编辑</el-button><el-dropdown trigger="click"><el-button aria-label="知识库操作"><mcp-icon name="MoreFilled"></mcp-icon></el-button><template #dropdown><el-dropdown-menu><el-dropdown-item @click="deleteKnowledge">删除知识库</el-dropdown-item></el-dropdown-menu></template></el-dropdown><el-button @click="openTryWithKnowledge(selectedKnowledgeId)">试一下</el-button><el-button type="primary" :loading="isUploading" @click="fileInput.click()"><mcp-icon name="Upload"></mcp-icon>上传文件</el-button></div></div>
+                  <input ref="fileInput" class="native-file-input" type="file" :accept="acceptedExtensions" @change="uploadDocument" aria-label="上传文件"><input ref="replaceInput" class="native-file-input" type="file" :accept="acceptedExtensions" @change="replaceDocument" aria-label="替换文件">
+                  <el-alert v-if="documentsError" :title="documentsError" type="error" :closable="false" show-icon class="feedback"><template #default><el-button link @click="loadDocuments">重试</el-button></template></el-alert>
+                  <el-table v-if="documents.length || documentsLoading" :data="documents" v-loading="documentsLoading"><el-table-column label="文件" min-width="180"><template #default="{row}"><span class="file-name"><mcp-icon name="Document"></mcp-icon>{{ row.filename }}</span></template></el-table-column><el-table-column label="处理状态" min-width="150"><template #default="{row}"><span class="status-text" :class="'status-' + row.status"><mcp-icon :name="statusIcon(row.status)" :class="{'processing-icon':documentPending(row)}" :size="16"></mcp-icon>{{ statusLabel(row.status) }}</span><p v-if="row.error_summary" class="small muted">{{ row.error_summary }}</p></template></el-table-column><el-table-column label="操作" width="180"><template #default="{row}"><el-button v-if="row.status === 'failed'" link type="primary" :disabled="!!documentBusyId" @click="documentAction(row,'retry')">重试</el-button><el-button link :disabled="documentPending(row) || !!documentBusyId" @click="chooseReplacement(row)">替换</el-button><el-button link :disabled="documentPending(row) || !!documentBusyId" @click="documentAction(row,'delete')">删除</el-button></template></el-table-column></el-table>
+                  <div v-else-if="!documentsError" class="panel empty-state"><mcp-icon name="DocumentAdd"></mcp-icon><h3>还没有文件</h3><p>上传后自动处理，可在此查看状态。</p></div><p class="upload-note">支持 {{ acceptedExtensions || '服务端允许的文件类型' }} · 单文件上限 {{ uploadLimitLabel }} · 处理完成后可检索</p>
                 </section>
-                <section class="invitation-panel operations-panel"><div class="section-heading"><div><span class="kicker">MCP / LAST 24 HOURS</span><h2>服务调用概况</h2></div><button class="btn-secondary" type="button" @click="loadOperations">刷新</button></div>
-                    <p v-if="operationsError" class="key-error" role="alert">{{ operationsError }}</p>
-                    <template v-if="operations"><div class="operations-stats"><div><strong>{{ operations.calls }}</strong><span>工具及拒绝调用</span></div><div><strong>{{ operations.errors }}</strong><span>异常调用</span></div><div><strong>{{ operations.averageDurationMs }} <small>ms</small></strong><span>平均耗时</span></div></div>
-                    <div class="operations-breakdown"><span v-for="item in operations.byOperation" :key="item.name">{{ item.name }} <b>{{ item.count }}</b></span></div>
-                    <h3 class="operations-subtitle">文件处理队列</h3><div class="operations-breakdown"><span>待处理 <b>{{ operations.documents.pending }}</b></span><span>处理中 <b>{{ operations.documents.processing }}</b></span><span>失败 <b>{{ operations.documents.failed }}</b></span></div>
-                    <div v-if="operations.failedDocuments.length" class="key-list operations-failed-files"><article v-for="item in operations.failedDocuments" :key="item.id" class="key-row invitation-row"><div><strong>文件 {{ item.id.slice(0, 8) }} · 用户 {{ item.ownerId }}</strong><small>知识库 {{ item.knowledgeId }} · {{ utcDate(item.updatedAt).toLocaleString() }}</small></div></article></div>
-                    <h3 class="operations-subtitle">最近异常</h3><p v-if="!operations.recentFailures.length" class="invitation-empty">近 24 小时没有异常调用。</p>
-                    <div v-else class="key-list"><article v-for="item in operations.recentFailures" :key="item.requestId + item.createdAt" class="key-row invitation-row"><div><strong>{{ item.operation }} · {{ item.category }}</strong><small>{{ utcDate(item.createdAt).toLocaleString() }} · 用户 {{ item.ownerId ?? '未知' }} · Key {{ item.keyId ? item.keyId.slice(0, 8) : '—' }} · 请求 {{ item.requestId }}</small></div></article></div></template>
-                    <p class="mcp-note">仅展示调用元数据，不保存查询原文、文件内容或完整 API Key。审计记录保留 90 天。</p>
-                </section>
-            </div>
-            <div v-if="page === '/admin' && isAuthenticated && !isAdmin" class="platform-page gate-page"><div class="eyebrow">ADMIN ONLY</div><h1>仅管理员可访问</h1><p>此页面需要管理员身份。</p></div>
-            <div v-if="isProtectedPage && !isAuthenticated" class="platform-page gate-page"><div class="eyebrow">PRIVATE WORKSPACE</div><h1>登录后继续</h1><p>当前页面只向受邀用户开放。登录后会保留你要访问的页面。</p><button class="btn-primary" @click="openLogin">登录 / 邀请注册 <i class="fas fa-arrow-right"></i></button></div>
+              </div>
+            </template>
+            <template v-else-if="page === '/try'">
+              <div class="page-head"><div><h1>试一下</h1><p>选择知识库，查看回答、检索片段与来源。</p></div><el-button @click="go('/workspace/knowledges')">管理知识库</el-button></div>
+              <el-alert v-if="knowledgeError" :title="knowledgeError" type="error" :closable="false" class="feedback"><template #default><el-button link @click="loadKnowledges">重试</el-button></template></el-alert>
+              <div class="scope-bar"><label for="knowledge-scope">知识库</label><el-select id="knowledge-scope" v-model="selectedKnowledgeIds" multiple collapse-tags collapse-tags-tooltip :multiple-limit="20" :loading="knowledgeLoading" :disabled="chatLoading" placeholder="选择知识库" aria-label="知识库范围"><el-option v-for="kb in knowledges" :key="kb.id" :label="kb.name" :value="kb.id"></el-option></el-select><span class="small muted">最多 20 个</span></div>
+              <div class="try-layout"><section><el-tabs v-model="tryMode"><el-tab-pane label="Agent 对话" name="chat">
+                <div class="chat-toolbar actions"><el-button size="small" :disabled="chatLoading" @click="newChat">新对话</el-button><el-button size="small" :disabled="chatLoading" @click="loadSessions">历史会话</el-button></div>
+                <div class="chat-log" ref="chatLog" aria-live="polite" aria-relevant="additions text"><div v-if="!messages.length" class="empty-state"><mcp-icon name="ChatLineSquare"></mcp-icon><h3>输入资料相关问题</h3><p>{{ knowledges.length ? '选择知识库后提问。' : '还没有知识库，可先上传资料。' }}</p></div><article v-for="message in messages" :key="message.id" class="chat-message" :class="{'is-user':message.author === 'user'}"><div class="chat-author">{{ message.author === 'user' ? '你' : 'Agent' }}<span class="message-scope">{{ scopeNames(message.knowledgeIds) }}</span></div><p v-if="message.author === 'user'" class="chat-body">{{ message.text }}</p><div v-else class="markdown-body" v-html="parseMarkdown(message.text)"></div><p v-if="message.thinking" class="small muted"><mcp-icon name="Loading" class="processing-icon" :size="14"></mcp-icon>正在回答</p><el-alert v-if="message.error" :title="message.error" type="error" :closable="false" class="feedback"></el-alert><el-collapse v-if="message.trace || message.steps?.length" class="trace-collapse">
+                  <el-collapse-item title="检索过程与来源" :name="message.id">
+                    <p v-for="(step,i) in message.steps || []" :key="i" class="small muted">{{ step.label || step.node || step.step || '检索步骤' }} {{ step.status || '' }}<span v-if="step.detail"> · {{ step.detail }}</span></p>
+                    <p v-if="message.trace?.tool_used === false" class="small muted">本轮未调用检索工具</p>
+                    <dl v-if="traceFacts(message.trace).length" class="trace-facts"><template v-for="fact in traceFacts(message.trace)" :key="fact.label"><dt>{{ fact.label }}</dt><dd>{{ fact.value }}</dd></template></dl>
+                    <section v-for="group in traceGroups(message.trace)" :key="group.label" class="trace-group">
+                      <h3>{{ group.label }}</h3>
+                      <div v-for="(source,i) in group.items" :key="source.chunk_id || i" class="source">
+                        <h3>{{ source.filename }}<span v-if="source.page_number" class="small muted"> · 第 {{ source.page_number }} 页</span></h3>
+                        <p>{{ source.text }}</p>
+                        <p class="small muted"><span v-if="source.knowledge_id">{{ scopeNames([source.knowledge_id]) }} · </span><span v-if="source.rrf_rank">召回 #{{ source.rrf_rank }} · </span><span v-if="source.rerank_score != null">重排 {{ Number(source.rerank_score).toFixed(4) }} · </span>{{ source.document_id }}</p>
+                      </div>
+                    </section>
+                  </el-collapse-item>
+                </el-collapse></article></div>
+                <el-form class="chat-compose" @submit.prevent="sendChat"><el-input v-model="chatInput" type="textarea" :rows="3" placeholder="输入问题，Shift + Enter 换行" aria-label="问题" :disabled="chatLoading" @keydown="handleChatKey" @compositionstart="isComposing = true" @compositionend="isComposing = false"></el-input><div class="actions"><span class="small muted">{{ selectedKnowledgeIds.length ? scopeLabel : '当前为空范围，不检索知识库' }}</span><el-button v-if="chatLoading" @click="stopChat">停止回答</el-button><el-button v-else type="primary" native-type="submit" :disabled="!chatInput.trim()">发送<mcp-icon name="Position" :size="16"></mcp-icon></el-button></div></el-form>
+              </el-tab-pane><el-tab-pane label="原始工具" name="tools"><el-form class="tool-fields" label-position="top" @submit.prevent="runTool"><el-form-item label="工具"><el-select v-model="toolName" aria-label="工具"><el-option label="retrieve" value="retrieve"></el-option><el-option label="listKnowledges" value="listKnowledges"></el-option></el-select></el-form-item><template v-if="toolName === 'retrieve'"><el-form-item label="查询内容"><el-input v-model="toolQuery" maxlength="500" placeholder="输入要检索的问题"></el-input></el-form-item><el-form-item label="topK"><el-input-number v-model="topK" :min="1" :max="knowledgeSettings.max_retrieval_results || 20"></el-input-number></el-form-item></template><el-button type="primary" native-type="submit" :loading="toolLoading" :disabled="toolName === 'retrieve' && (!toolQuery.trim() || !selectedKnowledgeIds.length)">运行工具</el-button></el-form>
+                <el-alert v-if="toolError" :title="toolError" type="error" :closable="false" show-icon class="feedback"></el-alert><div v-if="toolResult" class="result-area" aria-live="polite"><h3>{{ toolName === 'retrieve' ? '检索结果' : '知识库列表' }}</h3><p v-if="toolResult.status === 'no_documents'" class="section-note">当前范围没有可检索文件，请先上传文件并等待处理完成。</p><p v-if="toolResult.status === 'no_match'" class="section-note">没有匹配片段，可调整问题或知识库范围。</p><div v-for="source in toolResult.results || []" :key="source.sourceId" class="source"><h3>{{ source.rank }} · {{ source.knowledgeName }} / {{ source.filename }}<span v-if="source.pageNumber" class="small muted"> · 第 {{ source.pageNumber }} 页</span></h3><p>{{ source.text }}</p><span class="small muted">来源：{{ source.sourceId }}</span></div><div v-for="kb in toolResult.items || []" :key="kb.id" class="source"><h3>{{ kb.name }}</h3><p>{{ kb.readyDocumentCount }} 个可检索文件</p><code>{{ kb.id }}</code></div><p v-if="toolResult.items && !toolResult.items.length" class="section-note">还没有知识库。</p><el-collapse><el-collapse-item title="查看原始 JSON" name="json"><pre class="code">{{ JSON.stringify(toolResult,null,2) }}</pre></el-collapse-item></el-collapse></div>
+              </el-tab-pane></el-tabs></section><aside class="try-aside"><h3>当前范围</h3><p>{{ scopeLabel }}</p><p class="small">只检索所选知识库中处理完成的文件。调整范围后，下次请求使用新的范围。</p><el-button link type="primary" @click="go('/workspace/knowledges')">管理知识库</el-button></aside></div>
+            </template>
+            <template v-else-if="page === '/account'">
+              <div class="page-head"><div><h1>个人管理</h1><p>管理账号与个人 API Key。</p></div></div><div class="stack"><section class="panel"><div class="profile-row"><div class="profile-icon"><mcp-icon name="User" :size="24"></mcp-icon></div><div><h2>{{ displayName }}</h2><p class="muted">{{ isAdmin ? '管理员' : '普通用户' }}</p></div></div></section><section class="panel"><div class="panel-head"><h2>个人 API Key</h2><el-button link @click="loadKeys">刷新</el-button></div><p class="muted credential-note">完整 Key 仅创建时展示，请保存后用于 MCP 客户端接入。</p><div v-if="newKey" class="credential"><h3>保存此 Key</h3><p>关闭或离开页面后无法再次查看。</p><code>{{ newKey }}</code><div class="actions"><el-button @click="copyText(newKey)">复制</el-button><el-button @click="newKey = ''">已保存，关闭</el-button></div></div><el-alert v-if="keyError" :title="keyError" type="error" :closable="false" class="feedback"></el-alert><el-form class="inline-form" @submit.prevent="createKey"><el-form-item><el-input v-model="keyName" placeholder="Key 名称" aria-label="Key 名称" maxlength="100"></el-input></el-form-item><el-button type="primary" native-type="submit" :loading="keyBusy" :disabled="!keyName.trim()">创建 Key</el-button></el-form><el-table v-if="keys.length || keysLoading" :data="keys" v-loading="keysLoading"><el-table-column prop="name" label="名称" min-width="140"></el-table-column><el-table-column label="标识" min-width="160"><template #default="{row}">…{{ row.suffix }}</template></el-table-column><el-table-column label="最近使用" min-width="170"><template #default="{row}">{{ formatDate(row.lastUsedAt) }}</template></el-table-column><el-table-column label="状态" min-width="90"><template #default="{row}">{{ row.revokedAt ? '已撤销' : '可用' }}</template></el-table-column><el-table-column label="操作" width="80"><template #default="{row}"><el-button link :disabled="!!row.revokedAt || keyBusy" @click="revokeKey(row)">撤销</el-button></template></el-table-column></el-table><p v-else-if="!keyError" class="muted">还没有 API Key。</p></section></div>
+            </template>
+            <template v-else-if="page === '/admin' && !isAdmin"><div class="gate panel empty-state"><mcp-icon name="Lock"></mcp-icon><h1>需要管理员身份</h1><p>此页面仅向管理员开放。</p><el-button @click="go('/workspace/knowledges')">返回工作空间</el-button></div></template>
+            <template v-else-if="page === '/admin'">
+              <div class="page-head"><div><h1>管理页面</h1><p>管理邀请码，查看运行概况。</p></div><el-button @click="loadOperations">刷新概况</el-button></div><div class="admin-grid"><section class="panel"><div class="panel-head"><h2>邀请码</h2><el-button link @click="loadInvites">刷新</el-button></div><div v-if="newInvite" class="credential"><h3>保存邀请码</h3><p>完整内容仅创建时展示，关闭或离开页面后无法再次查看。</p><code>{{ newInvite }}</code><div class="actions"><el-button @click="copyText(newInvite)">复制</el-button><el-button @click="newInvite = ''">已保存，关闭</el-button></div></div><el-alert v-if="inviteError" :title="inviteError" type="error" :closable="false" class="feedback"></el-alert><el-form label-position="top" @submit.prevent="createInvite"><el-form-item label="可用次数"><el-input-number v-model="invitationForm.max_uses" :min="1" :max="100"></el-input-number></el-form-item><el-form-item label="过期时间（选填）"><el-date-picker v-model="invitationForm.expires_at" type="datetime" placeholder="不过期" aria-label="邀请码过期时间"></el-date-picker></el-form-item><el-button type="primary" native-type="submit" :loading="inviteBusy">创建邀请码</el-button></el-form><el-table :data="invites" v-loading="invitesLoading" class="invitation-table"><el-table-column label="使用次数" min-width="95"><template #default="{row}">{{ row.used_count }} / {{ row.max_uses }}</template></el-table-column><el-table-column label="过期时间" min-width="160"><template #default="{row}">{{ formatDate(row.expires_at) }}</template></el-table-column><el-table-column label="状态" min-width="90"><template #default="{row}">{{ invitationStatus(row) }}</template></el-table-column><el-table-column label="操作" width="80"><template #default="{row}"><el-button link :disabled="invitationStatus(row) !== '可用' || inviteBusy" @click="revokeInvite(row)">撤销</el-button></template></el-table-column></el-table></section>
+              <section class="panel" v-loading="operationsLoading"><h2>近 {{ operations?.windowHours || 24 }} 小时运行概况</h2><el-alert v-if="operationsError" :title="operationsError" type="error" :closable="false" class="feedback"></el-alert><template v-if="operations"><dl class="info-list"><div><dt>工具调用</dt><dd>{{ operations.calls }}</dd></div><div><dt>异常调用</dt><dd>{{ operations.errors }}</dd></div><div><dt>平均耗时</dt><dd>{{ operations.averageDurationMs }} ms</dd></div><div><dt>等待处理</dt><dd>{{ operations.documents.pending }}</dd></div><div><dt>处理中</dt><dd>{{ operations.documents.processing }}</dd></div><div><dt>处理失败</dt><dd>{{ operations.documents.failed }}</dd></div></dl><el-collapse><el-collapse-item title="调用与失败详情" name="operations"><p v-for="item in operations.byOperation" :key="item.name">{{ item.name }}：{{ item.count }} 次</p><div v-for="item in operations.recentFailures" :key="item.requestId" class="source"><h3>{{ item.operation }} · {{ item.category }}</h3><p>{{ formatDate(item.createdAt) }}</p><code>{{ item.requestId }}</code></div><div v-for="item in operations.failedDocuments" :key="item.id" class="source"><h3>文件处理失败</h3><code>{{ item.id }}</code><p class="small">知识库 {{ item.knowledgeId }} · {{ formatDate(item.updatedAt) }}</p></div></el-collapse-item></el-collapse></template></section></div>
+            </template>
+          </main>
+        </transition>
+        <footer class="site-footer"><span>MeowConnectPlatform</span><span>MCP · Model Context Protocol</span></footer>
+      </div>
+      <el-drawer v-model="mobileNav" title="导航" direction="rtl" size="min(320px, 90vw)"><nav class="mobile-nav" aria-label="移动导航"><div class="mobile-nav-label">探索服务</div><a href="/" :class="{active: isExplore}" @click.prevent="go('/')">MCP 服务广场</a><div class="mobile-nav-label">我的工作空间</div><a v-for="link in workspaceLinks" :key="link.path" :href="link.path" :class="{active: page === link.path}" @click.prevent="go(link.path)">{{ link.label }}</a><a v-if="role === 'admin'" href="/admin" @click.prevent="go('/admin')">管理页面</a></nav></el-drawer>
 
-            <div v-if="showAuth && !isAuthenticated" class="auth-overlay" @click.self="showAuth = false"><div class="auth-panel">
-                <button class="auth-close" @click="showAuth = false" aria-label="关闭">×</button><span class="kicker">WELCOME TO SUPERMew</span><h2>{{ authMode === 'login' ? '登录平台' : '邀请注册' }}</h2>
-                <p>使用邀请码注册后，可以管理自己的知识库并在聊天中检索。</p>
-                <div class="auth-form">
-                    <input v-model="authForm.username" type="text" placeholder="用户名" />
-                    <input v-model="authForm.password" type="password" placeholder="密码" />
-                    <input v-if="authMode === 'register'" v-model="authForm.invite_code" type="text" placeholder="邀请码" />
-                    <button class="send-btn auth-submit" :disabled="authLoading" @click="handleAuthSubmit">
-                        {{ authLoading ? '提交中...' : (authMode === 'login' ? '登录' : '注册') }}
-                    </button>
-                    <button class="auth-switch" @click="authMode = authMode === 'login' ? 'register' : 'login'">
-                        {{ authMode === 'login' ? '没有账号？去注册' : '已有账号？去登录' }}
-                    </button>
-                </div>
-
-            </div></div>
-
-            <!-- Private knowledge panel -->
-            <div v-if="isAuthenticated && page === '/workspace/knowledges'" class="settings-panel">
-                <div class="eyebrow">WORKSPACE / KNOWLEDGES</div>
-                <div class="settings-header">
-                    <h2>我的知识库</h2>
-                    <p>按主题管理资料。文件处理完成后，可直接进入站内试用。</p>
-                </div>
-                <p v-if="notice" class="platform-notice" role="status">{{ notice }} <button @click="notice = ''" aria-label="关闭提示">×</button></p>
-
-                <div class="upload-section">
-                    <h3>选择知识库</h3>
-                    <div class="knowledge-controls">
-                        <select v-model="selectedKnowledgeId" @change="selectKnowledge" aria-label="选择知识库">
-                            <option value="">请选择知识库</option>
-                            <option v-for="knowledge in knowledges" :key="knowledge.id" :value="knowledge.id">{{ knowledge.name }}</option>
-                        </select>
-                        <input v-model="newKnowledgeName" type="text" maxlength="200" placeholder="新知识库名称" @keyup.enter="createKnowledge" />
-                        <button class="btn-primary" :disabled="knowledgeLoading || !newKnowledgeName.trim()" @click="createKnowledge">创建</button>
-                    </div>
-                    <p v-if="knowledges.length === 0" class="knowledge-hint">先创建一个知识库，再上传文件。</p>
-                </div>
-
-                <div v-if="selectedKnowledge" class="upload-section knowledge-detail">
-                    <div class="section-heading"><div><span class="kicker">SELECTED KNOWLEDGE</span><h3>知识库信息</h3></div><span class="ready-badge">{{ selectedKnowledge.ready_document_count }} 个文件可检索</span></div>
-                    <label>名称<input v-model="knowledgeEdit.name" type="text" maxlength="200" /></label>
-                    <label>描述<textarea v-model="knowledgeEdit.description" rows="3" placeholder="这个知识库收录了什么内容？"></textarea></label>
-                    <div class="detail-actions"><button class="btn-primary" :disabled="knowledgeLoading || !knowledgeEdit.name.trim()" @click="updateKnowledge">保存修改</button><a :href="'/try?knowledge=' + selectedKnowledgeId" @click.prevent="openTryWithKnowledge(selectedKnowledgeId)" class="btn-secondary">去试一下 ↗</a><button class="btn-danger" :disabled="knowledgeLoading" @click="deleteKnowledge">删除知识库</button></div>
-                </div>
-
-                <div v-if="selectedKnowledgeId" class="upload-section">
-                    <h3><i class="fas fa-upload"></i> 上传文档</h3>
-                    <p class="upload-limits">支持 {{ knowledgeSettings.allowed_extensions.join('、') || 'PDF、Word、Excel' }}；单文件上限 {{ uploadLimitLabel() }}。</p>
-                    <div class="upload-area">
-                        <input 
-                            type="file" 
-                            ref="fileInput" 
-                            @change="handleFileSelect"
-                            accept=".pdf,.doc,.docx,.xls,.xlsx"
-                            style="display: none"
-                        />
-                        <button @click="$refs.fileInput.click()" class="upload-btn">
-                            <i class="fas fa-cloud-upload-alt"></i> 选择文件
-                        </button>
-                        <div v-if="selectedFile" class="selected-file">
-                            <i class="fas fa-file"></i> {{ selectedFile.name }}
-                            <button @click="uploadDocument" class="btn-primary" :disabled="isUploading">
-                                <i class="fas fa-upload"></i> {{ isUploading ? '上传中...' : '开始上传' }}
-                            </button>
-                        </div>
-                        <div v-if="uploadProgress" class="upload-progress">
-                            {{ uploadProgress }}
-                        </div>
-                    </div>
-                </div>
-
-                <div v-if="selectedKnowledgeId" class="documents-section">
-                    <h3><i class="fas fa-list"></i> 已上传文档</h3>
-                    <input ref="replaceInput" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx" style="display:none" @change="replaceDocument" />
-                    <button @click="loadDocuments" class="btn-secondary">
-                        <i class="fas fa-sync"></i> 刷新列表
-                    </button>
-                    
-                    <div v-if="documentsLoading" class="loading-indicator">
-                        加载中...
-                    </div>
-                    
-                    <div v-else-if="documents.length === 0" class="empty-documents">
-                        <i class="fas fa-inbox"></i>
-                        <p>暂无文档</p>
-                    </div>
-                    
-                    <div v-else class="documents-list">
-                        <div 
-                            v-for="doc in documents" 
-                            :key="doc.id"
-                            class="document-item"
-                        >
-                            <div class="document-info">
-                                <div class="document-icon">
-                                    <i :class="getFileIcon(doc.file_type)"></i>
-                                </div>
-                                <div class="document-details">
-                                    <div class="document-name">{{ doc.filename }}</div>
-                                    <div class="document-meta">
-                                        <span>{{ doc.file_type }}</span>
-                                        <span>{{ new Date(doc.created_at).toLocaleString() }}</span>
-                                        <span :class="['status-chip', 'status-' + doc.status]">{{ documentStatusLabel(doc.status) }}</span>
-                                        <span v-if="doc.error_summary">{{ doc.error_summary }}</span>
-                                    </div>
-                                </div>
-                            </div>
-                            <button v-if="doc.status === 'failed'" :disabled="documentBusyId === doc.id" @click="retryDocument(doc)" class="btn-secondary" title="重试处理">重试</button>
-                            <button v-if="['ready', 'failed'].includes(doc.status)" :disabled="documentBusyId === doc.id" @click="chooseReplacement(doc)" class="btn-secondary" title="替换文件">替换</button>
-                            <button 
-                                :disabled="documentBusyId === doc.id || ['processing', 'replacing'].includes(doc.status)"
-                                @click="deleteDocument(doc)"
-                                class="btn-danger"
-                                title="删除文档"
-                            >
-                                <i class="fas fa-trash"></i>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div v-if="isAuthenticated && page === '/try'" class="try-workbench">
-                <div class="eyebrow">WORKSPACE / TRY IT <span>站内试用</span></div>
-                <div class="try-heading"><div><h1>试一下</h1><p>选择本轮知识库范围，然后在 Agent 对话或原始工具调试中检验结果。</p></div><a href="/workspace/knowledges" @click.prevent="navigate('/workspace/knowledges')" class="text-link">管理知识库 ↗</a></div>
-                <div v-if="tryMode === 'chat'" class="scope-box"><div class="scope-title"><strong>检索范围</strong><span>切换仅影响下一条消息。</span></div><div class="scope-options"><label v-for="knowledge in knowledges" :key="knowledge.id"><input type="checkbox" :value="knowledge.id" v-model="selectedKnowledgeIds" /><span>{{ knowledge.name }}</span><small>{{ knowledge.has_ready_documents ? '可检索' : '暂无可检索文件' }}</small></label><span v-if="!knowledges.length" class="empty-scope">还没有知识库。<a href="/workspace/knowledges" @click.prevent="navigate('/workspace/knowledges')">先创建并上传文件 ↗</a></span></div><p class="scope-summary">当前：{{ selectedScopeLabel }}。<span v-if="!selectedKnowledgeIds.length">本次对话将使用空范围。</span></p></div>
-                <div class="try-tabs"><button :class="{active: tryMode === 'chat'}" @click="tryMode = 'chat'">Agent 对话</button><button :class="{active: tryMode === 'debug'}" @click="tryMode = 'debug'">工具调试</button></div>
-                <div v-if="tryMode === 'chat'" class="try-toolbar"><button @click="handleNewChat"><i class="fas fa-plus"></i> 新建会话</button><button @click="handleHistory"><i class="fas fa-clock-rotate-left"></i> 历史记录</button><button @click="handleClearChat"><i class="fas fa-trash"></i> 清空当前</button></div>
-            </div>
-
-            <!-- History Sidebar -->
-            <div v-if="isAuthenticated && page === '/try' && tryMode === 'chat' && showHistorySidebar" class="history-sidebar">
-                <div class="history-header">
-                    <h3>历史会话</h3>
-                    <button @click="showHistorySidebar = false" class="close-btn">
-                        <i class="fas fa-times"></i>
-                    </button>
-                </div>
-                <div class="history-list">
-                    <div v-if="sessions.length === 0" class="empty-history">
-                        <p>暂无历史记录</p>
-                    </div>
-                    <div 
-                        v-for="session in sessions" 
-                        :key="session.session_id"
-                        class="history-item"
-                        :class="{active: session.session_id === sessionId}"
-                    >
-                        <div class="session-body" @click="loadSession(session.session_id)">
-                            <div class="session-info">
-                                <div class="session-title">{{ session.title || session.session_id }}</div>
-                                <div class="session-meta">
-                                    <span>{{ session.message_count }} 条消息</span>
-                                    <span>{{ new Date(session.updated_at).toLocaleString() }}</span>
-                                </div>
-                            </div>
-                        </div>
-                        <button 
-                            class="history-delete-btn"
-                            title="删除会话"
-                            @click.stop="deleteSession(session.session_id)"
-                        >
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Chat Area (hidden when settings is active) -->
-            <div v-show="isAuthenticated && page === '/try' && tryMode === 'chat'" class="chat-area">
-                <header class="chat-header">
-                    <div class="header-info">
-                        <div class="status-dot"></div>
-                        <span>呆猫在线中...</span>
-                    </div>
-                    <div class="header-actions">
-                        <button class="icon-btn" title="更多"><i class="fas fa-ellipsis-h"></i></button>
-                    </div>
-                </header>
-
-                <div class="chat-container" ref="chatContainer">
-                <div v-if="messages.length === 0" class="welcome-screen">
-                    <div class="big-avatar">🐱</div>
-                    <h3>老大好！我是呆猫</h3>
-                    <p>我可以帮你搜索知识库、回答问题，很聪明的喵！</p>
-                </div>
-                
-                <!-- Messages -->
-                <div v-for="(msg, index) in messages" :key="index" :class="['message', msg.isUser ? 'user-message' : 'bot-message']">
-                    <div class="message-scope">本轮知识库：{{ scopeNames(msg.knowledgeIds) }}</div>
-                    <!-- 思考动画（在气泡内部，RAG 步骤实时填入） -->
-                    <div v-if="!msg.isUser && msg.isThinking && !msg.text" class="message-content thinking-content">
-                        <div class="thinking-header">
-                            <div class="thinking-dots">
-                                <span class="tdot"></span>
-                                <span class="tdot"></span>
-                                <span class="tdot"></span>
-                            </div>
-                            <span v-if="!msg.ragSteps || !msg.ragSteps.length" class="thinking-text">正在思考中...</span>
-                            <span v-else class="thinking-text">{{ msg.ragSteps[msg.ragSteps.length - 1].label }}</span>
-                        </div>
-                        <div v-if="msg.ragSteps && msg.ragSteps.length" class="thinking-trace-lines">
-                            <div v-for="(step, sIdx) in msg.ragSteps" :key="sIdx" class="thinking-trace-line">
-                                <span class="thinking-trace-icon">{{ step.icon || '▶' }}</span>
-                                <span class="thinking-trace-label">{{ step.label }}</span>
-                                <span v-if="step.detail" class="thinking-trace-detail">{{ step.detail }}</span>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- 正常回复内容 -->
-                    <div v-else class="message-content" v-html="msg.isUser ? escapeHtml(msg.text) : parseMarkdown(msg.text)"></div>
-                    <div v-if="!msg.isUser && msg.ragTrace" class="message-meta">
-                        <details class="reasoning-details">
-                            <summary>检索过程</summary>
-                            <div class="reasoning-content">
-                                <div class="trace-line">
-                                    工具：{{ msg.ragTrace.tool_used ? msg.ragTrace.tool_name : '未使用' }}
-                                </div>
-                                <div v-if="msg.ragTrace.retrieval_stage" class="trace-line">
-                                    检索阶段：{{ msg.ragTrace.retrieval_stage }}
-                                </div>
-                                <div v-if="msg.ragTrace.grade_score" class="trace-line">
-                                    相关性评分：{{ msg.ragTrace.grade_score }}
-                                </div>
-                                <div v-if="msg.ragTrace.grade_route" class="trace-line">
-                                    评分决策：{{ msg.ragTrace.grade_route }}
-                                </div>
-                                <div v-if="msg.ragTrace.rewrite_needed !== null && msg.ragTrace.rewrite_needed !== undefined" class="trace-line">
-                                    是否需要重写：{{ msg.ragTrace.rewrite_needed ? '是' : '否' }}
-                                </div>
-                                <div v-if="msg.ragTrace.rewrite_strategy" class="trace-line">
-                                    重写策略：{{ msg.ragTrace.rewrite_strategy }}
-                                </div>
-                                <div v-if="msg.ragTrace.rewrite_query" class="trace-line">
-                                    重写查询：{{ msg.ragTrace.rewrite_query }}
-                                </div>
-                                <div v-if="msg.ragTrace.retrieval_mode" class="trace-line">
-                                    检索模式：{{ msg.ragTrace.retrieval_mode }}
-                                </div>
-                                <div v-if="msg.ragTrace.candidate_k" class="trace-line">
-                                    候选召回数：{{ msg.ragTrace.candidate_k }}
-                                </div>
-                                <div v-if="msg.ragTrace.leaf_retrieve_level" class="trace-line">
-                                    叶子召回层级：L{{ msg.ragTrace.leaf_retrieve_level }}
-                                </div>
-                                <div v-if="msg.ragTrace.auto_merge_enabled !== null && msg.ragTrace.auto_merge_enabled !== undefined" class="trace-line">
-                                    Auto-merging启用：{{ msg.ragTrace.auto_merge_enabled ? '是' : '否' }}
-                                </div>
-                                <div v-if="msg.ragTrace.auto_merge_applied !== null && msg.ragTrace.auto_merge_applied !== undefined" class="trace-line">
-                                    Auto-merging应用：{{ msg.ragTrace.auto_merge_applied ? '是' : '否' }}
-                                </div>
-                                <div v-if="msg.ragTrace.auto_merge_threshold" class="trace-line">
-                                    合并阈值：{{ msg.ragTrace.auto_merge_threshold }}
-                                </div>
-                                <div v-if="msg.ragTrace.auto_merge_replaced_chunks" class="trace-line">
-                                    合并替换片段：{{ msg.ragTrace.auto_merge_replaced_chunks }}
-                                </div>
-                                <div v-if="msg.ragTrace.auto_merge_steps" class="trace-line">
-                                    合并轮次：{{ msg.ragTrace.auto_merge_steps }}
-                                </div>
-                                <div v-if="msg.ragTrace.rerank_enabled !== null && msg.ragTrace.rerank_enabled !== undefined" class="trace-line">
-                                    Rerank已配置：{{ msg.ragTrace.rerank_enabled ? '是' : '否' }}
-                                </div>
-                                <div v-if="msg.ragTrace.rerank_applied !== null && msg.ragTrace.rerank_applied !== undefined" class="trace-line">
-                                    Rerank已执行：{{ msg.ragTrace.rerank_applied ? '是' : '否' }}
-                                </div>
-                                <div v-if="msg.ragTrace.rerank_model" class="trace-line">
-                                    Rerank模型：{{ msg.ragTrace.rerank_model }}
-                                </div>
-                                <div v-if="msg.ragTrace.rerank_error" class="trace-line">
-                                    Rerank状态：{{ msg.ragTrace.rerank_error }}
-                                </div>
-                                <div v-if="msg.ragTrace.expansion_type" class="trace-line">
-                                    扩展策略：{{ msg.ragTrace.expansion_type }}
-                                </div>
-                                <div v-if="msg.ragTrace.step_back_question" class="trace-line">
-                                    退步问题：{{ msg.ragTrace.step_back_question }}
-                                </div>
-                                <div v-if="msg.ragTrace.expanded_query" class="trace-line">
-                                    扩展查询：{{ msg.ragTrace.expanded_query }}
-                                </div>
-                                <div v-if="msg.ragTrace.hypothetical_doc" class="trace-line">
-                                    HyDE 文档：{{ msg.ragTrace.hypothetical_doc }}
-                                </div>
-                                <div v-if="msg.ragTrace.initial_retrieved_chunks && msg.ragTrace.initial_retrieved_chunks.length" class="sources">
-                                    <div class="sources-title">初次检索结果</div>
-                                    <ul class="sources-list">
-                                        <li v-for="(chunk, sIndex) in msg.ragTrace.initial_retrieved_chunks" :key="sIndex" class="source-item">
-                                            <div class="source-title-line">
-                                                <span class="source-file">{{ chunk.filename }}</span>
-                                                <span v-if="chunk.page_number" class="source-page">（第 {{ chunk.page_number }} 页）</span>
-                                            </div>
-                                            <div class="source-meta-line">
-                                                <span class="source-page">RRF名次：#{{ chunk.rrf_rank || (sIndex + 1) }}</span>
-                                                <span v-if="chunk.knowledge_id" class="source-page">知识库：{{ scopeNames([chunk.knowledge_id]) }}</span>
-                                                <span v-if="chunk.document_id" class="source-page">文件 ID：{{ chunk.document_id }}</span>
-                                                <span v-if="chunk.rerank_score !== null && chunk.rerank_score !== undefined" class="source-page">Rerank分数：{{ Number(chunk.rerank_score).toFixed(4) }}</span>
-                                            </div>
-                                            <div v-if="chunk.text" class="source-excerpt">{{ chunk.text }}</div>
-                                        </li>
-                                    </ul>
-                                </div>
-                                <div v-if="msg.ragTrace.expanded_retrieved_chunks && msg.ragTrace.expanded_retrieved_chunks.length" class="sources">
-                                    <div class="sources-title">重写后检索结果</div>
-                                    <ul class="sources-list">
-                                        <li v-for="(chunk, sIndex) in msg.ragTrace.expanded_retrieved_chunks" :key="sIndex" class="source-item">
-                                            <div class="source-title-line">
-                                                <span class="source-file">{{ chunk.filename }}</span>
-                                                <span v-if="chunk.page_number" class="source-page">（第 {{ chunk.page_number }} 页）</span>
-                                            </div>
-                                            <div class="source-meta-line">
-                                                <span class="source-page">RRF名次：#{{ chunk.rrf_rank || (sIndex + 1) }}</span>
-                                                <span v-if="chunk.knowledge_id" class="source-page">知识库：{{ scopeNames([chunk.knowledge_id]) }}</span>
-                                                <span v-if="chunk.document_id" class="source-page">文件 ID：{{ chunk.document_id }}</span>
-                                                <span v-if="chunk.rerank_score !== null && chunk.rerank_score !== undefined" class="source-page">Rerank分数：{{ Number(chunk.rerank_score).toFixed(4) }}</span>
-                                            </div>
-                                            <div v-if="chunk.text" class="source-excerpt">{{ chunk.text }}</div>
-                                        </li>
-                                    </ul>
-                                </div>
-                                <div v-if="msg.ragTrace.retrieved_chunks && msg.ragTrace.retrieved_chunks.length && !(msg.ragTrace.initial_retrieved_chunks && msg.ragTrace.initial_retrieved_chunks.length) && !(msg.ragTrace.expanded_retrieved_chunks && msg.ragTrace.expanded_retrieved_chunks.length)" class="sources">
-                                    <div class="sources-title">向量检索结果</div>
-                                    <ul class="sources-list">
-                                        <li v-for="(chunk, sIndex) in msg.ragTrace.retrieved_chunks" :key="sIndex" class="source-item">
-                                            <div class="source-title-line">
-                                                <span class="source-file">{{ chunk.filename }}</span>
-                                                <span v-if="chunk.page_number" class="source-page">（第 {{ chunk.page_number }} 页）</span>
-                                            </div>
-                                            <div class="source-meta-line">
-                                                <span class="source-page">RRF名次：#{{ chunk.rrf_rank || (sIndex + 1) }}</span>
-                                                <span v-if="chunk.knowledge_id" class="source-page">知识库：{{ scopeNames([chunk.knowledge_id]) }}</span>
-                                                <span v-if="chunk.document_id" class="source-page">文件 ID：{{ chunk.document_id }}</span>
-                                                <span v-if="chunk.rerank_score !== null && chunk.rerank_score !== undefined" class="source-page">Rerank分数：{{ Number(chunk.rerank_score).toFixed(4) }}</span>
-                                            </div>
-                                            <div v-if="chunk.text" class="source-excerpt">{{ chunk.text }}</div>
-                                        </li>
-                                    </ul>
-                                </div>
-                            </div>
-                        </details>
-                    </div>
-                </div>
-                
-                <!-- Loading Indicator -->
-            </div>
-
-            <div class="input-area-wrapper">
-                <div class="input-area">
-                    <button class="attach-btn" @click="handleUploadClick" title="上传文档"><i class="fas fa-paperclip"></i></button>
-                    <textarea 
-                        v-model="userInput" 
-                        @keydown="handleKeyDown"
-                        @compositionstart="handleCompositionStart"
-                        @compositionend="handleCompositionEnd"
-                        @input="autoResize"
-                        placeholder="老大，有什么需要帮忙的喵？ (Shift+Enter 换行)"
-                        rows="1"
-                        ref="textarea"
-                    ></textarea>
-                    <button v-if="isLoading" @click="handleStop" class="send-btn stop-btn" title="终止回答">
-                        <i class="fas fa-stop"></i>
-                    </button>
-                    <button v-else @click="handleSend" class="send-btn" title="发送">
-                        <i class="fas fa-paper-plane"></i>
-                    </button>
-                </div>
-                <div class="footer-text">AI 生成的内容可能包含错误，请仔细甄别。</div>
-            </div>
-            </div>
-            <!-- End of Chat Area -->
-            <div v-if="isAuthenticated && page === '/try' && tryMode === 'debug'" class="debug-panel">
-                <div class="debug-intro"><span class="kicker">RAW TOOL OUTPUT</span><h2>站内工具调试</h2><p>这里直接展示只读工具返回的检索数据，不生成 AI 回答。远程 MCP 调用将在后续阶段开放。</p></div>
-                <div class="debug-grid"><section class="debug-card"><span class="tool-no">01 / DISCOVER</span><h3>listKnowledges</h3><p>列出当前账号的知识库和可检索状态。</p><button class="btn-primary" :disabled="debugLoading" @click="runDebug('listKnowledges')">运行工具 <i class="fas fa-play"></i></button></section><section class="debug-card"><span class="tool-no">02 / RETRIEVE</span><h3>retrieve</h3><label>检索问题<input v-model="debugQuery" type="text" maxlength="500" placeholder="输入想在文件里查找的问题" @keyup.enter="runDebug('retrieve')" /></label><fieldset><legend>知识库 ID（至少选择一个）</legend><div class="scope-options"><label v-for="knowledge in knowledges" :key="knowledge.id"><input type="checkbox" :value="knowledge.id" v-model="selectedKnowledgeIds" /><span>{{ knowledge.name }}</span><small>{{ knowledge.id }}</small></label><span v-if="!knowledges.length" class="empty-scope">暂无知识库，请先创建并上传文件。</span></div></fieldset><label>返回片段数量（1–20）<input v-model.number="debugTopK" type="number" min="1" max="20" /></label><button class="btn-primary" :disabled="debugLoading || !debugQuery.trim() || !selectedKnowledgeIds.length" @click="runDebug('retrieve')">运行检索 <i class="fas fa-play"></i></button></section></div>
-                <div v-if="debugLoading" class="debug-result">工具运行中…</div><div v-if="debugError" class="platform-notice" role="alert">{{ debugError }}</div>
-                <section v-if="debugResult" class="debug-result"><div class="section-heading"><div><span class="kicker">RESULT</span><h2>{{ debugTool }}</h2></div><span v-if="debugResult.status" class="ready-badge">{{ debugResult.status }}</span></div><p v-if="debugResult.status === 'no_documents'" class="debug-empty">当前范围没有可检索文件。请上传文件并等待处理完成。</p><p v-if="debugResult.status === 'no_match'" class="debug-empty">本次没有找到匹配片段。可以调整问题或知识库范围。</p><div v-for="item in debugResult.results || []" :key="item.sourceId" class="result-item"><div><b>#{{ item.rank }}</b><strong>{{ item.knowledgeName }} / {{ item.filename }}</strong><span v-if="item.pageNumber">第 {{ item.pageNumber }} 页</span></div><p>{{ item.text }}</p><small>来源：{{ item.sourceId }}</small></div><div v-if="debugResult.items" class="debug-knowledge-list"><div v-for="item in debugResult.items" :key="item.id"><strong>{{ item.name }}</strong><span>{{ item.readyDocumentCount }} 个文件可检索</span><small>{{ item.id }}</small></div></div><details open><summary>原始 JSON</summary><pre>{{ JSON.stringify(debugResult, null, 2) }}</pre></details></section>
-            </div>
-        </main>
-    </div>
-
-    <script src="/script.js"></script>
+      <el-dialog v-model="authOpen" :title="authMode === 'login' ? '登录' : '邀请注册'" width="440px" @closed="resetAuth" @opened="focusAuth"><el-alert v-if="authError" :title="authError" type="error" :closable="false" class="feedback"></el-alert><el-form ref="authFormRef" :model="authForm" :rules="authRules" label-position="top" @submit.prevent="submitAuth"><el-form-item label="用户名" prop="username"><el-input ref="usernameInput" v-model="authForm.username" autocomplete="username" maxlength="200"></el-input></el-form-item><el-form-item label="密码" prop="password"><el-input v-model="authForm.password" type="password" show-password :autocomplete="authMode === 'login' ? 'current-password' : 'new-password'"></el-input></el-form-item><el-form-item v-if="authMode === 'register'" label="邀请码" prop="invite"><el-input v-model="authForm.invite" autocomplete="off"></el-input></el-form-item><div class="auth-footer"><el-button link :disabled="authLoading" @click="switchAuth">{{ authMode === 'login' ? '邀请注册' : '返回登录' }}</el-button><el-button type="primary" native-type="submit" :loading="authLoading">{{ authMode === 'login' ? '登录' : '注册并登录' }}</el-button></div></el-form></el-dialog>
+      <el-dialog v-model="createOpen" title="创建知识库" width="440px"><el-form label-position="top" @submit.prevent="createKnowledge"><el-form-item label="名称"><el-input v-model="knowledgeName" maxlength="200"></el-input></el-form-item><el-form-item label="描述（选填）"><el-input v-model="knowledgeDescription" type="textarea" :rows="2"></el-input></el-form-item><div class="actions"><el-button @click="createOpen = false">取消</el-button><el-button type="primary" native-type="submit" :loading="knowledgeLoading" :disabled="!knowledgeName.trim()">创建</el-button></div></el-form></el-dialog>
+      <el-dialog v-model="editOpen" title="编辑知识库" width="440px"><el-form label-position="top" @submit.prevent="updateKnowledge"><el-form-item label="名称"><el-input v-model="knowledgeEdit.name" maxlength="200"></el-input></el-form-item><el-form-item label="描述"><el-input v-model="knowledgeEdit.description" type="textarea" :rows="2"></el-input></el-form-item><div class="actions"><el-button @click="editOpen = false">取消</el-button><el-button type="primary" native-type="submit" :loading="knowledgeLoading" :disabled="!knowledgeEdit.name.trim()">保存</el-button></div></el-form></el-dialog>
+      <el-drawer v-model="sessionsOpen" title="历史会话" size="min(460px,95vw)"><el-alert v-if="sessionsError" :title="sessionsError" type="error" :closable="false" class="feedback"><template #default><el-button link @click="loadSessions">重试</el-button></template></el-alert><div v-loading="sessionsLoading"><p v-if="!sessions.length && !sessionsLoading && !sessionsError" class="muted">还没有历史会话。</p><article v-for="session in sessions" :key="session.session_id" class="session-row"><el-button text :disabled="sessionsLoading" @click="loadSession(session)">{{ session.title || '未命名会话' }}</el-button><p class="small muted">{{ formatDate(session.updated_at) }}</p><p class="small muted">{{ scopeNames(session.last_knowledge_ids) }}</p><el-button link type="danger" @click="deleteSession(session)">删除</el-button></article></div></el-drawer>
+    </el-config-provider>
+  </div>
+  <script src="/vendor/vue/vue.global.prod.js"></script>
+  <script src="/vendor/element-plus/index.full.min.js"></script>
+  <script src="/vendor/element-plus/zh-cn.min.js"></script>
+  <script src="/vendor/icons-vue/index.iife.min.js"></script>
+  <script src="/vendor/marked/marked.umd.js"></script>
+  <script src="/vendor/dompurify/purify.min.js"></script>
+  <script src="/app.js"></script>
 </body>
 </html>
-

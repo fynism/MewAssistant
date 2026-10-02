@@ -1,6 +1,10 @@
-# SuperMew 项目说明
+# MeowConnectPlatform 项目说明
 
 Agent的项目记录，方便后续持续更新与展示。
+
+## v0.2 前端
+
+前端已采用服务广场与工作空间布局，使用 Vue 3、Element Plus、官方图标、日夜主题和本地字体。首页提供 Codex / Claude Code 配置切换、高亮及复制，接入地址与部署状态从现有服务接口读取。知识库、文件处理、流式对话、历史会话、工具调试、个人 Key 和管理员页面均连接现有后端接口。无需前端构建或 npm 安装；启动后端后刷新网页即可。文件结构和检查命令见 [前端说明](frontend/README.md)。
 
 > M1：注册使用管理员创建的一次性邀请码。旧 `.env` 中的 `ADMIN_INVITE_CODE` 已停用；首次管理员运行 `uv run python -m backend.admin_bootstrap --username admin` 创建，登录后调用 `POST /admin/invitations` 获取新的 `invite_code`。启动前先运行 `uv run alembic upgrade head`。
 
@@ -13,9 +17,9 @@ Agent的项目记录，方便后续持续更新与展示。
 Codex CLI 的配置示例（把 Key 只放在 Codex 运行环境的环境变量中）：
 
 ```toml
-[mcp_servers.supermew_knowledge]
+[mcp_servers.meowconnect_knowledge]
 url = "https://你的域名/mcp/knowledge"
-bearer_token_env_var = "SUPERMEW_MCP_API_KEY"
+bearer_token_env_var = "MCP_API_KEY"
 ```
 
 本地验收：`uv run python tests/m3_local_integration.py` 会在临时数据库运行迁移、启动 HTTP 服务，用官方 SDK 验证双用户隔离、两个工具和撤销。Docker 中的 Milvus 可用时追加 `--milvus`，会在随机测试 collection 中上传并检索两份同名文件。真实部署后可用 `MCP_URL`、`MCP_API_KEY` 环境变量运行 `uv run python tests/m3_sdk_smoke.py`。服务端默认关闭远程入口；未完成 HTTPS 发布验收时保持关闭。
@@ -128,7 +132,7 @@ Compose 会自动启动应用；在 ECS 上通过 Nginx/HTTPS 对外提供服务
   - 文档上传后执行三级滑动窗口分块，叶子分块向量化写入 Milvus，父级分块写入 PostgreSQL。
   - 用户注册/登录、JWT 鉴权、基于角色的 RBAC 权限控制（admin/user）。
   - 会话记忆与摘要，聊天与历史记录落地 PostgreSQL，并引入 Redis 缓存热点会话与父文档。
-- **运行形态**：FastAPI 后端 + 纯前端（Vue 3 CDN 单页）+ Milvus 向量库。
+- **运行形态**：FastAPI 后端 + Vue 3 浏览器版单页前端 + Milvus 向量库。
 
 ## 关键创新点
 - **混合检索落地**：稠密向量 + BM25 稀疏向量，Milvus Hybrid Search + RRF 排序，兼顾语义与词匹配。
@@ -231,7 +235,7 @@ Compose 会自动启动应用；在 ECS 上通过 Nginx/HTTPS 对外提供服务
   - [milvus_client.py](backend/milvus_client.py)：Milvus 集合定义、混合检索；`query_all` 分页查询（单次 `query` 的 `limit` 受服务端上限约束，删除前拉全量 chunk 文本时使用）。
   - [schemas.py](backend/schemas.py)：Pydantic 请求/响应模型。
 - 前端：`frontend/`
-  - [index.html](frontend/index.html) + [script.js](frontend/script.js) + [style.css](frontend/style.css)：Vue 3 + marked + highlight.js，提供聊天、历史会话、文档上传/删除界面。
+  - [index.html](frontend/index.html) + [app.js](frontend/app.js) + [theme.css](frontend/theme.css) + [styles.css](frontend/styles.css)：Vue 3 + Element Plus，提供服务广场、工作空间、聊天与接入管理；浏览器依赖位于 `frontend/vendor`。
 - 数据：`data/`
   - `bm25_state.json`：BM25 词表与 `doc_freq` / `total_docs` 等统计（稀疏检索 IDF 与入库、删除同步）。
   - `documents/`：上传文档原文件。
@@ -296,7 +300,7 @@ Compose 会自动启动应用；在 ECS 上通过 Nginx/HTTPS 对外提供服务
 - 后端：FastAPI、LangChain Agents、Pydantic、Uvicorn、SQLAlchemy、PostgreSQL、Redis。
 - 向量与检索：Milvus（HNSW 稠密索引 + SPARSE_INVERTED_INDEX 稀疏索引）、RRF 融合、Jina Rerank 精排。
 - 嵌入与稀疏：`langchain_huggingface` 本地稠密向量（默认 `BAAI/bge-m3`）；中英混合规则分词 + BM25 手写稀疏向量，统计持久化至 `bm25_state.json`。
-- 前端：Vue 3 (CDN)、marked、highlight.js、纯静态部署。
+- 前端：Vue 3、Element Plus、官方图标、marked、DOMPurify，依赖由项目提供，纯静态部署。
 - 工具链：dotenv 配置、requests、langchain_text_splitters、langchain_community.loaders。
 
 ## 环境变量
