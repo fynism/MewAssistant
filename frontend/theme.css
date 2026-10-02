@@ -1,0 +1,154 @@
+/* Local prototype fonts, shared by both themes. */
+@font-face {
+  font-family: 'Anthropic Sans';
+  src: url('/assets/fonts/AnthropicSans-Roman.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 300 800;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Anthropic Serif';
+  src: url('/assets/fonts/AnthropicSerif-Roman.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 300 800;
+  font-display: swap;
+}
+/* Shared semantic palette. All pages and Element Plus overlays use these roles. */
+:root, html.dark {
+  color-scheme: light;
+  --mcp-bg: #F5F3ED;
+  --mcp-surface: #FFFEFA;
+  --mcp-text: #292724;
+  --mcp-muted: #706B64;
+  --mcp-line: #DED9D0;
+  --mcp-accent: #8C4F3B;
+  --mcp-hover: #EBE7DE;
+  --mcp-soft: #EEE5DE;
+  --mcp-code-bg: #F0EDE6;
+  --mcp-code-key: #75523E;
+  --mcp-code-string: #4F6356;
+  --mcp-code-section: #705379;
+  --mcp-font-code: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  --mcp-font: 'Anthropic Sans', 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-serif;
+  --mcp-font-heading: 'Anthropic Serif', 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'SimSun', serif;
+  --el-color-primary: var(--mcp-accent);
+  --el-color-primary-light-3: #AB7C6C;
+  --el-color-primary-light-5: #C5A496;
+  --el-color-primary-light-7: #DDC7BC;
+  --el-color-primary-light-8: #E9D9D0;
+  --el-color-primary-light-9: #F1E8E1;
+  --el-color-primary-dark-2: #713C2C;
+  --el-color-success: #59735C;
+  --el-color-success-light-9: #EEF2EB;
+  --el-color-success-light-8: #DDE7D9;
+  --el-color-warning: #947135;
+  --el-color-warning-light-9: #F5EFE1;
+  --el-color-warning-light-8: #EDE1C7;
+  --el-color-danger: #AB4D43;
+  --el-color-danger-light-9: #F8ECE8;
+  --el-color-danger-light-8: #EDD2CA;
+  --el-color-info: var(--mcp-muted);
+  --el-color-info-light-9: #F0EDE6;
+  --el-color-info-light-8: #E6E1D7;
+  --el-bg-color: var(--mcp-surface);
+  --el-bg-color-page: var(--mcp-bg);
+  --el-bg-color-overlay: var(--mcp-surface);
+  --el-text-color-primary: var(--mcp-text);
+  --el-text-color-regular: var(--mcp-text);
+  --el-text-color-secondary: var(--mcp-muted);
+  --el-text-color-placeholder: var(--mcp-muted);
+  --el-text-color-disabled: #A19A90;
+  --el-border-color: var(--mcp-line);
+  --el-border-color-light: var(--mcp-line);
+  --el-border-color-lighter: #E9E5DC;
+  --el-border-color-extra-light: #EEEAE3;
+  --el-fill-color: var(--mcp-hover);
+  --el-fill-color-light: #F1EEE7;
+  --el-fill-color-lighter: #F7F4EE;
+  --el-fill-color-blank: var(--mcp-surface);
+  --el-fill-color-dark: #E4DED3;
+  --el-mask-color: rgba(28, 25, 21, .42);
+  --el-font-family: var(--mcp-font);
+  --el-font-size-base: 14px;
+  --el-border-radius-base: 6px;
+  --el-border-radius-small: 4px;
+  --el-box-shadow: 0 8px 28px rgba(34, 28, 20, .09);
+  --el-box-shadow-light: 0 6px 24px rgba(34, 28, 20, .07);
+  --el-transition-duration: .2s;
+}
+html.dark {
+  color-scheme: dark;
+  --mcp-bg: #1F1D1A;
+  --mcp-surface: #2A2723;
+  --mcp-text: #F1EEE7;
+  --mcp-muted: #B9B2A8;
+  --mcp-line: #49443E;
+  --mcp-accent: #D79C83;
+  --mcp-hover: #36312C;
+  --mcp-soft: #3A2E27;
+  --mcp-code-bg: #24211D;
+  --mcp-code-key: #D5AE91;
+  --mcp-code-string: #B4C2AF;
+  --mcp-code-section: #C8B0CD;
+  --el-color-primary-light-3: #B9816B;
+  --el-color-primary-light-5: #936957;
+  --el-color-primary-light-7: #634B3F;
+  --el-color-primary-light-8: #4D3C32;
+  --el-color-primary-light-9: #3A2E27;
+  --el-color-primary-dark-2: #E9B49B;
+  --el-color-success: #A2B69C;
+  --el-color-success-light-9: #2C3329;
+  --el-color-success-light-8: #3C4938;
+  --el-color-warning: #D3B27C;
+  --el-color-warning-light-9: #373023;
+  --el-color-warning-light-8: #4D402B;
+  --el-color-danger: #E29B8F;
+  --el-color-danger-light-9: #3C2B27;
+  --el-color-danger-light-8: #57362F;
+  --el-color-info-light-9: #302D28;
+  --el-color-info-light-8: #403B34;
+  --el-text-color-disabled: #827B70;
+  --el-border-color-lighter: #3B3630;
+  --el-border-color-extra-light: #332F29;
+  --el-fill-color-light: #302C26;
+  --el-fill-color-lighter: #2D2924;
+  --el-fill-color-dark: #423C34;
+  --el-mask-color: rgba(0, 0, 0, .6);
+  --el-box-shadow: 0 8px 28px rgba(0, 0, 0, .24);
+  --el-box-shadow-light: 0 6px 24px rgba(0, 0, 0, .18);
+}
+/* Foundation and shared component adjustments live here, never per page. */
+body { margin: 0; background: var(--mcp-bg); color: var(--mcp-text); font-family: var(--mcp-font); font-size: 14px; line-height: 1.65; }
+button, input, textarea, select { font-family: inherit; }
+h1, h2, h3, .brand-wordmark, .el-dialog__title, .el-drawer__title, .el-message-box__title { font-family: var(--mcp-font-heading); }
+a { color: inherit; text-decoration: none; }
+.content-link { color: var(--mcp-accent); text-decoration: underline; text-underline-offset: 3px; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--mcp-accent); outline-offset: 4px; }
+::selection { background: var(--mcp-soft); color: var(--mcp-text); }
+.el-button { font-weight: 500; }
+.el-button--primary { --el-button-text-color: #FFFEFA; --el-button-hover-text-color: #FFFEFA; --el-button-active-text-color: #FFFEFA; }
+html.dark .el-button--primary { --el-button-text-color: #241E19; --el-button-hover-text-color: #241E19; --el-button-active-text-color: #241E19; }
+.el-input, .el-select { --el-input-height: 36px; }
+.el-dialog, .el-message-box { border: 1px solid var(--mcp-line); border-radius: 12px; }
+.el-dialog { padding: 24px; max-width: calc(100vw - 32px); }
+.el-dialog__title, .el-drawer__title { font-weight: 600; }
+.el-dialog__body { padding-top: 8px; }
+.el-form-item__label { color: var(--mcp-text); }
+.el-tag { font-weight: 400; border-radius: 4px; }
+.el-tabs__nav-wrap::after { height: 1px; }
+.el-tabs__active-bar { height: 2px; }
+.el-collapse { --el-collapse-header-bg-color: transparent; --el-collapse-content-bg-color: transparent; }
+.el-collapse-item__header { font-weight: 500; }
+.el-table { --el-table-header-bg-color: var(--el-fill-color-light); --el-table-row-hover-bg-color: var(--mcp-hover); }
+.el-alert { align-items: flex-start; }
+.el-button .el-icon { margin-right: 6px; }
+.el-button.is-circle .el-icon { margin-right: 0; }
+.el-message-box { max-width: calc(100vw - 32px); }
+.connection-code { background: var(--mcp-code-bg); }
+.syntax-key { color: var(--mcp-code-key); }
+.syntax-string { color: var(--mcp-code-string); }
+.syntax-section { color: var(--mcp-code-section); }
+.syntax-comment, .syntax-punctuation { color: var(--mcp-muted); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-delay: 0ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+}
