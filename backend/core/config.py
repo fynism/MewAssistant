@@ -53,6 +53,15 @@ class Settings:
     embedding_device: str = os.getenv("EMBEDDING_DEVICE", "cpu")
     bm25_state_path: Path = Path(os.getenv("BM25_M1_STATE_PATH", BASE_DIR / "data" / "bm25_state_m1.json"))
     max_upload_bytes: int = int(os.getenv("MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
+    pdf_ocr_mode: str = os.getenv("PDF_OCR_MODE", "auto").lower()
+    pdf_ocr_dpi: int = int(os.getenv("PDF_OCR_DPI", "200"))
+    pdf_ocr_retry_dpi: int = int(os.getenv("PDF_OCR_RETRY_DPI", "300"))
+    pdf_ocr_max_side: int = int(os.getenv("PDF_OCR_MAX_SIDE", "3500"))
+    pdf_ocr_min_text_chars: int = int(os.getenv("PDF_OCR_MIN_TEXT_CHARS", "40"))
+    pdf_ocr_accept_score: float = float(os.getenv("PDF_OCR_ACCEPT_SCORE", "0.55"))
+    pdf_ocr_warning_score: float = float(os.getenv("PDF_OCR_WARNING_SCORE", "0.75"))
+    pdf_remove_repeated_margins: bool = os.getenv("PDF_REMOVE_REPEATED_MARGINS", "true").lower() == "true"
+    max_pdf_pages: int = int(os.getenv("MAX_PDF_PAGES", "300"))
     max_user_documents: int = int(os.getenv("MAX_USER_DOCUMENTS", "100"))
     max_user_storage_bytes: int = int(os.getenv("MAX_USER_STORAGE_BYTES", str(1024 * 1024 * 1024)))
     upload_rate_per_minute: int = int(os.getenv("UPLOAD_RATE_PER_MINUTE", "10"))
@@ -69,6 +78,14 @@ class Settings:
     auto_merge_enabled: bool = os.getenv("AUTO_MERGE_ENABLED", "true").lower() != "false"
     auto_merge_threshold: int = int(os.getenv("AUTO_MERGE_THRESHOLD", "2"))
     leaf_retrieve_level: int = int(os.getenv("LEAF_RETRIEVE_LEVEL", "3"))
+
+    def __post_init__(self):
+        if self.pdf_ocr_mode not in {"auto", "always", "off"}:
+            raise ValueError("PDF_OCR_MODE must be auto, always, or off")
+        if min(self.pdf_ocr_dpi, self.pdf_ocr_retry_dpi, self.pdf_ocr_max_side, self.max_pdf_pages) <= 0:
+            raise ValueError("PDF limits and resolutions must be positive")
+        if not 0 <= self.pdf_ocr_accept_score <= self.pdf_ocr_warning_score <= 1:
+            raise ValueError("OCR confidence thresholds must satisfy 0 <= accept <= warning <= 1")
 
 
 settings = Settings()
