@@ -2,6 +2,28 @@
 
 Agent的项目记录，方便后续持续更新与展示。
 
+## 文本清洗、TXT 与本地 PDF OCR
+
+上传与替换支持 PDF、Word、Excel、TXT。TXT 支持 UTF-8（含 BOM）、带 BOM 的 UTF-16/UTF-32 和 GB18030；解码错误、二进制内容、空正文在上传时返回明确错误。同一知识库的新文件按 SHA-256 检查完全重复内容，其他用户或知识库可独立保存相同文件；旧文件重新处理后补齐哈希。
+
+所有格式都在三级分块前统一清洗：NFC 规范化、统一换行、去除 BOM/异常零宽空格和无意义控制字符、去掉行尾空格、收敛连续空行。保留数字、单位、标点、缩进和表格列间空格。不会使用大模型改写正文，也不会去除正常的重叠分块。
+
+PDF 使用 PDFium 提取原生文字和位置。默认 `PDF_OCR_MODE=auto`：文字过少、乱码明显或存在大面积图片时逐页调用本地 RapidOCR（ONNX CPU）；`always` 强制检查所有页，`off` 关闭 OCR。原生文字与 OCR 按位置和文本相似度去重，简单双栏按栏排序，明确相邻的中文正文行合并。页眉页脚仅在页面上/下 10% 区域且至少 3 页、80% 页面重复时清理；可设置 `PDF_REMOVE_REPEATED_MARGINS=false` 关闭。复杂表格、公式、手写和严重模糊扫描不保证结构还原。
+
+OCR 默认 200 DPI，低质量最多重试一次（300 DPI），图片长边最多 3500 像素，PDF 最多 300 页。按文本长度加权的 OCR 分数低于 0.55 时，该识别结果留存供复核，扫描页暂不入库；存在低于 0.75 的结果时显示质量提示。分数不是准确率概率，需要用实际文件校准。正常页仍可入库，明显空白页单独计数，有可见内容但未识别的页显示缺页提示；全文件没有可用内容时处理失败。
+
+安装与启动：`uv sync`，备份数据库后运行 `uv run alembic upgrade head`（新增 `0008_document_cleaning`），再启动应用。Docker 镜像构建时加载 OCR 模型；本地首次识别也会加载模型，运行期间不向云端发送文档。
+
+文档接口新增 `processing_report`，包括清洗版本、总页数、可检索页数、空白页、未可靠提取页和质量提示。文件列表可查看清洗前后内容并重新处理；聊天来源、工具调试和 MCP `retrieve` 的 `processingReport` 也携带质量信息。逐页原始文字、OCR 文字、框位置和分数存 PostgreSQL，并随文档删除。
+
+- `POST /knowledges/{knowledge_id}/documents/{document_id}/reprocess`：排队重新处理既有文件，处理中退出检索，完成后重新可检索。
+- `POST .../retry`：失败或部分完成的文件可重试；当前会重处理整个文件，避免重复写入分块和统计。
+- `GET .../pages/{page_number}`：当前用户查看自己文件的页面提取结果，路径页码从 1 开始；原有检索字段页码仍从 0 开始，界面显示时加 1。
+
+已有文件不会自动重建。可从页面逐份重新处理，或停止应用 worker 后运行 `uv run python -m backend.reindex_documents --all`。新 BM25 索引默认保留数字、年份、版本和型号；已有统计文件继续沿用旧分词规则。若要升级旧索引，先备份数据库、上传文件和 BM25 状态，在维护窗口停止应用，然后运行 `uv run python -m backend.reindex_documents --all --upgrade-tokenizer`。该命令先隐藏文档、清理对应旧向量，确认集合已空后重建统计与新向量；失败文件可重试。不要在应用 worker 运行时执行批量重建。
+
+验证：`uv run python -m unittest discover -s tests -p 'test_*.py'`；`node tests/frontend_platform_smoke.js`；本地实际 OCR/向量化验证见 `tests/ingestion_ocr_smoke.py`。
+
 ## v0.2 前端
 
 前端已采用服务广场与工作空间布局，使用 Vue 3、Element Plus、官方图标、日夜主题和本地字体。首页提供 Codex / Claude Code 配置切换、高亮及复制，配置示例统一使用正式地址 https://fyism.cn/mcp/knowledge。知识库、文件处理、流式对话、历史会话、工具调试、个人 Key 和管理员页面均连接现有后端接口。无需前端构建或 npm 安装；启动后端后刷新网页即可。文件结构和检查命令见 [前端说明](frontend/README.md)。
