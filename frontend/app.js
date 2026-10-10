@@ -62,6 +62,7 @@
       const authRules = {username:[{required:true,whitespace:true,message:'请输入用户名',trigger:'blur'}],password:[{required:true,message:'请输入密码',trigger:'blur'}],invite:[{required:true,whitespace:true,message:'请输入邀请码',trigger:'blur'}]};
       const knowledges = ref([]), selectedKnowledgeId = ref(''), selectedKnowledgeIds = ref([]), knowledgeLoading = ref(false), knowledgeError = ref('');
       const documents = ref([]), documentsLoading = ref(false), documentsError = ref(''), documentBusyId = ref('');
+      const pageReview = ref(null), pageReviewLoading = ref(false);
       const knowledgeSettings = ref({allowed_extensions:[],max_upload_bytes:0,max_retrieval_results:20});
       const createOpen = ref(false), editOpen = ref(false), knowledgeName = ref(''), knowledgeDescription = ref(''), knowledgeEdit = reactive({name:'',description:''});
       const fileInput = ref(null), replaceInput = ref(null), replacingDocumentId = ref(''), isUploading = ref(false);
@@ -128,6 +129,7 @@
         knowledgeLoading.value = false; documentsLoading.value = false; keysLoading.value = false; invitesLoading.value = false; sessionsLoading.value = false; operationsLoading.value = false;
         keyBusy.value = false; inviteBusy.value = false; isUploading.value = false; documentBusyId.value = '';
         createOpen.value = false; editOpen.value = false; sessionsOpen.value = false;
+        pageReview.value = null; pageReviewLoading.value = false;
         knowledgeError.value = ''; documentsError.value = ''; keyError.value = ''; inviteError.value = ''; operationsError.value = '';
         if (navigateHome) go('/');
       }
@@ -231,12 +233,20 @@
         if (action === 'delete' && !await confirmAction(`删除“${doc.filename}”？此文件将退出检索。`,'删除文档')) return;
         if (epoch !== identityEpoch) return;
         documentBusyId.value = doc.id;
-        try {await jsonRequest(`/knowledges/${encodeURIComponent(id)}/documents/${encodeURIComponent(doc.id)}${action === 'retry' ? '/retry' : ''}`,{method:action === 'retry' ? 'POST' : 'DELETE'}); if (epoch === identityEpoch && id === selectedKnowledgeId.value) await loadDocuments();}
+        try {await jsonRequest(`/knowledges/${encodeURIComponent(id)}/documents/${encodeURIComponent(doc.id)}${action === 'delete' ? '' : '/' + action}`,{method:action === 'delete' ? 'DELETE' : 'POST'}); if (epoch === identityEpoch && id === selectedKnowledgeId.value) await loadDocuments();}
         catch (error) {report(error);} finally {if (epoch === identityEpoch) documentBusyId.value = '';}
       }
       const statusLabel = status => ({pending:'等待处理',processing:'处理中',ready:'可检索',failed:'处理失败',replacing:'替换中',deleting:'删除中'}[status] || status);
       const statusIcon = status => ({ready:'CircleCheck',failed:'CircleClose'}[status] || 'Loading');
       const documentPending = doc => ['pending','processing','replacing','deleting'].includes(doc.status);
+      async function viewDocumentPage(doc, pageNumber) {
+        const id = selectedKnowledgeId.value, epoch = identityEpoch;
+        const review = reactive({filename:doc.filename,pageNumber,data:null,error:''});
+        pageReview.value = review; pageReviewLoading.value = true;
+        try {const data = await jsonRequest(`/knowledges/${encodeURIComponent(id)}/documents/${encodeURIComponent(doc.id)}/pages/${pageNumber}`); if (epoch === identityEpoch && pageReview.value === review) review.data = data;}
+        catch (error) {if (epoch === identityEpoch && pageReview.value === review) review.error = error.message;}
+        finally {if (epoch === identityEpoch && pageReview.value === review) pageReviewLoading.value = false;}
+      }
       function openTryWithKnowledge(id) {selectedKnowledgeIds.value = [id]; scopeInitialized = true; history.pushState({},'',`/try?knowledge=${encodeURIComponent(id)}`); page.value = '/try';}
       function scopeNames(ids) {return ids == null ? '历史会话未记录范围' : !ids.length ? '空范围' : ids.map(id => knowledges.value.find(kb => kb.id === id)?.name || '已删除的知识库').join('、');}
       async function runTool() {
@@ -399,7 +409,7 @@
         connectionClient,servicePanels,connectionEndpoint,connectionNote,connectionExamples,
         authOpen,authMode,authLoading,authError,authForm,authFormRef,authRules,usernameInput,resetAuth,openAuth,switchAuth,focusAuth,submitAuth,logout,
         knowledges,selectedKnowledgeId,selectedKnowledgeIds,selectedKnowledge,knowledgeLoading,knowledgeError,loadKnowledges,selectKnowledge,createOpen,editOpen,knowledgeName,knowledgeDescription,knowledgeEdit,createKnowledge,openKnowledgeEdit,updateKnowledge,deleteKnowledge,
-        documents,documentsLoading,documentsError,documentBusyId,loadDocuments,fileInput,replaceInput,isUploading,acceptedExtensions,uploadLimitLabel,uploadDocument,chooseReplacement,replaceDocument,documentAction,statusLabel,statusIcon,documentPending,openTryWithKnowledge,
+        documents,documentsLoading,documentsError,documentBusyId,loadDocuments,fileInput,replaceInput,isUploading,acceptedExtensions,uploadLimitLabel,uploadDocument,chooseReplacement,replaceDocument,documentAction,statusLabel,statusIcon,documentPending,openTryWithKnowledge,pageReview,pageReviewLoading,viewDocumentPage,
         scopeLabel,scopeNames,toolName,toolQuery,topK,knowledgeSettings,toolLoading,toolResult,toolError,runTool,messages,chatInput,chatLoading,chatLog,isComposing,sendChat,stopChat,handleChatKey,parseMarkdown,traceFacts,traceGroups,newChat,sessions,sessionsOpen,sessionsLoading,sessionsError,loadSessions,loadSession,deleteSession,
         keys,keyName,newKey,keysLoading,keyBusy,keyError,loadKeys,createKey,revokeKey,invites,newInvite,invitesLoading,inviteBusy,inviteError,invitationForm,loadInvites,createInvite,revokeInvite,invitationStatus,formatDate,operations,operationsLoading,operationsError,loadOperations,copyText
       };
