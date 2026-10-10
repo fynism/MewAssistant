@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from backend.models import KnowledgeBase, KnowledgeDocument
 from backend.core.config import settings
 from backend.services.knowledge_service import visible_document_ids
+from backend.ingestion import public_report
 
 
 def _decode_cursor(cursor: str | None) -> int:
@@ -91,6 +92,8 @@ def retrieve(db: Session, owner_id: int, query: str,
     ).all()
     source = {document_id: (filename, knowledge_id, knowledge_name)
               for document_id, filename, knowledge_id, knowledge_name in records}
+    reports = {row.id: public_report(row.processing_report) for row in db.query(KnowledgeDocument).filter(
+        KnowledgeDocument.id.in_(list(source))).all() if row.processing_report}
     results = []
     for item in docs:
         document_id = item["document_id"]
@@ -107,5 +110,7 @@ def retrieve(db: Session, owner_id: int, query: str,
             result["retrievalScore"] = item["score"]
         if item.get("rerank_score") is not None:
             result["rerankScore"] = item["rerank_score"]
+        if document_id in reports:
+            result["processingReport"] = reports[document_id]
         results.append(result)
     return {"status": "ok" if results else "no_match", "results": results}

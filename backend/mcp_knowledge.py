@@ -43,6 +43,7 @@ class RetrievalHit(BaseModel):
     text: str
     retrievalScore: float | None = None
     rerankScore: float | None = None
+    processingReport: dict | None = None
 
 
 class RetrievalResult(BaseModel):
