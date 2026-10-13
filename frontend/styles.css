@@ -14,10 +14,13 @@
 .nav-link.active::after { content: ''; position: absolute; height: 2px; background: var(--mcp-accent); bottom: -1px; left: 0; right: 0; }
 .header-actions { margin-left: auto; display: flex; align-items: center; gap: 12px; }
 .mobile-trigger { display: none; }
-.workspace-subnav { width: calc(100% - 80px); max-width: 1120px; margin: 24px auto -24px; display: flex; gap: 24px; }
-.workspace-subnav a { padding: 8px 0; color: var(--mcp-muted); }
+.workspace-subnav { width: calc(100% - 80px); max-width: 1120px; margin: 24px auto 0; display: flex; gap: 24px; }
+.workspace-subnav a { display: inline-flex; align-items: center; gap: 6px; padding: 8px 0; color: var(--mcp-muted); }
+.workspace-subnav .el-icon, .mobile-nav .el-icon { flex-shrink: 0; }
 .workspace-subnav a.active { color: var(--mcp-accent); border-bottom: 1px solid var(--mcp-accent); }
 .main { width: calc(100% - 80px); max-width: 1120px; margin: 0 auto; padding: 56px 0 72px; flex: 1; }
+/* Keep the original content spacing without overlapping the navigation hit area. */
+.workspace-subnav + .main { padding-top: 32px; }
 .main.home-main { max-width: 1200px; padding-top: 64px; }
 .site-footer { max-width: 1200px; width: calc(100% - 80px); margin: auto; border-top: 1px solid var(--mcp-line); padding: 20px 0 24px; display: flex; justify-content: space-between; gap: 16px; font-size: 12px; color: var(--mcp-muted); }
 .page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-bottom: 32px; }
@@ -140,7 +143,11 @@ h3 { font-size: 15px; line-height: 1.6; font-weight: 600; }
 .chat-log { min-height: 260px; max-height: 440px; overflow-y: auto; padding: 8px 0 24px; }
 .chat-message { margin-bottom: 24px; }
 .chat-message:last-child { margin-bottom: 0; }
-.chat-author { margin-bottom: 8px; font-size: 12px; font-weight: 600; color: var(--mcp-muted); }
+.chat-author { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; font-size: 12px; font-weight: 600; color: var(--mcp-muted); }
+.chat-role { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.chat-role-icon { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 8px; background: var(--mcp-soft); color: var(--mcp-accent); }
+.chat-message.is-user .chat-role-icon { background: var(--el-fill-color-light); color: var(--mcp-muted); box-shadow: inset 0 0 0 1px var(--mcp-line); }
+.chat-author .message-scope { min-width: 0; margin-left: 4px; }
 .chat-body { white-space: pre-wrap; overflow-wrap: anywhere; }
 .chat-message.is-user { border-left: 2px solid var(--mcp-line); padding-left: 16px; }
 .chat-compose { border-top: 1px solid var(--mcp-line); padding-top: 20px; }
@@ -166,6 +173,7 @@ h3 { font-size: 15px; line-height: 1.6; font-weight: 600; }
 .auth-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 24px; }
 .mobile-nav { display: flex; flex-direction: column; gap: 8px; }
 .mobile-nav a { padding: 12px; border-radius: 6px; }
+.mobile-nav .workspace-nav-link { display: flex; align-items: center; gap: 8px; }
 .mobile-nav a.active { background: var(--mcp-soft); color: var(--mcp-accent); }
 .mobile-nav-label { color: var(--mcp-muted); font-size: 12px; margin: 16px 12px 4px; }
 .el-fade-in-linear-enter-active, .el-fade-in-linear-leave-active { transition-duration: .15s; }
@@ -194,6 +202,7 @@ h3 { font-size: 15px; line-height: 1.6; font-weight: 600; }
   .logo img { width: 26px; height: 26px; }
   .main, .site-footer, .workspace-subnav { width: calc(100% - 40px); }
   .main, .main.home-main { padding: 40px 0 48px; }
+  .workspace-subnav + .main { padding-top: 16px; }
   .brand-wordmark { font-size: 22px; column-gap: 16px; margin-bottom: 40px; }
   .brand-initial { font-size: 46px; }
   .home-hero { gap: 28px; margin-bottom: 40px; }

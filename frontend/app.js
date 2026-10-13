@@ -29,7 +29,7 @@
       const isAdmin = computed(() => role.value === 'admin');
       const displayName = computed(() => currentUser.value?.username || '');
       const pageTitle = computed(() => titles[page.value]);
-      const workspaceLinks = [{path:'/workspace/knowledges',label:'我的知识库'}, {path:'/try',label:'试一下'}, {path:'/account',label:'个人管理'}];
+      const workspaceLinks = [{path:'/workspace/knowledges',label:'我的知识库',icon:'FolderOpened'}, {path:'/try',label:'试一下',icon:'ChatDotRound'}, {path:'/account',label:'个人管理',icon:'User'}];
       const isExplore = computed(() => page.value === '/' || page.value === '/services/knowledge');
       const isWorkspace = computed(() => workspaceLinks.some(link => link.path === page.value));
       const isDark = ref(document.documentElement.classList.contains('dark'));
