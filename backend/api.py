@@ -1,10 +1,12 @@
 from fastapi import APIRouter
 
 from backend.routers import auth, chat, sessions, knowledges, invitations, tool_debug, api_keys, platform, operations
+from backend.routers import github_auth
 
 
 router = APIRouter()
 router.include_router(auth.router)
+router.include_router(github_auth.router)
 router.include_router(sessions.router)
 router.include_router(chat.router)
 router.include_router(knowledges.router)
