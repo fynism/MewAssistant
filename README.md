@@ -28,7 +28,7 @@ OCR 默认 200 DPI，低质量最多重试一次（300 DPI），图片长边最�
 
 前端已采用服务广场与工作空间布局，使用 Vue 3、Element Plus、官方图标、日夜主题和本地字体。首页提供 Codex / Claude Code 配置切换、高亮及复制，配置示例统一使用正式地址 https://fyism.cn/mcp/knowledge。知识库、文件处理、流式对话、历史会话、工具调试、个人 Key 和管理员页面均连接现有后端接口。无需前端构建或 npm 安装；启动后端后刷新网页即可。文件结构和检查命令见 [前端说明](frontend/README.md)。
 
-> M1：注册使用管理员创建的一次性邀请码。旧 `.env` 中的 `ADMIN_INVITE_CODE` 已停用；首次管理员运行 `uv run python -m backend.admin_bootstrap --username admin` 创建，登录后调用 `POST /admin/invitations` 获取新的 `invite_code`。启动前先运行 `uv run alembic upgrade head`。
+> 用户名密码注册使用管理员创建的一次性邀请码；可选开启 GitHub 登录，首次授权自动创建普通用户，无需邀请码。配置与验收见 [GitHub OAuth 接入说明](docs/deploy/GitHub-OAuth.md)。旧 `.env` 中的 `ADMIN_INVITE_CODE` 已停用；首次管理员运行 `uv run python -m backend.admin_bootstrap --username admin` 创建，登录后调用 `POST /admin/invitations` 获取新的 `invite_code`。启动前先运行 `uv run alembic upgrade head`。
 
 ## M3 远程知识库 MCP
 

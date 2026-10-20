@@ -17,6 +17,8 @@ Vue 3 浏览器版 + Element Plus，HTML / CSS / JavaScript，无构建步骤。
 
 使用现有 `/auth/*`、`/knowledges/*`、`/knowledge-settings`、`/chat/stream`、`/sessions/*`、`/tools/debug/*`、`/account/api-keys/*` 与 `/admin/*`，未改变后端契约。
 
+页面启动时读取 `/auth/providers`。启用 GitHub OAuth 后，登录及邀请注册弹窗显示“使用 GitHub 登录”；首次授权自动注册，无需邀请码。GitHub 回调通过 HttpOnly 的短期一次性凭据完成同源登录，恢复发起时的页面及查询参数；地址栏只出现成功/失败标记，页面读取后立即移除。原有用户名密码和邀请码注册继续可用。配置见 [GitHub OAuth](../docs/deploy/GitHub-OAuth.md)。
+
 知识库 MCP 的正式地址为 `https://fyism.cn/mcp/knowledge`，首页和服务详情的地址与配置示例统一使用它。Codex 与 Claude Code 示例均从 `MCP_API_KEY` 环境变量读取个人 Key，不把真实 Key 写入示例。
 
 服务详情提供创建知识库、创建 API Key 的导航链接、客户端接入步骤与配置示例；“工具与接入”中的工具试用使用现有 `/tools/debug/*` 接口，登录后加载当前账号的知识库。`/try` 保留 Agent 对话和检索来源，详情中的“试用”链接指向该页面。
@@ -30,5 +32,6 @@ Vue 3 浏览器版 + Element Plus，HTML / CSS / JavaScript，无构建步骤。
 ```powershell
 node --check frontend/app.js
 node tests/frontend_knowledge_smoke.js
+node tests/frontend_github_smoke.js
 uv run python -m unittest tests.test_frontend_routes tests.test_backend_contracts tests.test_m3_platform
 ```
