@@ -50,7 +50,8 @@
 
       const connectionClient = ref('codex'), servicePanels = ref([]);
       const connectionEndpoint = 'https://fyism.cn/mcp/knowledge';
-      const connectionNote = 'Streamable HTTP · MCP_API_KEY 为个人 API Key 环境变量';
+      const helpTopic = ref(''), qualityReview = ref(null);
+      const helpTitle = computed(() => ({connection:'客户端接入',tools:'工具说明',upload:'上传说明',scope:'知识库范围'})[helpTopic.value] || '帮助');
       const connectionExamples = computed(() => [
         {id:'codex',label:'Codex',language:'TOML',file:'~/.codex/config.toml',source:`[mcp_servers.meowconnect_knowledge]\nurl = ${JSON.stringify(connectionEndpoint)}\nbearer_token_env_var = "MCP_API_KEY"`},
         {id:'claude',label:'Claude Code',language:'JSON',file:'.mcp.json',source:JSON.stringify({mcpServers:{meowconnect_knowledge:{type:'http',url:connectionEndpoint,headers:{Authorization:'Bearer ${MCP_API_KEY}'}}}},null,2)}
@@ -172,7 +173,7 @@
         knowledgeLoading.value = false; documentsLoading.value = false; keysLoading.value = false; invitesLoading.value = false; sessionsLoading.value = false; operationsLoading.value = false;
         keyBusy.value = false; inviteBusy.value = false; isUploading.value = false; documentBusyId.value = '';
         createOpen.value = false; editOpen.value = false; sessionsOpen.value = false;
-        pageReview.value = null; pageReviewLoading.value = false;
+        pageReview.value = null; pageReviewLoading.value = false; qualityReview.value = null; helpTopic.value = '';
         knowledgeError.value = ''; documentsError.value = ''; keyError.value = ''; inviteError.value = ''; operationsError.value = '';
         if (navigateHome) go('/');
       }
@@ -434,7 +435,7 @@
       watch(toolName, clearToolResults);
       watch(page, async () => {
         newKey.value = ''; newInvite.value = ''; stopDocumentPolling(); documentEpoch++; clearToolResults(); sessionEpoch++; stopChat();
-        createOpen.value = false; editOpen.value = false; sessionsOpen.value = false;
+        createOpen.value = false; editOpen.value = false; sessionsOpen.value = false; helpTopic.value = ''; qualityReview.value = null;
         document.title = pageTitle.value + ' · MeowConnectPlatform'; playBrand(); await loadPageData(); await nextTick();
         document.getElementById('main')?.focus({preventScroll:true});
       });
@@ -451,7 +452,7 @@
       onBeforeUnmount(() => {identityEpoch++; stopChat(); stopDocumentPolling(); clearTimeout(brandTimer); window.removeEventListener('popstate',onPopState); systemTheme.removeEventListener('change',onSystemTheme); motionQuery.removeEventListener('change',onMotion);});
       return {
         locale:ElementPlusLocaleZhCn,page,mobileNav,currentUser,authChecking,role,isAuthenticated,isAdmin,displayName,pageTitle,workspaceLinks,isExplore,isWorkspace,isDark,brandAnimating,brandWords,toggleTheme,go,accountCommand,
-        connectionClient,servicePanels,connectionEndpoint,connectionNote,connectionExamples,
+        connectionClient,servicePanels,connectionEndpoint,connectionExamples,helpTopic,helpTitle,qualityReview,
         authOpen,authMode,authView,authTitle,authLoading,authError,authForm,authFormRef,authRules,usernameInput,githubLoginButton,resetAuth,openAuth,switchAuth,focusAuth,choosePasswordLogin,showAuthMethods,submitAuth,logout,githubEnabled,githubLoading,startGitHubLogin,
         knowledges,selectedKnowledgeId,selectedKnowledgeIds,selectedKnowledge,knowledgeLoading,knowledgeError,loadKnowledges,selectKnowledge,createOpen,editOpen,knowledgeName,knowledgeDescription,knowledgeEdit,createKnowledge,openKnowledgeEdit,updateKnowledge,deleteKnowledge,
         documents,documentsLoading,documentsError,documentBusyId,loadDocuments,fileInput,replaceInput,isUploading,acceptedExtensions,uploadLimitLabel,uploadDocument,chooseReplacement,replaceDocument,documentAction,statusLabel,statusIcon,documentPending,openTryWithKnowledge,pageReview,pageReviewLoading,viewDocumentPage,
@@ -462,8 +463,8 @@
   });
   app.use(ElementPlus);
   app.component('mcp-connection-example',{
-    props:{modelValue:String,examples:Array,note:String},
-    emits:['update:modelValue','copy'],
+    props:{modelValue:String,examples:Array},
+    emits:['update:modelValue','copy','help'],
     template:'#connection-example-template'
   });
   app.component('mcp-icon',{props:{name:{type:String,required:true},size:{type:Number,default:20}},setup(props) {return () => Vue.h(ElementPlus.ElIcon,{size:props.size,'aria-hidden':'true'},() => Vue.h(ElementPlusIconsVue[props.name] || ElementPlusIconsVue.Document));}});
