@@ -58,6 +58,7 @@
 
       let identityEpoch = 0, documentEpoch = 0, knowledgeEpoch = 0, resultEpoch = 0, sessionEpoch = 0;
       const authOpen = ref(false), authMode = ref('login'), authLoading = ref(false), authError = ref('');
+      const githubEnabled = ref(false), githubLoading = ref(false);
       const authForm = reactive({username:'',password:'',invite:''}), authFormRef = ref(null), usernameInput = ref(null);
       const authRules = {username:[{required:true,whitespace:true,message:'请输入用户名',trigger:'blur'}],password:[{required:true,message:'请输入密码',trigger:'blur'}],invite:[{required:true,whitespace:true,message:'请输入邀请码',trigger:'blur'}]};
       const knowledges = ref([]), selectedKnowledgeId = ref(''), selectedKnowledgeIds = ref([]), knowledgeLoading = ref(false), knowledgeError = ref('');
@@ -104,16 +105,46 @@
       function openAuth(mode = 'login') {resetAuth(); authMode.value = mode; authOpen.value = true;}
       function switchAuth() {authMode.value = authMode.value === 'login' ? 'register' : 'login'; resetAuth();}
       function focusAuth() {usernameInput.value?.focus();}
+      function acceptLogin(data) {
+        logout(false);
+        token.value = data.access_token; storage.set('accessToken',data.access_token);
+        currentUser.value = {username:data.username,role:data.role}; authOpen.value = false; resetAuth();
+      }
+      async function startGitHubLogin() {
+        if (!githubEnabled.value || githubLoading.value || authLoading.value) return;
+        githubLoading.value = true; authError.value = '';
+        try {
+          const data = await jsonRequest('/auth/github/start',jsonBody('POST',{next:location.pathname + location.search}),false);
+          location.assign(data.authorization_url);
+        } catch (error) {authError.value = error.message; githubLoading.value = false;}
+      }
+      async function restoreGitHubLogin() {
+        const params = new URLSearchParams(location.search);
+        const success = params.get('github') === 'success', failure = params.get('github_error');
+        if (!success && !failure) return false;
+        params.delete('github'); params.delete('github_error');
+        history.replaceState({},'',location.pathname + (params.size ? '?' + params.toString() : '') + (location.hash || ''));
+        // The marker is not a credential. The server consumes an HttpOnly, one-use ticket.
+        if (success) {
+          authChecking.value = true;
+          try {acceptLogin(await jsonRequest('/auth/github/complete',jsonBody('POST',{}),false)); return true;}
+          catch (error) {authError.value = error.message;}
+          finally {authChecking.value = false;}
+        } else {
+          const reasons = {cancelled:'已取消 GitHub 授权，可以重新尝试',expired:'GitHub 登录已过期，请重新尝试',unavailable:'GitHub 登录暂时不可用，请稍后重试',failed:'GitHub 登录失败，请重新尝试'};
+          authError.value = reasons[failure] || 'GitHub 登录失败，请重新尝试';
+        }
+        authMode.value = 'login'; authOpen.value = true; return false;
+      }
       async function submitAuth() {
-        if (authLoading.value) return;
+        if (authLoading.value || githubLoading.value) return;
         try {await authFormRef.value.validate();} catch {return;}
         authLoading.value = true; authError.value = '';
         try {
           const payload = {username:authForm.username.trim(),password:authForm.password};
           if (authMode.value === 'register') payload.invite_code = authForm.invite.trim();
           const data = await jsonRequest(authMode.value === 'login' ? '/auth/login' : '/auth/register',jsonBody('POST',payload),false);
-          identityEpoch++; token.value = data.access_token; storage.set('accessToken',data.access_token);
-          currentUser.value = {username:data.username,role:data.role}; authOpen.value = false; resetAuth();
+          acceptLogin(data);
           await loadPageData();
         } catch (error) {authError.value = error.message;} finally {authLoading.value = false;}
       }
@@ -397,7 +428,9 @@
       });
       onMounted(async () => {
         document.title = pageTitle.value + ' · MeowConnectPlatform'; playBrand(); window.addEventListener('popstate',onPopState);
-        if (token.value) {
+        try {githubEnabled.value = (await jsonRequest('/auth/providers',{},false)).github === true;} catch {}
+        const githubRestored = await restoreGitHubLogin();
+        if (token.value && !githubRestored) {
           try {currentUser.value = await jsonRequest('/auth/me');} catch (error) {if (error.name !== 'AbortError') report(error);}
           finally {authChecking.value = false;}
         }
@@ -407,7 +440,7 @@
       return {
         locale:ElementPlusLocaleZhCn,page,mobileNav,currentUser,authChecking,role,isAuthenticated,isAdmin,displayName,pageTitle,workspaceLinks,isExplore,isWorkspace,isDark,brandAnimating,brandWords,toggleTheme,go,accountCommand,
         connectionClient,servicePanels,connectionEndpoint,connectionNote,connectionExamples,
-        authOpen,authMode,authLoading,authError,authForm,authFormRef,authRules,usernameInput,resetAuth,openAuth,switchAuth,focusAuth,submitAuth,logout,
+        authOpen,authMode,authLoading,authError,authForm,authFormRef,authRules,usernameInput,resetAuth,openAuth,switchAuth,focusAuth,submitAuth,logout,githubEnabled,githubLoading,startGitHubLogin,
         knowledges,selectedKnowledgeId,selectedKnowledgeIds,selectedKnowledge,knowledgeLoading,knowledgeError,loadKnowledges,selectKnowledge,createOpen,editOpen,knowledgeName,knowledgeDescription,knowledgeEdit,createKnowledge,openKnowledgeEdit,updateKnowledge,deleteKnowledge,
         documents,documentsLoading,documentsError,documentBusyId,loadDocuments,fileInput,replaceInput,isUploading,acceptedExtensions,uploadLimitLabel,uploadDocument,chooseReplacement,replaceDocument,documentAction,statusLabel,statusIcon,documentPending,openTryWithKnowledge,pageReview,pageReviewLoading,viewDocumentPage,
         scopeLabel,scopeNames,toolName,toolQuery,topK,knowledgeSettings,toolLoading,toolResult,toolError,runTool,messages,chatInput,chatLoading,chatLog,isComposing,sendChat,stopChat,handleChatKey,parseMarkdown,traceFacts,traceGroups,newChat,sessions,sessionsOpen,sessionsLoading,sessionsError,loadSessions,loadSession,deleteSession,

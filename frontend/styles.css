@@ -170,6 +170,9 @@ h3 { font-size: 15px; line-height: 1.6; font-weight: 600; }
 .profile-icon { width: 44px; height: 44px; border: 1px solid var(--mcp-line); display: flex; align-items: center; justify-content: center; border-radius: 50%; color: var(--mcp-muted); }
 .admin-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 24px; }
 .auth-help { font-size: 12px; color: var(--mcp-muted); margin-top: 4px; }
+.github-login { margin-bottom: 24px; }
+.github-login > .el-button { width: 100%; }
+.github-login .auth-help { margin: 8px 0 0; text-align: center; }
 .auth-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 24px; }
 .mobile-nav { display: flex; flex-direction: column; gap: 8px; }
 .mobile-nav a { padding: 12px; border-radius: 6px; }
