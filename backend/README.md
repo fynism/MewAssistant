@@ -14,6 +14,7 @@ backend/
 │   └── schemas/                   # 按能力拆分的 HTTP 请求/响应模型
 ├── services/
 │   ├── authentication.py          # 用户凭据校验
+│   ├── github_oauth.py            # GitHub 身份验证、状态与一次性登录票据
 │   ├── knowledge/
 │   │   ├── access.py              # 知识库创建、归属与检索可见范围
 │   │   ├── uploads.py             # 格式校验、配额、去重、上传与替换
@@ -50,6 +51,8 @@ backend/
 - `models/__init__.py` 汇总所有 ORM 映射，Alembic 与应用共用同一个 `Base.metadata`。拆分模型不新增迁移，也不修改历史迁移的建表行为。
 - 项目内导入使用新路径；`legacy/` 不参与正常私有知识库检索，其全局文档路由不注册到应用。
 
+GitHub 登录路由位于 `api/routers/github_auth.py`，请求和响应模型位于 `api/schemas/auth.py`，身份查询及一次性凭据由 `services/github_oauth.py` 处理。它与用户名密码登录共用 `api/dependencies.py` 的数据库依赖和 `core/security.py` 的 JWT 签发。用户的 `github_id` 及唯一索引保留在 `infrastructure/database/models/identity.py`，应用数据库版本为 `0009_github_oauth`；本次目录整理不新增迁移。
+
 ## 运行与验证
 
 在项目根目录执行：
@@ -59,6 +62,7 @@ uv run uvicorn backend.app:app --host 0.0.0.0 --port 8000 --reload
 uv run python -m unittest discover -s tests -p 'test_*.py'
 node tests/frontend_platform_smoke.js
 node tests/frontend_knowledge_smoke.js
+node tests/frontend_github_smoke.js
 uv run python tests/m3_local_integration.py
 ```
 

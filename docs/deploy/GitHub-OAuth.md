@@ -58,18 +58,28 @@ api.github.com/user
 
 ## 实现和测试
 
+模块化后的代码位置：
+
+- `backend/api/routers/github_auth.py`：登录入口、授权回调、票据兑换；通过 `backend/api/router.py` 注册到实际应用。
+- `backend/api/schemas/auth.py`：GitHub 登录请求及共用的认证响应模型。
+- `backend/services/github_oauth.py`：GitHub 身份验证、PKCE、Redis 状态及一次性票据。
+- `backend/api/dependencies.py` 和 `backend/core/security.py`：共用数据库依赖与 JWT 签发。
+- `backend/infrastructure/database/models/identity.py`：用户模型和 `github_id` 唯一索引；`session.py` 负责数据库会话与版本检查。
+
+模块化仅调整内部代码位置，对外 `/auth/*` 路径、环境变量和 `0009_github_oauth` 迁移保持一致。目录和依赖规则见 [后端架构说明](../../backend/README.md)。
+
 - OAuth `state` 有效期 10 分钟，绑定发起浏览器，Redis 原子一次性消费；使用 PKCE S256。
 - 授权成功后签发 60 秒一次性登录票据，通过 HttpOnly Cookie 和同源 POST 换取原有站内 JWT。JWT 与 GitHub access token 都不会写进回跳 URL；GitHub access token 不落库、不返回前端。
 - 生产 Cookie 使用 Secure、SameSite=Lax 和 `/auth/github` 路径；Redis 故障时拒绝登录，不降级为无验证注册。
 - 用户始终以 `user` 角色注册；GitHub 身份不匹配本站同名账号。请求日志只记录路径，不记录授权参数。反向代理和 Uvicorn 的访问日志可能包含 OAuth 回调查询串，生产日志应对该路径省略查询参数。
 
 ```bash
-uv run python -m unittest tests.test_github_oauth tests.test_github_oauth_migration tests.test_backend_contracts
+uv run python -m unittest tests.test_github_oauth tests.test_github_oauth_migration tests.test_backend_architecture tests.test_backend_contracts
 node --check frontend/app.js
 node tests/frontend_github_smoke.js
 node tests/frontend_platform_smoke.js
 ```
 
-自动测试使用隔离 SQLite、可过期 Redis 替身与 GitHub HTTP 替身，验证注册登录、账号隔离、CSRF、PKCE、状态/票据过期及重放、异常、迁移和页面恢复。真实 GitHub 授权必须在配置实际 OAuth App 后按上面的实际验收完成。
+自动测试使用隔离 SQLite、可过期 Redis 替身与 GitHub HTTP 替身，验证注册登录、账号隔离、CSRF、PKCE、状态/票据过期及重放、异常、迁移和页面恢复；还通过实际应用装配的路由完成登录及 `/auth/me` 身份确认，检查架构分层和导入有效性。真实 GitHub 授权必须在配置实际 OAuth App 后按上面的实际验收完成。
 
 参考：[GitHub OAuth Web Flow](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps)。
