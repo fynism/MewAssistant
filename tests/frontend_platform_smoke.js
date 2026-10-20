@@ -30,7 +30,7 @@ const json = (data,status=200) => ({ok:status>=200&&status<300,status,headers:ne
 responder = async (url,options={}) => {
   if(url === '/platform/services/knowledge') return json({externalAvailable:true,endpoint:'https://mcp.example/mcp/knowledge'});
   if(url === '/auth/login' || url === '/auth/register') return json({access_token:'fixture-token',username:'alice',role:userRole});
-  if(url === '/knowledge-settings') return json({allowed_extensions:['.pdf'],max_upload_bytes:1000000,max_retrieval_results:20});
+  if(url === '/knowledge-settings') return json({allowed_extensions:['.pdf','.txt'],max_upload_bytes:1000000,max_retrieval_results:20});
   if(url === '/knowledges') return json(options.method === 'POST' ? {id:knowledgeId,name:'Private',has_ready_documents:true} : {knowledges:[{id:knowledgeId,name:'Private',has_ready_documents:true}]});
   if(url.endsWith('/documents') && options.method !== 'POST') return json({documents:[{id:'doc',filename:'same.pdf',status:'ready'}]});
   if(url.includes('/documents')) return json({id:'doc',status:'pending'});
@@ -72,6 +72,15 @@ vm.runInContext(fs.readFileSync(path.join(root,'frontend/app.js'),'utf8'),contex
   await app.documentAction({id:'doc',filename:'same.pdf'},'retry');
   await app.documentAction({id:'doc',filename:'same.pdf'},'delete');
   assert.ok(requests.some(item=>item.url.endsWith('/doc/retry')&&item.method==='POST'));
+  const textFile = new Blob(['2025 v2.0']); textFile.name = 'new.txt';
+  const uploadCount = requests.filter(item=>item.method==='POST'&&item.url.endsWith('/documents')).length;
+  await app.uploadDocument({target:{files:[textFile],value:'selected'}});
+  assert.equal(requests.filter(item=>item.method==='POST'&&item.url.endsWith('/documents')).length,uploadCount+1);
+  await app.documentAction({id:'doc',filename:'same.pdf'},'reprocess');
+  assert.ok(requests.some(item=>item.url.endsWith('/doc/reprocess')&&item.method==='POST'));
+  await app.viewDocumentPage({id:'doc',filename:'same.pdf'},2);
+  assert.ok(requests.some(item=>item.url.endsWith('/doc/pages/2')));
+  assert.ok(app.pageReview.data);
   assert.ok(requests.some(item=>item.url.endsWith('/doc')&&item.method==='DELETE'));
   assert.ok(!requests.some(item=>/^\/documents(?:\/|$)/.test(item.url)));
   app.openTryWithKnowledge(knowledgeId); await tick();

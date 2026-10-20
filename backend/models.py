@@ -128,6 +128,8 @@ class KnowledgeDocument(Base):
     replacement_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
     error_summary: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    processing_report: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     legacy_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     replacement_storage_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
     replacement_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -151,3 +153,15 @@ class KnowledgeParentChunk(Base):
     root_chunk_id: Mapped[str] = mapped_column(String(512), default="", nullable=False)
     chunk_level: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     chunk_idx: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
+class KnowledgeDocumentPage(Base):
+    __tablename__ = "knowledge_document_pages"
+
+    document_id: Mapped[str] = mapped_column(ForeignKey("knowledge_documents.id", ondelete="CASCADE"), primary_key=True)
+    page_number: Mapped[int] = mapped_column(Integer, primary_key=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    extraction: Mapped[str] = mapped_column(String(20), nullable=False)
+    raw_text: Mapped[str] = mapped_column(Text, nullable=False)
+    cleaned_text: Mapped[str] = mapped_column(Text, nullable=False)
+    extraction_data: Mapped[dict] = mapped_column(JSON, nullable=False)

@@ -96,7 +96,13 @@ def _format_docs(docs: List[dict]) -> str:
         source = doc.get("filename", "Unknown")
         page = doc.get("page_number", "N/A")
         text = doc.get("text", "")
-        chunks.append(f"[{i}] {source} (Page {page}):\n{text}")
+        report = doc.get("processing_report") or {}
+        warning = ""
+        if report.get("incomplete_pages"):
+            warning = f"\n[文档识别不完整，未可靠提取的页码：{report['incomplete_pages']}；不能据此断言全文没有相关内容。]"
+        elif report.get("warnings"):
+            warning = "\n[文档存在识别质量警告，涉及数字、金额、型号时应核对原文。]"
+        chunks.append(f"[{i}] {source} (Page {page}):{warning}\n{text}")
     return "\n\n---\n\n".join(chunks)
 
 

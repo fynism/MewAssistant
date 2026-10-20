@@ -1,7 +1,12 @@
 """文档加载和分片服务"""
 from typing import Dict, List
+from pathlib import Path
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, UnstructuredExcelLoader
+from langchain_community.document_loaders import Docx2txtLoader, UnstructuredExcelLoader
+
+from backend.core.config import settings
+from backend.ingestion import ExtractedPage, LoadedChunks, ProcessingError, clean_pages, decode_text
+from backend.pdf_extraction import extract_pdf
 
 
 class DocumentLoader:
@@ -127,7 +132,10 @@ class DocumentLoader:
 
         if file_lower.endswith(".pdf"):
             doc_type = "PDF"
-            loader = PyPDFLoader(file_path)
+            loader = None
+        elif file_lower.endswith(".txt"):
+            doc_type = "TXT"
+            loader = None
         elif file_lower.endswith((".docx", ".doc")):
             doc_type = "Word"
             loader = Docx2txtLoader(file_path)
@@ -138,25 +146,35 @@ class DocumentLoader:
             raise ValueError(f"不支持的文件类型: {filename}")
 
         try:
-            raw_docs = loader.load()
+            if doc_type == "PDF":
+                pages = extract_pdf(file_path)
+            elif doc_type == "TXT":
+                pages = [ExtractedPage(0, decode_text(Path(file_path).read_bytes()))]
+            else:
+                pages = [ExtractedPage(index, doc.page_content or "") for index, doc in enumerate(loader.load())]
+            clean_pages(pages, remove_margins=doc_type == "PDF" and settings.pdf_remove_repeated_margins)
             documents = []
             page_global_chunk_idx = 0
-            for doc in raw_docs:
+            for page in pages:
+                if page.status != "ready":
+                    continue
                 base_doc = {
                     "filename": filename,
                     "document_id": document_id,
                     "knowledge_id": knowledge_id,
                     "file_path": file_path,
                     "file_type": doc_type,
-                    "page_number": doc.metadata.get("page", 0),
+                    "page_number": page.page_number,
                 }
                 page_chunks = self._split_page_to_three_levels(
-                    text=(doc.page_content or "").strip(),
+                    text=page.cleaned_text,
                     base_doc=base_doc,
                     page_global_chunk_idx=page_global_chunk_idx,
                 )
                 page_global_chunk_idx += len(page_chunks)
                 documents.extend(page_chunks)
-            return documents
+            return LoadedChunks(documents, pages)
+        except ProcessingError:
+            raise
         except Exception as e:
             raise Exception(f"处理文档失败: {str(e)}")

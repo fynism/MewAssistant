@@ -38,6 +38,7 @@ class EmbeddingService:
         self._total_docs = 0
         self._sum_token_len = 0
         self._avg_doc_len = 1.0
+        self._tokenizer_version = 2  # New indexes retain digits and alphanumeric identifiers.
 
         self._load_state()
 
@@ -56,6 +57,9 @@ class EmbeddingService:
             return
         if raw.get("version") != 1:
             return
+        self._tokenizer_version = int(raw.get("tokenizer_version", 1))
+        if self._tokenizer_version not in (1, 2):
+            raise ValueError("Unsupported BM25 tokenizer version")
         self._vocab = {str(k): int(v) for k, v in raw.get("vocab", {}).items()}
         self._doc_freq = Counter({str(k): int(v) for k, v in raw.get("doc_freq", {}).items()})
         self._total_docs = int(raw.get("total_docs", 0))
@@ -70,6 +74,7 @@ class EmbeddingService:
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "version": 1,
+            "tokenizer_version": self._tokenizer_version,
             "total_docs": self._total_docs,
             "sum_token_len": self._sum_token_len,
             "vocab": self._vocab,
@@ -135,7 +140,9 @@ class EmbeddingService:
             raise Exception(f"本地嵌入模型调用失败: {str(e)}") from e
 
     def tokenize(self, text: str) -> list[str]:
-        """简单的中英文分词器，中文单字，英文连续字母序列，忽略其他字符"""
+        """Keep old indexes compatible; v2 retains years, decimals and model numbers."""
+        if self._tokenizer_version == 2:
+            return re.findall(r"[\u4e00-\u9fff]|[a-z0-9]+(?:[._/-][a-z0-9]+)*", text.lower())
         text = text.lower()
         tokens = []
         chinese_pattern = re.compile(r"[\u4e00-\u9fff]")
@@ -154,6 +161,17 @@ class EmbeddingService:
             else:
                 i += 1
         return tokens
+
+    def reset_for_rebuild(self):
+        """Only call from maintenance after proving the vector collection is empty."""
+        with self._lock:
+            self._vocab.clear()
+            self._vocab_counter = 0
+            self._doc_freq.clear()
+            self._total_docs = self._sum_token_len = 0
+            self._avg_doc_len = 1.0
+            self._tokenizer_version = 2
+            self._persist_unlocked()
 
     def _sparse_vector_for_text_unlocked(self, text: str) -> tuple[dict, bool]:
         """计算单文本的 BM25 稀疏向量，返回稀疏向量和词表是否发生变化的标志。"""

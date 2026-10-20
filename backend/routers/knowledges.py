@@ -7,11 +7,11 @@ from sqlalchemy.orm import Session
 
 from backend.auth import get_current_user, get_db
 from backend.core.config import settings
-from backend.models import KnowledgeBase, KnowledgeDocument, User
+from backend.models import KnowledgeBase, KnowledgeDocument, KnowledgeDocumentPage, User
 from backend.services.knowledge_service import (
     create_knowledge, delete_document, delete_knowledge, get_owned_document,
     get_owned_knowledge, replace_document, save_upload,
-    ALLOWED_EXTENSIONS,
+    ALLOWED_EXTENSIONS, queue_reprocessing,
 )
 from backend.services.rate_limits import enforce_rate_limits
 
@@ -34,6 +34,7 @@ def document_payload(item: KnowledgeDocument) -> dict:
     return {"id": item.id, "knowledge_id": item.knowledge_id, "filename": item.filename,
             "file_type": item.file_type, "status": item.status,
             "error_summary": item.error_summary, "created_at": item.created_at,
+            "processing_report": item.processing_report,
             "updated_at": item.updated_at}
 
 
@@ -126,12 +127,26 @@ async def replace_document_endpoint(knowledge_id: str, document_id: str,
 @router.post("/knowledges/{knowledge_id}/documents/{document_id}/retry", status_code=202)
 def retry_document(knowledge_id: str, document_id: str,
                    user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    item = get_owned_document(db, user.id, knowledge_id, document_id)
-    if item.status != "failed":
-        raise HTTPException(status_code=409, detail="只有失败的文件可以重试")
-    item.status = "pending"
-    db.commit()
+    enforce_rate_limits((f"upload:user:{user.id}", settings.upload_rate_per_minute))
+    item = queue_reprocessing(db, user.id, knowledge_id, document_id)
     return document_payload(item)
+
+
+@router.post("/knowledges/{knowledge_id}/documents/{document_id}/reprocess", status_code=202)
+def reprocess_document(knowledge_id: str, document_id: str,
+                       user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    enforce_rate_limits((f"upload:user:{user.id}", settings.upload_rate_per_minute))
+    return document_payload(queue_reprocessing(db, user.id, knowledge_id, document_id))
+
+
+@router.get("/knowledges/{knowledge_id}/documents/{document_id}/pages/{page_number}")
+def page_details(knowledge_id: str, document_id: str, page_number: int,
+                 user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    get_owned_document(db, user.id, knowledge_id, document_id)
+    page = db.get(KnowledgeDocumentPage, (document_id, page_number - 1))
+    if page is None:
+        raise HTTPException(status_code=404, detail="页面记录不存在，请先重新处理文件")
+    return {**page.extraction_data, "page_number": page_number}
 
 
 @router.delete("/knowledges/{knowledge_id}/documents/{document_id}")

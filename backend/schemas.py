@@ -42,6 +42,7 @@ class RetrievedChunk(BaseModel):
     score: Optional[float] = None
     rrf_rank: Optional[int] = None
     rerank_score: Optional[float] = None
+    processing_report: Optional[dict] = None
 
 
 class RagTrace(BaseModel):
