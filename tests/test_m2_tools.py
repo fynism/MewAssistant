@@ -7,9 +7,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend.auth import create_access_token, get_db
-from backend.database import Base
-from backend.models import KnowledgeBase, KnowledgeDocument, User
+from backend.core.security import create_access_token
+from backend.api.dependencies import get_db
+from backend.infrastructure.database.session import Base
+from backend.infrastructure.database.models import KnowledgeBase, KnowledgeDocument, User
 
 
 class M2ToolTests(unittest.TestCase):
@@ -23,7 +24,7 @@ class M2ToolTests(unittest.TestCase):
         self.engine = create_engine(f"sqlite:///{Path(self.temp.name) / 'db.sqlite'}")
         Base.metadata.create_all(self.engine)
         self.factory = sessionmaker(bind=self.engine, expire_on_commit=False)
-        self.rate_patch = patch("backend.routers.tool_debug.enforce_rate_limits", lambda *_: None)
+        self.rate_patch = patch("backend.api.routers.tool_debug.enforce_rate_limits", lambda *_: None)
         self.rate_patch.start()
 
         def db_override():

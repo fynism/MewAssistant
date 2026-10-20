@@ -29,7 +29,7 @@
       const isAdmin = computed(() => role.value === 'admin');
       const displayName = computed(() => currentUser.value?.username || '');
       const pageTitle = computed(() => titles[page.value]);
-      const workspaceLinks = [{path:'/workspace/knowledges',label:'我的知识库'}, {path:'/try',label:'试一下'}, {path:'/account',label:'个人管理'}];
+      const workspaceLinks = [{path:'/workspace/knowledges',label:'我的知识库',icon:'FolderOpened'}, {path:'/try',label:'试一下',icon:'ChatDotRound'}, {path:'/account',label:'个人管理',icon:'User'}];
       const isExplore = computed(() => page.value === '/' || page.value === '/services/knowledge');
       const isWorkspace = computed(() => workspaceLinks.some(link => link.path === page.value));
       const isDark = ref(document.documentElement.classList.contains('dark'));
@@ -50,7 +50,8 @@
 
       const connectionClient = ref('codex'), servicePanels = ref([]);
       const connectionEndpoint = 'https://fyism.cn/mcp/knowledge';
-      const connectionNote = 'Streamable HTTP · MCP_API_KEY 为个人 API Key 环境变量';
+      const helpTopic = ref(''), qualityReview = ref(null);
+      const helpTitle = computed(() => ({connection:'客户端接入',tools:'工具说明',upload:'上传说明',scope:'知识库范围'})[helpTopic.value] || '帮助');
       const connectionExamples = computed(() => [
         {id:'codex',label:'Codex',language:'TOML',file:'~/.codex/config.toml',source:`[mcp_servers.meowconnect_knowledge]\nurl = ${JSON.stringify(connectionEndpoint)}\nbearer_token_env_var = "MCP_API_KEY"`},
         {id:'claude',label:'Claude Code',language:'JSON',file:'.mcp.json',source:JSON.stringify({mcpServers:{meowconnect_knowledge:{type:'http',url:connectionEndpoint,headers:{Authorization:'Bearer ${MCP_API_KEY}'}}}},null,2)}
@@ -58,10 +59,14 @@
 
       let identityEpoch = 0, documentEpoch = 0, knowledgeEpoch = 0, resultEpoch = 0, sessionEpoch = 0;
       const authOpen = ref(false), authMode = ref('login'), authLoading = ref(false), authError = ref('');
-      const authForm = reactive({username:'',password:'',invite:''}), authFormRef = ref(null), usernameInput = ref(null);
+      const authView = ref('methods');
+      const authTitle = computed(() => authMode.value === 'register' ? '邀请注册' : authView.value === 'password' ? '账号密码登录' : '登录');
+      const githubEnabled = ref(false), githubLoading = ref(false);
+      const authForm = reactive({username:'',password:'',invite:''}), authFormRef = ref(null), usernameInput = ref(null), githubLoginButton = ref(null);
       const authRules = {username:[{required:true,whitespace:true,message:'请输入用户名',trigger:'blur'}],password:[{required:true,message:'请输入密码',trigger:'blur'}],invite:[{required:true,whitespace:true,message:'请输入邀请码',trigger:'blur'}]};
       const knowledges = ref([]), selectedKnowledgeId = ref(''), selectedKnowledgeIds = ref([]), knowledgeLoading = ref(false), knowledgeError = ref('');
       const documents = ref([]), documentsLoading = ref(false), documentsError = ref(''), documentBusyId = ref('');
+      const pageReview = ref(null), pageReviewLoading = ref(false);
       const knowledgeSettings = ref({allowed_extensions:[],max_upload_bytes:0,max_retrieval_results:20});
       const createOpen = ref(false), editOpen = ref(false), knowledgeName = ref(''), knowledgeDescription = ref(''), knowledgeEdit = reactive({name:'',description:''});
       const fileInput = ref(null), replaceInput = ref(null), replacingDocumentId = ref(''), isUploading = ref(false);
@@ -90,7 +95,7 @@
         if (authenticated && token.value) headers.set('Authorization', `Bearer ${token.value}`);
         const response = await fetch(path, {...options, headers});
         if (authenticated && epoch !== identityEpoch) throw new DOMException('账号已切换', 'AbortError');
-        if (authenticated && response.status === 401) {logout(false); authOpen.value = true; throw new Error('登录已过期，请重新登录');}
+        if (authenticated && response.status === 401) {logout(false); openAuth(); throw new Error('登录已过期，请重新登录');}
         if (!response.ok) {const data = await response.json().catch(() => ({})); throw new Error(errorMessage(response, data, '请求失败'));}
         return response;
       }
@@ -100,19 +105,59 @@
       async function confirmAction(message, title) {try {await ElMessageBox.confirm(message,title,{confirmButtonText:'确认',cancelButtonText:'取消',type:'warning',autofocus:false}); return true;} catch {return false;}}
       async function copyText(value) {try {await navigator.clipboard.writeText(value); ElMessage.success('已复制');} catch {ElMessage.warning('复制失败，请选中文本手动复制');}}
       function resetAuth() {authForm.password = ''; authForm.invite = ''; authError.value = ''; authFormRef.value?.clearValidate();}
-      function openAuth(mode = 'login') {resetAuth(); authMode.value = mode; authOpen.value = true;}
+      function openAuth(mode = 'login') {resetAuth(); authMode.value = mode; authView.value = mode === 'login' && githubEnabled.value ? 'methods' : 'password'; authOpen.value = true;}
       function switchAuth() {authMode.value = authMode.value === 'login' ? 'register' : 'login'; resetAuth();}
-      function focusAuth() {usernameInput.value?.focus();}
+      function focusAuth() {if (authView.value === 'password') usernameInput.value?.focus(); else githubLoginButton.value?.$el?.focus();}
+      async function choosePasswordLogin() {
+        if (authLoading.value || githubLoading.value) return;
+        resetAuth(); authMode.value = 'login'; authView.value = 'password';
+        await nextTick(); focusAuth();
+      }
+      async function showAuthMethods() {
+        if (authLoading.value || githubLoading.value) return;
+        resetAuth(); authMode.value = 'login'; authView.value = 'methods';
+        await nextTick(); focusAuth();
+      }
+      function acceptLogin(data) {
+        logout(false);
+        token.value = data.access_token; storage.set('accessToken',data.access_token);
+        currentUser.value = {username:data.username,role:data.role}; authOpen.value = false; resetAuth();
+      }
+      async function startGitHubLogin() {
+        if (!githubEnabled.value || githubLoading.value || authLoading.value) return;
+        githubLoading.value = true; authError.value = '';
+        try {
+          const data = await jsonRequest('/auth/github/start',jsonBody('POST',{next:location.pathname + location.search}),false);
+          location.assign(data.authorization_url);
+        } catch (error) {authError.value = error.message; githubLoading.value = false;}
+      }
+      async function restoreGitHubLogin() {
+        const params = new URLSearchParams(location.search);
+        const success = params.get('github') === 'success', failure = params.get('github_error');
+        if (!success && !failure) return false;
+        params.delete('github'); params.delete('github_error');
+        history.replaceState({},'',location.pathname + (params.size ? '?' + params.toString() : '') + (location.hash || ''));
+        // The marker is not a credential. The server consumes an HttpOnly, one-use ticket.
+        if (success) {
+          authChecking.value = true;
+          try {acceptLogin(await jsonRequest('/auth/github/complete',jsonBody('POST',{}),false)); return true;}
+          catch (error) {authError.value = error.message;}
+          finally {authChecking.value = false;}
+        } else {
+          const reasons = {cancelled:'已取消 GitHub 授权，可以重新尝试',expired:'GitHub 登录已过期，请重新尝试',unavailable:'GitHub 登录暂时不可用，请稍后重试',failed:'GitHub 登录失败，请重新尝试'};
+          authError.value = reasons[failure] || 'GitHub 登录失败，请重新尝试';
+        }
+        authMode.value = 'login'; authView.value = githubEnabled.value ? 'methods' : 'password'; authOpen.value = true; return false;
+      }
       async function submitAuth() {
-        if (authLoading.value) return;
+        if (authLoading.value || githubLoading.value) return;
         try {await authFormRef.value.validate();} catch {return;}
         authLoading.value = true; authError.value = '';
         try {
           const payload = {username:authForm.username.trim(),password:authForm.password};
           if (authMode.value === 'register') payload.invite_code = authForm.invite.trim();
           const data = await jsonRequest(authMode.value === 'login' ? '/auth/login' : '/auth/register',jsonBody('POST',payload),false);
-          identityEpoch++; token.value = data.access_token; storage.set('accessToken',data.access_token);
-          currentUser.value = {username:data.username,role:data.role}; authOpen.value = false; resetAuth();
+          acceptLogin(data);
           await loadPageData();
         } catch (error) {authError.value = error.message;} finally {authLoading.value = false;}
       }
@@ -128,6 +173,7 @@
         knowledgeLoading.value = false; documentsLoading.value = false; keysLoading.value = false; invitesLoading.value = false; sessionsLoading.value = false; operationsLoading.value = false;
         keyBusy.value = false; inviteBusy.value = false; isUploading.value = false; documentBusyId.value = '';
         createOpen.value = false; editOpen.value = false; sessionsOpen.value = false;
+        pageReview.value = null; pageReviewLoading.value = false; qualityReview.value = null; helpTopic.value = '';
         knowledgeError.value = ''; documentsError.value = ''; keyError.value = ''; inviteError.value = ''; operationsError.value = '';
         if (navigateHome) go('/');
       }
@@ -231,12 +277,20 @@
         if (action === 'delete' && !await confirmAction(`删除“${doc.filename}”？此文件将退出检索。`,'删除文档')) return;
         if (epoch !== identityEpoch) return;
         documentBusyId.value = doc.id;
-        try {await jsonRequest(`/knowledges/${encodeURIComponent(id)}/documents/${encodeURIComponent(doc.id)}${action === 'retry' ? '/retry' : ''}`,{method:action === 'retry' ? 'POST' : 'DELETE'}); if (epoch === identityEpoch && id === selectedKnowledgeId.value) await loadDocuments();}
+        try {await jsonRequest(`/knowledges/${encodeURIComponent(id)}/documents/${encodeURIComponent(doc.id)}${action === 'delete' ? '' : '/' + action}`,{method:action === 'delete' ? 'DELETE' : 'POST'}); if (epoch === identityEpoch && id === selectedKnowledgeId.value) await loadDocuments();}
         catch (error) {report(error);} finally {if (epoch === identityEpoch) documentBusyId.value = '';}
       }
       const statusLabel = status => ({pending:'等待处理',processing:'处理中',ready:'可检索',failed:'处理失败',replacing:'替换中',deleting:'删除中'}[status] || status);
       const statusIcon = status => ({ready:'CircleCheck',failed:'CircleClose'}[status] || 'Loading');
       const documentPending = doc => ['pending','processing','replacing','deleting'].includes(doc.status);
+      async function viewDocumentPage(doc, pageNumber) {
+        const id = selectedKnowledgeId.value, epoch = identityEpoch;
+        const review = reactive({filename:doc.filename,pageNumber,data:null,error:''});
+        pageReview.value = review; pageReviewLoading.value = true;
+        try {const data = await jsonRequest(`/knowledges/${encodeURIComponent(id)}/documents/${encodeURIComponent(doc.id)}/pages/${pageNumber}`); if (epoch === identityEpoch && pageReview.value === review) review.data = data;}
+        catch (error) {if (epoch === identityEpoch && pageReview.value === review) review.error = error.message;}
+        finally {if (epoch === identityEpoch && pageReview.value === review) pageReviewLoading.value = false;}
+      }
       function openTryWithKnowledge(id) {selectedKnowledgeIds.value = [id]; scopeInitialized = true; history.pushState({},'',`/try?knowledge=${encodeURIComponent(id)}`); page.value = '/try';}
       function scopeNames(ids) {return ids == null ? '历史会话未记录范围' : !ids.length ? '空范围' : ids.map(id => knowledges.value.find(kb => kb.id === id)?.name || '已删除的知识库').join('、');}
       async function runTool() {
@@ -381,13 +435,15 @@
       watch(toolName, clearToolResults);
       watch(page, async () => {
         newKey.value = ''; newInvite.value = ''; stopDocumentPolling(); documentEpoch++; clearToolResults(); sessionEpoch++; stopChat();
-        createOpen.value = false; editOpen.value = false; sessionsOpen.value = false;
+        createOpen.value = false; editOpen.value = false; sessionsOpen.value = false; helpTopic.value = ''; qualityReview.value = null;
         document.title = pageTitle.value + ' · MeowConnectPlatform'; playBrand(); await loadPageData(); await nextTick();
         document.getElementById('main')?.focus({preventScroll:true});
       });
       onMounted(async () => {
         document.title = pageTitle.value + ' · MeowConnectPlatform'; playBrand(); window.addEventListener('popstate',onPopState);
-        if (token.value) {
+        try {githubEnabled.value = (await jsonRequest('/auth/providers',{},false)).github === true;} catch {}
+        const githubRestored = await restoreGitHubLogin();
+        if (token.value && !githubRestored) {
           try {currentUser.value = await jsonRequest('/auth/me');} catch (error) {if (error.name !== 'AbortError') report(error);}
           finally {authChecking.value = false;}
         }
@@ -396,10 +452,10 @@
       onBeforeUnmount(() => {identityEpoch++; stopChat(); stopDocumentPolling(); clearTimeout(brandTimer); window.removeEventListener('popstate',onPopState); systemTheme.removeEventListener('change',onSystemTheme); motionQuery.removeEventListener('change',onMotion);});
       return {
         locale:ElementPlusLocaleZhCn,page,mobileNav,currentUser,authChecking,role,isAuthenticated,isAdmin,displayName,pageTitle,workspaceLinks,isExplore,isWorkspace,isDark,brandAnimating,brandWords,toggleTheme,go,accountCommand,
-        connectionClient,servicePanels,connectionEndpoint,connectionNote,connectionExamples,
-        authOpen,authMode,authLoading,authError,authForm,authFormRef,authRules,usernameInput,resetAuth,openAuth,switchAuth,focusAuth,submitAuth,logout,
+        connectionClient,servicePanels,connectionEndpoint,connectionExamples,helpTopic,helpTitle,qualityReview,
+        authOpen,authMode,authView,authTitle,authLoading,authError,authForm,authFormRef,authRules,usernameInput,githubLoginButton,resetAuth,openAuth,switchAuth,focusAuth,choosePasswordLogin,showAuthMethods,submitAuth,logout,githubEnabled,githubLoading,startGitHubLogin,
         knowledges,selectedKnowledgeId,selectedKnowledgeIds,selectedKnowledge,knowledgeLoading,knowledgeError,loadKnowledges,selectKnowledge,createOpen,editOpen,knowledgeName,knowledgeDescription,knowledgeEdit,createKnowledge,openKnowledgeEdit,updateKnowledge,deleteKnowledge,
-        documents,documentsLoading,documentsError,documentBusyId,loadDocuments,fileInput,replaceInput,isUploading,acceptedExtensions,uploadLimitLabel,uploadDocument,chooseReplacement,replaceDocument,documentAction,statusLabel,statusIcon,documentPending,openTryWithKnowledge,
+        documents,documentsLoading,documentsError,documentBusyId,loadDocuments,fileInput,replaceInput,isUploading,acceptedExtensions,uploadLimitLabel,uploadDocument,chooseReplacement,replaceDocument,documentAction,statusLabel,statusIcon,documentPending,openTryWithKnowledge,pageReview,pageReviewLoading,viewDocumentPage,
         scopeLabel,scopeNames,toolName,toolQuery,topK,knowledgeSettings,toolLoading,toolResult,toolError,runTool,messages,chatInput,chatLoading,chatLog,isComposing,sendChat,stopChat,handleChatKey,parseMarkdown,traceFacts,traceGroups,newChat,sessions,sessionsOpen,sessionsLoading,sessionsError,loadSessions,loadSession,deleteSession,
         keys,keyName,newKey,keysLoading,keyBusy,keyError,loadKeys,createKey,revokeKey,invites,newInvite,invitesLoading,inviteBusy,inviteError,invitationForm,loadInvites,createInvite,revokeInvite,invitationStatus,formatDate,operations,operationsLoading,operationsError,loadOperations,copyText
       };
@@ -407,8 +463,8 @@
   });
   app.use(ElementPlus);
   app.component('mcp-connection-example',{
-    props:{modelValue:String,examples:Array,note:String},
-    emits:['update:modelValue','copy'],
+    props:{modelValue:String,examples:Array},
+    emits:['update:modelValue','copy','help'],
     template:'#connection-example-template'
   });
   app.component('mcp-icon',{props:{name:{type:String,required:true},size:{type:Number,default:20}},setup(props) {return () => Vue.h(ElementPlus.ElIcon,{size:props.size,'aria-hidden':'true'},() => Vue.h(ElementPlusIconsVue[props.name] || ElementPlusIconsVue.Document));}});

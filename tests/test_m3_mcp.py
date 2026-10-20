@@ -10,9 +10,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend.database import Base
-from backend.models import KnowledgeBase, KnowledgeDocument, User
-from backend.services.api_keys import create_key
+from backend.infrastructure.database.session import Base
+from backend.infrastructure.database.models import KnowledgeBase, KnowledgeDocument, User
+from backend.services.platform.api_keys import create_key
 
 
 class McpProtocolTests(unittest.TestCase):
@@ -35,10 +35,10 @@ class McpProtocolTests(unittest.TestCase):
             db.commit()
             _, self.alice_key = create_key(db, 1, "Codex")
             _, self.bob_key = create_key(db, 2, "Codex")
-        self.patches = [patch("backend.mcp_knowledge.SessionLocal", self.factory),
-                        patch("backend.mcp_knowledge.record_call", lambda *_: None),
-                        patch("backend.mcp_knowledge.enforce_rate_limits", lambda *_: None),
-                        patch("backend.mcp_knowledge.settings", SimpleNamespace(
+        self.patches = [patch("backend.integrations.mcp.knowledge.SessionLocal", self.factory),
+                        patch("backend.integrations.mcp.knowledge.record_call", lambda *_: None),
+                        patch("backend.integrations.mcp.knowledge.enforce_rate_limits", lambda *_: None),
+                        patch("backend.integrations.mcp.knowledge.settings", SimpleNamespace(
                             mcp_external_enabled=True, mcp_allowed_origins="")),
                         patch.object(self.app_module, "run_document_maintenance", lambda: asyncio.sleep(3600)),
                         patch.object(self.app_module, "init_db", lambda: None)]

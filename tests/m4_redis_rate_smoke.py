@@ -10,7 +10,7 @@ from redis import Redis
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from backend.core.config import settings
-from backend.services.rate_limits import enforce_rate_limits
+from backend.services.platform.rate_limits import enforce_rate_limits
 
 
 def main() -> None:

@@ -10,9 +10,10 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend.auth import get_db, get_password_hash
-from backend.database import Base
-from backend.models import KnowledgeBase, KnowledgeDocument, User
+from backend.api.dependencies import get_db
+from backend.core.security import get_password_hash
+from backend.infrastructure.database.session import Base
+from backend.infrastructure.database.models import KnowledgeBase, KnowledgeDocument, User
 
 
 class M1IsolationTests(unittest.TestCase):
@@ -120,13 +121,14 @@ class M1IsolationTests(unittest.TestCase):
         self.assertEqual(self.client.get(f"/knowledges/{b_id}/documents/b-doc", headers=self.alice).status_code, 404)
 
     def test_upload_same_filename_uses_distinct_private_storage(self):
-        from backend.services import knowledge_service
+        from backend.infrastructure import storage
+        from backend.services import knowledge as knowledge_service
 
         a_id = self.client.post("/knowledges", headers=self.alice, json={"name": "A"}).json()["id"]
         b_id = self.client.post("/knowledges", headers=self.bob, json={"name": "B"}).json()["id"]
         private_dir = Path(self.temp.name) / "uploads"
-        with (patch.object(knowledge_service, "STORAGE_DIR", private_dir),
-              patch("backend.routers.knowledges.enforce_rate_limits", lambda *_: None)):
+        with (patch.object(storage, "KNOWLEDGE_DOCUMENTS_DIR", private_dir),
+              patch("backend.api.routers.knowledges.enforce_rate_limits", lambda *_: None)):
             upload = lambda kid, headers: self.client.post(
                 f"/knowledges/{kid}/documents", headers=headers,
                 files={"file": ("same.pdf", b"%PDF-1.4\nprivate", "application/pdf")})
@@ -138,7 +140,7 @@ class M1IsolationTests(unittest.TestCase):
             self.assertEqual(upload(b_id, self.alice).status_code, 404)
 
     def test_chat_receives_authenticated_owner_not_payload_owner(self):
-        from backend.routers import chat
+        from backend.api.routers import chat
         with self.session_factory() as db:
             alice_id = db.query(User.id).filter(User.username == "alice").scalar()
         with patch.object(chat, "chat_with_agent", return_value={"response": "ok", "rag_trace": None}) as agent:
@@ -186,16 +188,16 @@ class M1IsolationTests(unittest.TestCase):
         own = {"document_id": "a-doc", "knowledge_id": "a-kb", "text": "Alice", "chunk_id": "a"}
         foreign = {"document_id": "b-doc", "knowledge_id": "b-kb", "text": "Bob", "chunk_id": "b"}
         with (patch.object(retrieval, "SessionLocal", self.session_factory),
-              patch.object(retrieval._embedding_service, "get_embeddings", return_value=[[0.1]]),
-              patch.object(retrieval._embedding_service, "get_sparse_embedding", return_value={1: 1.0}),
+              patch.object(retrieval.resources.embedding_service, "get_embeddings", return_value=[[0.1]]),
+              patch.object(retrieval.resources.embedding_service, "get_sparse_embedding", return_value={1: 1.0}),
               patch.object(retrieval, "rerank_documents", side_effect=lambda query, docs, top_k: (docs, {})),
               patch.object(retrieval, "auto_merge_documents", side_effect=lambda docs, top_k, allowed_document_ids: (docs, {}))):
-            with patch.object(retrieval._milvus_manager, "hybrid_retrieve", return_value=[own, foreign]) as hybrid:
+            with patch.object(retrieval.resources.milvus_manager, "hybrid_retrieve", return_value=[own, foreign]) as hybrid:
                 result = retrieval.retrieve_documents("same", owner_id=alice_id)
                 self.assertEqual(result["docs"], [own])
                 self.assertIn('document_id in ["a-doc"]', hybrid.call_args.kwargs["filter_expr"])
-            with (patch.object(retrieval._milvus_manager, "hybrid_retrieve", side_effect=RuntimeError("down")),
-                  patch.object(retrieval._milvus_manager, "dense_retrieve", return_value=[foreign, own]) as dense):
+            with (patch.object(retrieval.resources.milvus_manager, "hybrid_retrieve", side_effect=RuntimeError("down")),
+                  patch.object(retrieval.resources.milvus_manager, "dense_retrieve", return_value=[foreign, own]) as dense):
                 result = retrieval.retrieve_documents("same", owner_id=alice_id)
                 self.assertEqual(result["docs"], [own])
                 self.assertIn('document_id in ["a-doc"]', dense.call_args.kwargs["filter_expr"])

@@ -2,8 +2,8 @@ from collections import defaultdict
 from typing import Any, Dict, List, Tuple
 
 from backend.core.config import settings
-from backend.database import SessionLocal
-from backend.models import KnowledgeParentChunk
+from backend.infrastructure.database.session import SessionLocal
+from backend.infrastructure.database.models import KnowledgeParentChunk
 
 
 AUTO_MERGE_ENABLED = settings.auto_merge_enabled

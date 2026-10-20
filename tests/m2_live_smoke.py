@@ -63,14 +63,15 @@ def main() -> None:
             import redis
             from fastapi.testclient import TestClient
             from backend.app import create_app
-            from backend.auth import get_password_hash
-            from backend.database import SessionLocal, engine
-            from backend.milvus_client import MilvusManager
-            from backend.models import User
-            from backend.services import knowledge_service
+            from backend.core.security import get_password_hash
+            from backend.infrastructure.database.session import SessionLocal, engine
+            from backend.infrastructure.vector_store.client import MilvusManager
+            from backend.infrastructure.database.models import User
+            from backend.infrastructure import storage
+            from backend.services import knowledge as knowledge_service
 
             assert redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379/0")).ping()
-            knowledge_service.STORAGE_DIR = temp / "files"
+            storage.KNOWLEDGE_DOCUMENTS_DIR = temp / "files"
             db = SessionLocal()
             try:
                 db.add_all([
@@ -151,12 +152,12 @@ def main() -> None:
         finally:
             if created:
                 try:
-                    from backend.milvus_client import MilvusManager
+                    from backend.infrastructure.vector_store.client import MilvusManager
                     MilvusManager(collection_name=collection_name).drop_collection()
                 except ImportError:
                     pass
                 try:
-                    from backend.database import engine
+                    from backend.infrastructure.database.session import engine
                     engine.dispose()
                 except ImportError:
                     pass

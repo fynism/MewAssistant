@@ -1,9 +1,11 @@
 from typing import Any, Dict
 
 from backend.core.config import settings
-from backend.dependencies import embedding_service as _embedding_service, milvus_manager as _milvus_manager
-from backend.database import SessionLocal
-from backend.services.knowledge_service import visible_document_ids
+from backend.infrastructure import resources
+from backend.infrastructure.database.session import SessionLocal
+from backend.services.knowledge.access import visible_document_ids
+from backend.infrastructure.database.models import KnowledgeDocument
+from backend.documents.cleaning import public_report
 from backend.rag.merging import AUTO_MERGE_ENABLED, AUTO_MERGE_THRESHOLD, auto_merge_documents
 from backend.rag.rerank import RERANK_API_KEY, RERANK_BINDING_HOST, RERANK_MODEL, get_rerank_endpoint, rerank_documents
 
@@ -17,6 +19,8 @@ def retrieve_documents(query: str, owner_id: int, top_k: int = 5, knowledge_ids:
     db = SessionLocal()
     try:
         document_ids = visible_document_ids(db, owner_id, knowledge_ids)
+        reports = {row.id: public_report(row.processing_report) for row in db.query(KnowledgeDocument).filter(
+            KnowledgeDocument.id.in_(document_ids)).all() if row.processing_report}
     finally:
         db.close()
     if not document_ids:
@@ -27,11 +31,11 @@ def retrieve_documents(query: str, owner_id: int, top_k: int = 5, knowledge_ids:
     quoted_ids = ", ".join(f'"{item}"' for item in document_ids)
     filter_expr = f"chunk_level == {LEAF_RETRIEVE_LEVEL} and document_id in [{quoted_ids}]"
     try:
-        dense_embeddings = _embedding_service.get_embeddings([query])
+        dense_embeddings = resources.embedding_service.get_embeddings([query])
         dense_embedding = dense_embeddings[0]
-        sparse_embedding = _embedding_service.get_sparse_embedding(query)
+        sparse_embedding = resources.embedding_service.get_sparse_embedding(query)
 
-        retrieved = _milvus_manager.hybrid_retrieve(
+        retrieved = resources.milvus_manager.hybrid_retrieve(
             dense_embedding=dense_embedding,
             sparse_embedding=sparse_embedding,
             top_k=candidate_k,
@@ -44,12 +48,15 @@ def retrieve_documents(query: str, owner_id: int, top_k: int = 5, knowledge_ids:
         rerank_meta["candidate_k"] = candidate_k
         rerank_meta["leaf_retrieve_level"] = LEAF_RETRIEVE_LEVEL
         rerank_meta.update(merge_meta)
+        for doc in merged_docs:
+            if doc.get("document_id") in reports:
+                doc["processing_report"] = reports[doc["document_id"]]
         return {"docs": merged_docs, "meta": rerank_meta}
     except Exception:
         try:
-            dense_embeddings = _embedding_service.get_embeddings([query])
+            dense_embeddings = resources.embedding_service.get_embeddings([query])
             dense_embedding = dense_embeddings[0]
-            retrieved = _milvus_manager.dense_retrieve(
+            retrieved = resources.milvus_manager.dense_retrieve(
                 dense_embedding=dense_embedding,
                 top_k=candidate_k,
                 filter_expr=filter_expr,
@@ -61,6 +68,9 @@ def retrieve_documents(query: str, owner_id: int, top_k: int = 5, knowledge_ids:
             rerank_meta["candidate_k"] = candidate_k
             rerank_meta["leaf_retrieve_level"] = LEAF_RETRIEVE_LEVEL
             rerank_meta.update(merge_meta)
+            for doc in merged_docs:
+                if doc.get("document_id") in reports:
+                    doc["processing_report"] = reports[doc["document_id"]]
             return {"docs": merged_docs, "meta": rerank_meta}
         except Exception:
             return {

@@ -8,9 +8,10 @@ from langchain_core.messages import AIMessage, HumanMessage
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend.auth import create_access_token, get_db
-from backend.database import Base
-from backend.models import ChatMessage, ChatSession, KnowledgeBase, User
+from backend.core.security import create_access_token
+from backend.api.dependencies import get_db
+from backend.infrastructure.database.session import Base
+from backend.infrastructure.database.models import ChatMessage, ChatSession, KnowledgeBase, User
 
 
 class M2ChatScopeTests(unittest.TestCase):
@@ -48,7 +49,7 @@ class M2ChatScopeTests(unittest.TestCase):
         self.temp.cleanup()
 
     def test_sync_and_stream_reject_foreign_scope_before_agent(self):
-        from backend.routers import chat
+        from backend.api.routers import chat
         payload = {"message": "question", "knowledge_ids": ["b"]}
         with (patch.object(chat, "chat_with_agent") as sync_agent,
               patch.object(chat, "chat_with_agent_stream") as stream_agent):
@@ -58,7 +59,7 @@ class M2ChatScopeTests(unittest.TestCase):
             stream_agent.assert_not_called()
 
     def test_explicit_empty_scope_stays_empty(self):
-        from backend.routers import chat
+        from backend.api.routers import chat
         with patch.object(chat, "chat_with_agent",
                           return_value={"response": "empty", "knowledge_ids": []}) as agent:
             response = self.client.post("/chat", headers=self.alice,
@@ -67,7 +68,7 @@ class M2ChatScopeTests(unittest.TestCase):
         self.assertEqual(agent.call_args.kwargs["knowledge_ids"], [])
 
     def test_history_keeps_each_turn_snapshot_and_legacy_flag(self):
-        from backend.services import conversation_storage as module
+        from backend.services.chat import storage as module
 
         class Cache:
             def get_json(self, _key):
@@ -102,7 +103,7 @@ class M2ChatScopeTests(unittest.TestCase):
             self.assertTrue(infos["old"]["legacy_scope_unknown"])
 
     def test_initial_and_expansion_retrieval_use_same_scope(self):
-        from backend import rag_pipeline
+        from backend.rag import pipeline as rag_pipeline
         state = {"owner_id": 1, "knowledge_ids": ["a"], "question": "question",
                  "expansion_type": "complex", "hypothetical_doc": "hyde",
                  "expanded_query": "step back", "rag_trace": {}}

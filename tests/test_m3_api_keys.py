@@ -6,10 +6,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend.auth import create_access_token, get_db
-from backend.database import Base
-from backend.models import PersonalApiKey, User
-from backend.services.api_keys import authenticate_key
+from backend.core.security import create_access_token
+from backend.api.dependencies import get_db
+from backend.infrastructure.database.session import Base
+from backend.infrastructure.database.models import PersonalApiKey, User
+from backend.services.platform.api_keys import authenticate_key
 
 
 class ApiKeyTests(unittest.TestCase):

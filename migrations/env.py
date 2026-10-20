@@ -4,8 +4,8 @@ from alembic import context
 from sqlalchemy import create_engine, pool
 
 from backend.core.config import settings
-from backend.database import Base
-from backend import models  # noqa: F401
+from backend.infrastructure.database.session import Base
+from backend.infrastructure.database import models  # noqa: F401
 
 config = context.config
 if config.config_file_name:

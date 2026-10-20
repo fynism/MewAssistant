@@ -4,11 +4,11 @@ import asyncio
 import time
 
 from backend.core.config import settings
-from backend.database import SessionLocal
-from backend.models import KnowledgeDocument
-from backend.observability import logger
-from backend.services.call_audit import prune_expired_audits
-from backend.services.knowledge_service import process_document, reset_interrupted_documents
+from backend.infrastructure.database.session import SessionLocal
+from backend.infrastructure.database.models import KnowledgeDocument
+from backend.core.observability import logger
+from backend.services.platform.call_audit import prune_expired_audits
+from backend.services.knowledge.processing import process_document, reset_interrupted_documents
 
 
 def pending_document_ids(limit: int) -> list[str]:

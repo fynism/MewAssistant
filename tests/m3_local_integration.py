@@ -76,9 +76,9 @@ def main():
         if use_milvus:
             os.environ["MILVUS_M1_COLLECTION"] = collection
             os.environ["BM25_M1_STATE_PATH"] = env["BM25_M1_STATE_PATH"]
-        from backend.database import SessionLocal, engine
-        from backend.models import KnowledgeBase, PersonalApiKey, User
-        from backend.services.api_keys import create_key
+        from backend.infrastructure.database.session import SessionLocal, engine
+        from backend.infrastructure.database.models import KnowledgeBase, PersonalApiKey, User
+        from backend.services.platform.api_keys import create_key
         with SessionLocal() as db:
             db.add_all([User(id=1, username="m3-alice", password_hash="x", role="user"),
                         User(id=2, username="m3-bob", password_hash="x", role="user"),
@@ -90,9 +90,10 @@ def main():
             alice_key_id = alice_item.id
             if use_milvus:
                 from fastapi import UploadFile
-                from backend.models import KnowledgeDocument
-                from backend.services import knowledge_service
-                knowledge_service.STORAGE_DIR = root / "files"
+                from backend.infrastructure.database.models import KnowledgeDocument
+                from backend.infrastructure import storage
+                from backend.services import knowledge as knowledge_service
+                storage.KNOWLEDGE_DOCUMENTS_DIR = root / "files"
                 for owner_id, knowledge_id, phrase in (
                     (1, "m3-alice-kb", "sapphire dragon password"),
                     (2, "m3-bob-kb", "emerald tiger password"),
@@ -135,8 +136,8 @@ def main():
                                "emerald tiger password" if use_milvus else "test",
                                "emerald tiger" if use_milvus else None), timeout=60))
                 if use_milvus:
-                    from backend.models import KnowledgeDocument
-                    from backend.services import knowledge_service
+                    from backend.infrastructure.database.models import KnowledgeDocument
+                    from backend.services import knowledge as knowledge_service
                     with SessionLocal() as db:
                         item = db.query(KnowledgeDocument).filter(
                             KnowledgeDocument.knowledge_id == "m3-alice-kb").one()
@@ -163,7 +164,7 @@ def main():
                     process.wait(timeout=10)
                 engine.dispose()
                 if use_milvus:
-                    from backend.milvus_client import MilvusManager
+                    from backend.infrastructure.vector_store.client import MilvusManager
                     MilvusManager(collection_name=collection).drop_collection()
                 time.sleep(1)
 
