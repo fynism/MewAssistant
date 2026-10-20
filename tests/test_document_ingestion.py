@@ -10,14 +10,16 @@ from fastapi import HTTPException, UploadFile
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend.database import Base
-from backend.document_loader import DocumentLoader
-from backend.ingestion import ExtractedPage
-from backend.milvus_writer import MilvusWriter
-from backend.models import KnowledgeBase, KnowledgeDocument, KnowledgeDocumentPage, User
-from backend.routers import knowledges as routes
-from backend.services import knowledge_service as service
-from backend.services.knowledge_tools import retrieve
+from backend.infrastructure.database.session import Base
+from backend.documents.loader import DocumentLoader
+from backend.documents.cleaning import ExtractedPage
+from backend.infrastructure.vector_store.writer import MilvusWriter
+from backend.infrastructure.database.models import KnowledgeBase, KnowledgeDocument, KnowledgeDocumentPage, User
+from backend.api.routers import knowledges as routes
+from backend.infrastructure import resources, storage
+from backend.services.knowledge import processing
+from backend.services import knowledge as service
+from backend.services.knowledge.tools import retrieve
 
 
 class MemoryMilvus:
@@ -68,12 +70,12 @@ class DocumentIngestionTests(unittest.TestCase):
                          KnowledgeBase(id="b", owner_id=2, name="B")])
         self.db.commit()
         self.milvus, self.embeddings = MemoryMilvus(), SmallEmbeddings()
-        self.patches = [patch.object(service, "STORAGE_DIR", self.root / "files"),
-                        patch.object(service, "SessionLocal", self.factory),
-                        patch.object(service, "document_loader", DocumentLoader()),
-                        patch.object(service, "milvus_manager", self.milvus),
-                        patch.object(service, "embedding_service", self.embeddings),
-                        patch.object(service, "milvus_writer", MilvusWriter(self.embeddings, self.milvus))]
+        self.patches = [patch.object(storage, "KNOWLEDGE_DOCUMENTS_DIR", self.root / "files"),
+                        patch.object(processing, "SessionLocal", self.factory),
+                        patch.object(resources, "document_loader", DocumentLoader()),
+                        patch.object(resources, "milvus_manager", self.milvus),
+                        patch.object(resources, "embedding_service", self.embeddings),
+                        patch.object(resources, "milvus_writer", MilvusWriter(self.embeddings, self.milvus))]
         for p in self.patches:
             p.start()
 
@@ -112,7 +114,7 @@ class DocumentIngestionTests(unittest.TestCase):
         doc = self.upload("scan.pdf", b"%PDF-test")
         pages = [ExtractedPage(0, "Usable 2025 amount 123.45"),
                  ExtractedPage(1, "", status="failed", warnings=["Page failed"])]
-        with patch("backend.document_loader.extract_pdf", return_value=pages):
+        with patch("backend.documents.loader.extract_pdf", return_value=pages):
             service.process_document(doc.id)
         self.db.expire_all()
         self.assertEqual(doc.status, "ready")
@@ -128,7 +130,7 @@ class DocumentIngestionTests(unittest.TestCase):
         with patch("backend.rag.retrieval.retrieve_documents", return_value=result):
             hit = retrieve(self.db, 1, "2025", ["a"])["results"][0]
         self.assertEqual(hit["processingReport"]["incomplete_pages"], [2])
-        from backend.mcp_knowledge import RetrievalResult
+        from backend.integrations.mcp.knowledge import RetrievalResult
         self.assertEqual(RetrievalResult.model_validate({"status": "ok", "results": [hit]}).results[0].processingReport["incomplete_pages"], [2])
         service.delete_document(self.db, doc)
         self.assertEqual(self.db.query(KnowledgeDocumentPage).count(), 0)
@@ -136,7 +138,7 @@ class DocumentIngestionTests(unittest.TestCase):
 
     def test_all_failed_pages_keep_report_and_never_become_searchable(self):
         doc = self.upload("bad.pdf", b"%PDF-test")
-        with patch("backend.document_loader.extract_pdf", return_value=[
+        with patch("backend.documents.loader.extract_pdf", return_value=[
             ExtractedPage(0, "", status="failed", warnings=["Page failed"]) ]):
             service.process_document(doc.id)
         self.db.expire_all()

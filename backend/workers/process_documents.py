@@ -2,7 +2,7 @@
 
 import argparse
 
-from backend.services.knowledge_service import recover_pending_documents
+from backend.services.knowledge.processing import recover_pending_documents
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

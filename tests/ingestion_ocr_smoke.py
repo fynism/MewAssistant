@@ -24,12 +24,13 @@ with tempfile.TemporaryDirectory() as tmp:
     import numpy as np
     from PIL import Image, ImageDraw, ImageFont
     from fastapi import UploadFile
-    from backend.database import Base, engine, SessionLocal
-    from backend.models import User, KnowledgeBase, KnowledgeDocumentPage
-    from backend.dependencies import embedding_service
-    from backend.milvus_writer import MilvusWriter
-    from backend.services import knowledge_service as service
-    from backend.services.knowledge_tools import retrieve
+    from backend.infrastructure.database.session import Base, engine, SessionLocal
+    from backend.infrastructure.database.models import User, KnowledgeBase, KnowledgeDocumentPage
+    from backend.infrastructure.resources import embedding_service
+    from backend.infrastructure.vector_store.writer import MilvusWriter
+    from backend.infrastructure import resources, storage
+    from backend.services import knowledge as service
+    from backend.services.knowledge.tools import retrieve
     from test_document_ingestion import MemoryMilvus
 
     Base.metadata.create_all(engine)
@@ -45,8 +46,8 @@ with tempfile.TemporaryDirectory() as tmp:
     image.save(pdf_bytes, format="PDF", resolution=150)
     sink = MemoryMilvus()
     writer = MilvusWriter(embedding_service, sink)
-    with (patch.object(service, "STORAGE_DIR", root / "files"),
-          patch.object(service, "milvus_manager", sink), patch.object(service, "milvus_writer", writer)):
+    with (patch.object(storage, "KNOWLEDGE_DOCUMENTS_DIR", root / "files"),
+          patch.object(resources, "milvus_manager", sink), patch.object(resources, "milvus_writer", writer)):
         with SessionLocal() as db:
             db.add_all([User(id=1, username="smoke", password_hash="x"),
                         KnowledgeBase(id="kb", owner_id=1, name="Smoke")])

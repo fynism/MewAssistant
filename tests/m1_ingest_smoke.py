@@ -16,11 +16,12 @@ with tempfile.TemporaryDirectory() as temp_dir:
     os.environ["BM25_M1_STATE_PATH"] = str(root / "bm25.json")
 
     from fastapi import UploadFile
-    from backend.database import Base, SessionLocal, engine
-    from backend.milvus_client import MilvusManager
-    from backend.models import KnowledgeBase, KnowledgeDocument, User
+    from backend.infrastructure.database.session import Base, SessionLocal, engine
+    from backend.infrastructure.vector_store.client import MilvusManager
+    from backend.infrastructure.database.models import KnowledgeBase, KnowledgeDocument, User
     from backend.rag.retrieval import retrieve_documents
-    from backend.services import knowledge_service
+    from backend.infrastructure import storage
+    from backend.services import knowledge as knowledge_service
 
     def make_docx(text: str) -> bytes:
         stream = io.BytesIO()
@@ -41,7 +42,7 @@ with tempfile.TemporaryDirectory() as temp_dir:
         return stream.getvalue()
 
     Base.metadata.create_all(engine)
-    knowledge_service.STORAGE_DIR = root / "files"
+    storage.KNOWLEDGE_DOCUMENTS_DIR = root / "files"
     db = SessionLocal()
     try:
         db.add_all([

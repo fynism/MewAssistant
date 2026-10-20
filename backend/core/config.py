@@ -1,6 +1,7 @@
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
@@ -29,6 +30,11 @@ class Settings:
     jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
     jwt_expire_minutes: int = int(os.getenv("JWT_EXPIRE_MINUTES", "1440"))
     password_pbkdf2_rounds: int = int(os.getenv("PASSWORD_PBKDF2_ROUNDS", "310000"))
+
+    github_oauth_enabled: bool = os.getenv("GITHUB_OAUTH_ENABLED", "false").lower() == "true"
+    github_client_id: str = os.getenv("GITHUB_CLIENT_ID", "").strip()
+    github_client_secret: str = os.getenv("GITHUB_CLIENT_SECRET", "").strip()
+    github_redirect_uri: str = os.getenv("GITHUB_REDIRECT_URI", "").strip()
 
     mcp_public_base_url: str = os.getenv("MCP_PUBLIC_BASE_URL", "")
     mcp_allowed_hosts: str = os.getenv("MCP_ALLOWED_HOSTS", "localhost:*,127.0.0.1:*,testserver")
@@ -80,6 +86,15 @@ class Settings:
     leaf_retrieve_level: int = int(os.getenv("LEAF_RETRIEVE_LEVEL", "3"))
 
     def __post_init__(self):
+        if self.github_oauth_enabled:
+            if not all((self.github_client_id, self.github_client_secret, self.github_redirect_uri)):
+                raise ValueError("GitHub OAuth requires GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET and GITHUB_REDIRECT_URI")
+            uri = urlsplit(self.github_redirect_uri)
+            if (not uri.hostname or uri.username or uri.password or uri.query or uri.fragment
+                    or uri.path != "/auth/github/callback"
+                    or (uri.scheme != "https" and not (
+                        uri.scheme == "http" and uri.hostname in {"localhost", "127.0.0.1", "::1"}))):
+                raise ValueError("GITHUB_REDIRECT_URI must be an HTTPS /auth/github/callback URL (HTTP only on loopback)")
         if self.pdf_ocr_mode not in {"auto", "always", "off"}:
             raise ValueError("PDF_OCR_MODE must be auto, always, or off")
         if min(self.pdf_ocr_dpi, self.pdf_ocr_retry_dpi, self.pdf_ocr_max_side, self.max_pdf_pages) <= 0:

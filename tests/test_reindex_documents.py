@@ -6,9 +6,9 @@ from unittest.mock import patch
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend.database import Base
-from backend.models import KnowledgeBase, KnowledgeDocument, User
-from backend.reindex_documents import reindex_all
+from backend.infrastructure.database.session import Base
+from backend.infrastructure.database.models import KnowledgeBase, KnowledgeDocument, User
+from backend.cli.reindex_documents import reindex_all
 
 
 class ReindexTests(unittest.TestCase):
@@ -33,11 +33,11 @@ class ReindexTests(unittest.TestCase):
                 with factory() as db:
                     db.get(KnowledgeDocument, doc_id).status = "ready"
                     db.commit()
-            with (patch("backend.database.SessionLocal", factory),
-                  patch("backend.services.knowledge_service._cleanup_vectors", side_effect=cleanup),
-                  patch("backend.services.knowledge_service.process_document", side_effect=process),
-                  patch("backend.dependencies.milvus_manager") as milvus,
-                  patch("backend.dependencies.embedding_service") as embedding):
+            with (patch("backend.infrastructure.database.session.SessionLocal", factory),
+                  patch("backend.services.knowledge.processing.cleanup_document_index", side_effect=cleanup),
+                  patch("backend.services.knowledge.processing.process_document", side_effect=process),
+                  patch("backend.infrastructure.resources.milvus_manager") as milvus,
+                  patch("backend.infrastructure.resources.embedding_service") as embedding):
                 milvus.query_all.return_value = []
                 embedding.reset_for_rebuild.side_effect = lambda: calls.append("reset")
                 self.assertEqual(reindex_all(True), {"total": 1, "ready": 1, "failed": 0})

@@ -3,7 +3,7 @@ import unittest
 
 class M1WriterTests(unittest.TestCase):
     def test_second_batch_failure_deletes_partial_vectors_and_bm25_stats(self):
-        from backend.milvus_writer import MilvusWriter
+        from backend.infrastructure.vector_store.writer import MilvusWriter
 
         class Embeddings:
             def __init__(self):

@@ -18,10 +18,10 @@ try:
     os.environ["DATABASE_URL"] = f"postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/{name}"
 
     from fastapi import HTTPException
-    from backend.database import Base, SessionLocal, engine
-    from backend.models import Invitation, User
-    from backend.routers.auth import register
-    from backend.schemas import RegisterRequest
+    from backend.infrastructure.database.session import Base, SessionLocal, engine
+    from backend.infrastructure.database.models import Invitation, User
+    from backend.api.routers.auth import register
+    from backend.api.schemas.auth import RegisterRequest
 
     Base.metadata.create_all(engine)
     code = "one-use-" + uuid4().hex

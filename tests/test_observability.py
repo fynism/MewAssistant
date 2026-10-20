@@ -2,7 +2,7 @@ import unittest
 
 from sqlalchemy import create_engine, text
 
-from backend.observability import enable_sql_logging, request_id
+from backend.core.observability import enable_sql_logging, request_id
 
 
 class SQLLoggingTests(unittest.TestCase):

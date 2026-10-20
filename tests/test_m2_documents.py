@@ -10,11 +10,13 @@ from fastapi import HTTPException, UploadFile
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend.database import Base
-from backend.models import KnowledgeBase, KnowledgeDocument, User
-from backend.routers import knowledges as routes
-from backend.services import knowledge_service as service
-from backend.services.knowledge_tools import retrieve
+from backend.infrastructure.database.session import Base
+from backend.infrastructure.database.models import KnowledgeBase, KnowledgeDocument, User
+from backend.api.routers import knowledges as routes
+from backend.infrastructure import resources, storage
+from backend.services.knowledge import processing, uploads
+from backend.services import knowledge as service
+from backend.services.knowledge.tools import retrieve
 
 
 class M2DocumentTests(unittest.TestCase):
@@ -37,7 +39,7 @@ class M2DocumentTests(unittest.TestCase):
         self.storage = self.root / "files"
         self.storage.mkdir()
         (self.storage / "old.pdf").write_bytes(b"%PDF-old")
-        self.storage_patch = patch.object(service, "STORAGE_DIR", self.storage)
+        self.storage_patch = patch.object(storage, "KNOWLEDGE_DOCUMENTS_DIR", self.storage)
         self.storage_patch.start()
 
     def tearDown(self):
@@ -88,11 +90,11 @@ class M2DocumentTests(unittest.TestCase):
                 self.written.extend(chunks)
 
         milvus, embeddings, writer = Milvus(), Embeddings(), Writer()
-        with (patch.object(service, "SessionLocal", self.factory),
-              patch.object(service, "milvus_manager", milvus),
-              patch.object(service, "embedding_service", embeddings),
-              patch.object(service, "document_loader", Loader()),
-              patch.object(service, "milvus_writer", writer)):
+        with (patch.object(processing, "SessionLocal", self.factory),
+              patch.object(resources, "milvus_manager", milvus),
+              patch.object(resources, "embedding_service", embeddings),
+              patch.object(resources, "document_loader", Loader()),
+              patch.object(resources, "milvus_writer", writer)):
             service.process_document(item.id)
         self.db.expire_all()
         self.assertEqual(item.status, "ready")
@@ -127,13 +129,13 @@ class M2DocumentTests(unittest.TestCase):
         self.assertIn("updated_at", routes.document_payload(document))
 
     def test_user_document_and_storage_quotas_cover_upload_and_replacement(self):
-        with patch.object(service, "settings", replace(service.settings, max_user_documents=1)):
+        with patch.object(uploads, "settings", replace(uploads.settings, max_user_documents=1)):
             with self.assertRaises(HTTPException) as full:
                 asyncio.run(service.save_upload(self.db, 1, "alice-kb", self.upload()))
         self.assertEqual(full.exception.status_code, 413)
         self.assertEqual(self.db.query(KnowledgeDocument).count(), 1)
 
-        with patch.object(service, "settings", replace(service.settings, max_user_storage_bytes=14)):
+        with patch.object(uploads, "settings", replace(uploads.settings, max_user_storage_bytes=14)):
             with self.assertRaises(HTTPException) as full:
                 asyncio.run(service.replace_document(self.db, 1, "alice-kb", "alice-doc", self.upload()))
         self.assertEqual(full.exception.status_code, 413)
@@ -142,7 +144,7 @@ class M2DocumentTests(unittest.TestCase):
         item = self.db.get(KnowledgeDocument, "alice-doc")
         item.status = "deleting"
         self.db.commit()
-        with patch.object(service, "settings", replace(service.settings, max_user_documents=1)):
+        with patch.object(uploads, "settings", replace(uploads.settings, max_user_documents=1)):
             with self.assertRaises(HTTPException) as occupied:
                 asyncio.run(service.save_upload(self.db, 1, "alice-kb", self.upload()))
         self.assertEqual(occupied.exception.status_code, 413)
@@ -158,7 +160,7 @@ class M2DocumentTests(unittest.TestCase):
             def delete(self, _expression):
                 pass
 
-        with (patch.object(service, "milvus_manager", Milvus()),
+        with (patch.object(resources, "milvus_manager", Milvus()),
               patch("backend.rag.retrieval.retrieve_documents") as search):
             service.delete_document(self.db, self.db.get(KnowledgeDocument, "alice-doc"))
             self.assertEqual(retrieve(self.db, 1, "old", ["alice-kb"]),
