@@ -2,8 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from backend.document_loader import DocumentLoader
-from backend.ingestion import (ExtractedPage, ProcessingError, TextBlock, clean_pages,
+from backend.documents.loader import DocumentLoader
+from backend.documents.cleaning import (ExtractedPage, ProcessingError, TextBlock, clean_pages,
                                clean_text, decode_text, reconstruct_text, public_report)
 
 

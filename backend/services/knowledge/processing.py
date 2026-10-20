@@ -1,0 +1,121 @@
+"""Document indexing and recovery with retained page diagnostics."""
+
+import hashlib
+from datetime import datetime
+
+from sqlalchemy.orm import Session
+
+from backend.infrastructure.database.session import SessionLocal
+from backend.documents.cleaning import ProcessingError
+from backend.infrastructure import resources, storage
+from backend.infrastructure.database.models import KnowledgeBase, KnowledgeDocument, KnowledgeParentChunk, KnowledgeDocumentPage
+from backend.core.observability import logger
+
+
+def cleanup_document_index(db: Session, item: KnowledgeDocument, remove_bm25: bool = False) -> None:
+    resources.milvus_manager.init_collection()
+    expr = f'document_id == "{item.id}"'
+    rows = resources.milvus_manager.query_all(filter_expr=expr, output_fields=["text"])
+    resources.milvus_manager.delete(expr)
+    if rows and (remove_bm25 or item.status in {"ready", "deleting"}):
+        resources.embedding_service.increment_remove_documents([r.get("text", "") for r in rows])
+    db.query(KnowledgeParentChunk).filter(KnowledgeParentChunk.document_id == item.id).delete()
+    db.commit()
+
+
+def process_document(document_id: str) -> None:
+    db = SessionLocal()
+    try:
+        item = db.query(KnowledgeDocument).filter(KnowledgeDocument.id == document_id).with_for_update(skip_locked=True).first()
+        if item is None or item.status not in {"pending", "failed", "replacing"}:
+            return
+        knowledge = db.query(KnowledgeBase).filter(KnowledgeBase.id == item.knowledge_id).with_for_update().first()
+        if knowledge is None or knowledge.status != "active":
+            return
+        item.status = "processing"
+        item.error_summary = None
+        item.processing_report = None
+        db.query(KnowledgeDocumentPage).filter(KnowledgeDocumentPage.document_id == item.id).delete()
+        item.updated_at = datetime.utcnow()
+        db.commit()
+        try:
+            if item.replacement_storage_key:
+                cleanup_document_index(db, item, remove_bm25=item.replacement_old_ready)
+                old_storage_key = item.storage_key
+                item.storage_key = item.replacement_storage_key
+                item.filename = item.replacement_filename
+                item.file_type = item.replacement_file_type
+                item.size_bytes = item.replacement_size_bytes or 0
+                item.replacement_storage_key = None
+                item.replacement_filename = None
+                item.replacement_file_type = None
+                item.replacement_size_bytes = None
+                item.replacement_old_ready = False
+                db.commit()
+                (storage.KNOWLEDGE_DOCUMENTS_DIR / old_storage_key).unlink(missing_ok=True)
+            else:
+                cleanup_document_index(db, item, remove_bm25=True)
+            path = storage.KNOWLEDGE_DOCUMENTS_DIR / item.storage_key
+            item.content_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+            chunks = resources.document_loader.load_document(str(path), item.filename, item.id, item.knowledge_id)
+            item.processing_report = getattr(chunks, "report", None)
+            db.query(KnowledgeDocumentPage).filter(KnowledgeDocumentPage.document_id == item.id).delete()
+            for page in getattr(chunks, "pages", []):
+                record = page.record()
+                db.add(KnowledgeDocumentPage(document_id=item.id, page_number=page.page_number,
+                    status=page.status, extraction=page.extraction, raw_text=page.raw_text,
+                    cleaned_text=page.cleaned_text, extraction_data=record))
+            db.commit()  # Keep diagnostics even if no page is usable.
+            parents = [c for c in chunks if c["chunk_level"] in (1, 2)]
+            leaves = [c for c in chunks if c["chunk_level"] == 3]
+            if not leaves:
+                raise ProcessingError("文件没有可检索内容，请查看页面处理报告或替换文件")
+            db.add_all([KnowledgeParentChunk(
+                chunk_id=c["chunk_id"], knowledge_id=item.knowledge_id, document_id=item.id,
+                text=c["text"], filename=item.filename, file_type=c["file_type"],
+                page_number=c["page_number"], parent_chunk_id=c.get("parent_chunk_id", ""),
+                root_chunk_id=c.get("root_chunk_id", ""), chunk_level=c["chunk_level"],
+                chunk_idx=c["chunk_idx"]) for c in parents])
+            db.commit()
+            resources.milvus_writer.write_documents(leaves)
+            item.status = "ready"
+            item.updated_at = datetime.utcnow()
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            logger.error("document_processing_failed document_id=%s error_type=%s",
+                         document_id, type(exc).__name__)
+            try:
+                cleanup_document_index(db, item, remove_bm25=item.replacement_old_ready)
+            except Exception:
+                db.rollback()
+            item.status = "failed"
+            item.error_summary = str(exc) if isinstance(exc, ProcessingError) else "处理失败；请重试或联系管理员"
+            item.updated_at = datetime.utcnow()
+            db.commit()
+    finally:
+        db.close()
+
+
+def recover_pending_documents(include_stale_processing: bool = False) -> int:
+    db = SessionLocal()
+    try:
+        if include_stale_processing:
+            reset_interrupted_documents(db)
+        db.commit()
+        ids = [row[0] for row in db.query(KnowledgeDocument.id).filter(
+            KnowledgeDocument.status.in_(["pending", "replacing"])).all()]
+    finally:
+        db.close()
+    for document_id in ids:
+        process_document(document_id)
+    return len(ids)
+
+
+def reset_interrupted_documents(db: Session) -> int:
+    """Call only once on startup of the single web worker, before scheduling jobs."""
+    count = db.query(KnowledgeDocument).filter(
+        KnowledgeDocument.status == "processing",
+    ).update({"status": "pending", "updated_at": datetime.utcnow()}, synchronize_session=False)
+    db.commit()
+    return count

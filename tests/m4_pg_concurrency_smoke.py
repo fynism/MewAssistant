@@ -37,8 +37,10 @@ def main() -> None:
 
         engine = create_engine(scoped_url)
         try:
-            from backend.models import KnowledgeBase, KnowledgeDocument, User
-            from backend.services import knowledge_service
+            from backend.infrastructure.database.models import KnowledgeBase, KnowledgeDocument, User
+            from backend.services.knowledge import uploads
+            from backend.infrastructure import storage
+            from backend.services import knowledge as knowledge_service
 
             factory = sessionmaker(bind=engine, expire_on_commit=False)
             with factory() as db:
@@ -49,12 +51,12 @@ def main() -> None:
                 db.commit()
 
             with tempfile.TemporaryDirectory(prefix="supermew-m4-files-") as tmp:
-                old_storage = knowledge_service.STORAGE_DIR
-                old_settings = knowledge_service.settings
+                old_storage = storage.KNOWLEDGE_DOCUMENTS_DIR
+                old_settings = uploads.settings
                 try:
                     from dataclasses import replace
-                    knowledge_service.STORAGE_DIR = Path(tmp)
-                    knowledge_service.settings = replace(old_settings, max_user_documents=1)
+                    storage.KNOWLEDGE_DOCUMENTS_DIR = Path(tmp)
+                    uploads.settings = replace(old_settings, max_user_documents=1)
                     gate = Barrier(2)
 
                     def upload(knowledge_id: str):
@@ -74,8 +76,8 @@ def main() -> None:
                         assert db.query(KnowledgeDocument).count() == 1
                     print("PostgreSQL M4 concurrency passed; one upload accepted, one quota rejection")
                 finally:
-                    knowledge_service.STORAGE_DIR = old_storage
-                    knowledge_service.settings = old_settings
+                    storage.KNOWLEDGE_DOCUMENTS_DIR = old_storage
+                    uploads.settings = old_settings
         finally:
             engine.dispose()
     finally:

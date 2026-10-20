@@ -9,8 +9,8 @@ from unittest.mock import patch
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend.database import Base
-from backend.models import KnowledgeBase, KnowledgeDocument, User
+from backend.infrastructure.database.session import Base
+from backend.infrastructure.database.models import KnowledgeBase, KnowledgeDocument, User
 from backend.workers import maintenance
 
 
@@ -50,7 +50,7 @@ class RecoveryTests(unittest.TestCase):
                 await asyncio.gather(task, return_exceptions=True)
 
         with (patch.object(maintenance, "SessionLocal", self.factory),
-              patch("backend.services.knowledge_service.SessionLocal", self.factory),
+              patch("backend.services.knowledge.processing.SessionLocal", self.factory),
               patch.object(maintenance, "process_document", process),
               patch.object(maintenance, "prune_expired_audits", lambda: 0),
               patch.object(maintenance, "settings", replace(maintenance.settings,

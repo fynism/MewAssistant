@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from fastapi import HTTPException
 
-from backend.services.rate_limits import enforce_rate_limits
+from backend.services.platform.rate_limits import enforce_rate_limits
 
 
 class RateLimitTests(unittest.TestCase):
@@ -21,7 +21,7 @@ class RateLimitTests(unittest.TestCase):
                 seen.append((script, count, args))
                 return 2
 
-        with patch("backend.services.rate_limits.Redis.from_url", return_value=FakeRedis()):
+        with patch("backend.services.platform.rate_limits.Redis.from_url", return_value=FakeRedis()):
             with self.assertRaises(HTTPException) as denied:
                 enforce_rate_limits(("mcp:user:1", 60), ("mcp:key:key-id", 30))
         self.assertEqual(denied.exception.status_code, 429)

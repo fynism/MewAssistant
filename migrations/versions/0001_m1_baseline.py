@@ -7,8 +7,8 @@ Revises:
 from alembic import op
 import sqlalchemy as sa
 
-from backend.database import Base
-from backend import models  # noqa: F401
+from backend.infrastructure.database.session import Base
+from backend.infrastructure.database import models  # noqa: F401
 
 revision = "0001_m1"
 down_revision = None

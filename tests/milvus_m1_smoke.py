@@ -2,7 +2,7 @@
 
 from uuid import uuid4
 
-from backend.milvus_client import MilvusManager
+from backend.infrastructure.vector_store.client import MilvusManager
 
 
 def main():
