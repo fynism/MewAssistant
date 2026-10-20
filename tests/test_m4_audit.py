@@ -9,14 +9,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend.database import Base
-from backend.auth import get_current_user, get_db
-from backend.models import CallAudit, User
-from backend.observability import request_id
-from backend.routers.operations import operations
-from backend.routers.operations import router as operations_router
-from backend.services.call_audit import prune_expired_audits, record_call
-from backend.services.api_keys import create_key
+from backend.infrastructure.database.session import Base
+from backend.api.dependencies import get_current_user, get_db
+from backend.infrastructure.database.models import CallAudit, User
+from backend.core.observability import request_id
+from backend.api.routers.operations import operations
+from backend.api.routers.operations import router as operations_router
+from backend.services.platform.call_audit import prune_expired_audits, record_call
+from backend.services.platform.api_keys import create_key
 
 
 class CallAuditTests(unittest.TestCase):
@@ -34,7 +34,7 @@ class CallAuditTests(unittest.TestCase):
         self.temp.cleanup()
 
     def test_minimal_record_dashboard_and_retention(self):
-        with patch("backend.services.call_audit.SessionLocal", self.factory):
+        with patch("backend.services.platform.call_audit.SessionLocal", self.factory):
             token = request_id.set("req-123")
             try:
                 record_call(1, "key-id", "retrieve", "success", 24)
@@ -70,15 +70,15 @@ class CallAuditTests(unittest.TestCase):
             self.assertEqual(client.get("/admin/operations").status_code, 200)
 
     def test_mcp_tool_call_persists_only_metadata(self):
-        from backend.mcp_knowledge import _invoke
-        from backend.services.knowledge_tools import list_knowledges
+        from backend.integrations.mcp.knowledge import _invoke
+        from backend.services.knowledge.tools import list_knowledges
 
         with self.factory() as db:
             _, key = create_key(db, 1, "Codex")
         token = request_id.set("mcp-req")
         try:
-            with (patch("backend.mcp_knowledge.SessionLocal", self.factory),
-                  patch("backend.services.call_audit.SessionLocal", self.factory)):
+            with (patch("backend.integrations.mcp.knowledge.SessionLocal", self.factory),
+                  patch("backend.services.platform.call_audit.SessionLocal", self.factory)):
                 result = _invoke({"authorization": "Bearer " + key}, list_knowledges)
         finally:
             request_id.reset(token)

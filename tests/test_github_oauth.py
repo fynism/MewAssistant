@@ -21,11 +21,12 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from backend.auth import get_db, get_password_hash
+from backend.api.dependencies import get_db
+from backend.api.routers import auth, github_auth
 from backend.core.config import settings
-from backend.database import Base
-from backend.models import User
-from backend.routers import auth, github_auth
+from backend.core.security import get_password_hash
+from backend.infrastructure.database.session import Base
+from backend.infrastructure.database.models import User
 from backend.services import github_oauth as oauth
 
 ORIGIN = "https://platform.example"

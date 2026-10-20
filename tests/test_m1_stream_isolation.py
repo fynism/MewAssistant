@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 class M1StreamIsolationTests(unittest.TestCase):
     def test_failed_stream_does_not_save_incomplete_turn(self):
-        from backend import agent
+        from backend.services.chat import agent
 
         class FailingAgent:
             async def astream(self, *_args, **_kwargs):
@@ -32,7 +32,8 @@ class M1StreamIsolationTests(unittest.TestCase):
 
     def test_two_streams_keep_tool_results_and_rag_events_separate(self):
         from langchain_core.messages import AIMessageChunk
-        from backend import agent, rag_pipeline
+        from backend.services.chat import agent
+        from backend.rag import pipeline as rag_pipeline
         from backend.rag.events import emit_rag_step
 
         class FakeAgent:

@@ -71,7 +71,7 @@ bearer_token_env_var = "MCP_API_KEY"
 uv sync
 
 # 运行服务
-uv run python backend/app.py
+uv run python -m backend.app
 # 或
 uv run uvicorn backend.app:app --host 0.0.0.0 --port 8000 --reload
 ```
@@ -84,7 +84,7 @@ pip install -U pip
 pip install -e .
 
 # 运行服务
-python backend/app.py
+python -m backend.app
 # 或
 uvicorn backend.app:app --host 0.0.0.0 --port 8000 --reload
 ```
@@ -241,21 +241,18 @@ Compose 会自动启动应用；在 ECS 上通过 Nginx/HTTPS 对外提供服务
 - 登录校验兼容历史 bcrypt 哈希，支持平滑迁移。
 
 ## 目录与架构
+后端结构及依赖规则见 [后端架构说明](backend/README.md)。
+
 - 后端：`backend/`
-  - [app.py](backend/app.py)：FastAPI 入口、CORS、静态资源挂载。
-  - [api.py](backend/api.py)：聊天、会话管理、文档管理接口。
-  - [auth.py](backend/auth.py)：注册登录、JWT 鉴权、权限检查、密码哈希与校验。
-  - [database.py](backend/database.py)：数据库引擎与会话工厂、建表入口。
-  - [models.py](backend/models.py)：ORM 模型定义（用户、会话、消息、父文档）。
-  - [cache.py](backend/cache.py)：Redis JSON 缓存封装。
-  - [agent.py](backend/agent.py)：LangChain Agent、会话存储、摘要逻辑。
-  - [tools.py](backend/tools.py)：天气查询、知识库检索工具。
-  - [embedding.py](backend/embedding.py)：本地 HuggingFace 稠密向量（默认 `BAAI/bge-m3`）+ BM25 稀疏向量；BM25 状态持久化与增量更新。
-  - [document_loader.py](backend/document_loader.py)：PDF/Word 加载与分片。
-  - [parent_chunk_store.py](backend/parent_chunk_store.py)：父级分块仓储（PostgreSQL + Redis，用于 Auto-merging 回取父块）。
-  - [milvus_writer.py](backend/milvus_writer.py)：向量写入（稠密+稀疏）。
-  - [milvus_client.py](backend/milvus_client.py)：Milvus 集合定义、混合检索；`query_all` 分页查询（单次 `query` 的 `limit` 受服务端上限约束，删除前拉全量 chunk 文本时使用）。
-  - [schemas.py](backend/schemas.py)：Pydantic 请求/响应模型。
+  - `app.py`：应用装配与生命周期，保留 `backend.app:app` 入口。
+  - `api/`：HTTP 路由、请求/响应模型、鉴权依赖、中间件与静态页面。
+  - `services/`：知识库、文件生命周期、聊天、账号与平台业务。
+  - `documents/`：文档提取、OCR、文本清洗与分块。
+  - `rag/`：检索图、扩展、重排和父块合并。
+  - `infrastructure/`：数据库与分域 ORM、Redis、embedding、Milvus、共享资源与文件路径。
+  - `integrations/mcp/`：MCP 协议适配与工具注册。
+  - `workers/`、`cli/`：后台调度与运维命令。
+  - `core/`：配置、安全原语与日志；`legacy/`：隔离的旧版全局文档实现。
 - 前端：`frontend/`
   - [index.html](frontend/index.html) + [app.js](frontend/app.js) + [theme.css](frontend/theme.css) + [styles.css](frontend/styles.css)：Vue 3 + Element Plus，提供服务广场、工作空间、聊天与接入管理；浏览器依赖位于 `frontend/vendor`。
 - 数据：`data/`
@@ -267,7 +264,7 @@ Compose 会自动启动应用；在 ECS 上通过 Nginx/HTTPS 对外提供服务
 
 ### 1) 项目全链路（端到端）
 1. 用户在前端输入问题，调用 `POST /chat/stream`（流式）。
-2. FastAPI `api.py` 返回 `StreamingResponse(media_type="text/event-stream")`。
+2. FastAPI `api/routers/chat.py` 返回 `StreamingResponse(media_type="text/event-stream")`。
 3. LangChain Agent 根据问题类型决定是否调用工具：
   - 天气问题 → `get_current_weather`
   - 知识问答 → `search_knowledge_base`

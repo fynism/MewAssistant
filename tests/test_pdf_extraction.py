@@ -8,8 +8,8 @@ import numpy as np
 from pypdf import PdfWriter
 from pypdf.generic import DictionaryObject, NameObject, DecodedStreamObject
 
-from backend import pdf_extraction as pdf
-from backend.ingestion import TextBlock, clean_pages, summarize_pages
+from backend.documents import pdf
+from backend.documents.cleaning import TextBlock, clean_pages, summarize_pages
 
 
 def write_native_pdf(path: Path):

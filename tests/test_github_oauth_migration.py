@@ -47,7 +47,7 @@ class GitHubMigrationTests(unittest.TestCase):
                                      ("admin", "preserved-hash", "admin"))
                     self.assertEqual(db.execute(text("SELECT COUNT(*) FROM users")).scalar(), 2)
                 migrate("upgrade", "head")
-                from backend import database
+                from backend.infrastructure.database import session as database
                 from unittest.mock import patch
                 with patch.object(database, "engine", engine):
                     database.init_db()

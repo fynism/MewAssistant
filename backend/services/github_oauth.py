@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.core.config import settings
-from backend.models import User
+from backend.infrastructure.database.models import User
 
 FLOW_TTL = 600
 TICKET_TTL = 60

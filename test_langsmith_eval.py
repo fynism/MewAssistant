@@ -1,18 +1,11 @@
 from typing import Any, Optional
-import importlib
 import os
-import sys
 from uuid import uuid4
 
 from dotenv import load_dotenv
 from langsmith import evaluate
 
-# 将 backend 路径添加到 sys.path，以便导入你的 Agent 模块
-backend_path = os.path.join(os.path.dirname(__file__), "backend")
-if backend_path not in sys.path:
-    sys.path.append(backend_path)
-
-chat_with_agent = importlib.import_module("agent").chat_with_agent
+from backend.services.chat.agent import chat_with_agent
 
 load_dotenv()
 
