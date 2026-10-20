@@ -120,6 +120,24 @@ class GitHubOAuthTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.client.post("/auth/register", json={"username": "new", "password": "secret"}).status_code, 422)
 
+    def test_application_routes_complete_github_login_with_shared_database_dependency(self):
+        from backend.app import app
+
+        # Exercise the exported application without rebuilding the global MCP
+        # transport, and restore dependency overrides for the other API tests.
+        client = TestClient(app, base_url=ORIGIN)
+        self.addCleanup(client.close)
+        with patch.dict(app.dependency_overrides, {get_db: self.app.dependency_overrides[get_db]}):
+            self.assertEqual(client.get("/auth/providers").json(), {"github": True})
+            query, _ = self.start(client=client)
+            self.assertIn("github=success", self.callback(query["state"][0], client=client).headers["location"])
+            response = self.complete(client=client)
+            self.assertEqual(response.status_code, 200, response.text)
+            data = response.json()
+            me = client.get("/auth/me", headers={"Authorization": "Bearer " + data["access_token"]})
+            self.assertEqual(me.status_code, 200, me.text)
+            self.assertEqual(me.json(), {"username": data["username"], "role": "user"})
+
     def test_start_has_pkce_secure_cookies_and_no_private_scopes(self):
         self.assertEqual(self.client.get("/auth/providers").json(), {"github": True})
         query, response = self.start()
