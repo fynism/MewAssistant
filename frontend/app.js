@@ -58,8 +58,10 @@
 
       let identityEpoch = 0, documentEpoch = 0, knowledgeEpoch = 0, resultEpoch = 0, sessionEpoch = 0;
       const authOpen = ref(false), authMode = ref('login'), authLoading = ref(false), authError = ref('');
+      const authView = ref('methods');
+      const authTitle = computed(() => authMode.value === 'register' ? '邀请注册' : authView.value === 'password' ? '账号密码登录' : '登录');
       const githubEnabled = ref(false), githubLoading = ref(false);
-      const authForm = reactive({username:'',password:'',invite:''}), authFormRef = ref(null), usernameInput = ref(null);
+      const authForm = reactive({username:'',password:'',invite:''}), authFormRef = ref(null), usernameInput = ref(null), githubLoginButton = ref(null);
       const authRules = {username:[{required:true,whitespace:true,message:'请输入用户名',trigger:'blur'}],password:[{required:true,message:'请输入密码',trigger:'blur'}],invite:[{required:true,whitespace:true,message:'请输入邀请码',trigger:'blur'}]};
       const knowledges = ref([]), selectedKnowledgeId = ref(''), selectedKnowledgeIds = ref([]), knowledgeLoading = ref(false), knowledgeError = ref('');
       const documents = ref([]), documentsLoading = ref(false), documentsError = ref(''), documentBusyId = ref('');
@@ -92,7 +94,7 @@
         if (authenticated && token.value) headers.set('Authorization', `Bearer ${token.value}`);
         const response = await fetch(path, {...options, headers});
         if (authenticated && epoch !== identityEpoch) throw new DOMException('账号已切换', 'AbortError');
-        if (authenticated && response.status === 401) {logout(false); authOpen.value = true; throw new Error('登录已过期，请重新登录');}
+        if (authenticated && response.status === 401) {logout(false); openAuth(); throw new Error('登录已过期，请重新登录');}
         if (!response.ok) {const data = await response.json().catch(() => ({})); throw new Error(errorMessage(response, data, '请求失败'));}
         return response;
       }
@@ -102,9 +104,19 @@
       async function confirmAction(message, title) {try {await ElMessageBox.confirm(message,title,{confirmButtonText:'确认',cancelButtonText:'取消',type:'warning',autofocus:false}); return true;} catch {return false;}}
       async function copyText(value) {try {await navigator.clipboard.writeText(value); ElMessage.success('已复制');} catch {ElMessage.warning('复制失败，请选中文本手动复制');}}
       function resetAuth() {authForm.password = ''; authForm.invite = ''; authError.value = ''; authFormRef.value?.clearValidate();}
-      function openAuth(mode = 'login') {resetAuth(); authMode.value = mode; authOpen.value = true;}
+      function openAuth(mode = 'login') {resetAuth(); authMode.value = mode; authView.value = mode === 'login' && githubEnabled.value ? 'methods' : 'password'; authOpen.value = true;}
       function switchAuth() {authMode.value = authMode.value === 'login' ? 'register' : 'login'; resetAuth();}
-      function focusAuth() {usernameInput.value?.focus();}
+      function focusAuth() {if (authView.value === 'password') usernameInput.value?.focus(); else githubLoginButton.value?.$el?.focus();}
+      async function choosePasswordLogin() {
+        if (authLoading.value || githubLoading.value) return;
+        resetAuth(); authMode.value = 'login'; authView.value = 'password';
+        await nextTick(); focusAuth();
+      }
+      async function showAuthMethods() {
+        if (authLoading.value || githubLoading.value) return;
+        resetAuth(); authMode.value = 'login'; authView.value = 'methods';
+        await nextTick(); focusAuth();
+      }
       function acceptLogin(data) {
         logout(false);
         token.value = data.access_token; storage.set('accessToken',data.access_token);
@@ -134,7 +146,7 @@
           const reasons = {cancelled:'已取消 GitHub 授权，可以重新尝试',expired:'GitHub 登录已过期，请重新尝试',unavailable:'GitHub 登录暂时不可用，请稍后重试',failed:'GitHub 登录失败，请重新尝试'};
           authError.value = reasons[failure] || 'GitHub 登录失败，请重新尝试';
         }
-        authMode.value = 'login'; authOpen.value = true; return false;
+        authMode.value = 'login'; authView.value = githubEnabled.value ? 'methods' : 'password'; authOpen.value = true; return false;
       }
       async function submitAuth() {
         if (authLoading.value || githubLoading.value) return;
@@ -440,7 +452,7 @@
       return {
         locale:ElementPlusLocaleZhCn,page,mobileNav,currentUser,authChecking,role,isAuthenticated,isAdmin,displayName,pageTitle,workspaceLinks,isExplore,isWorkspace,isDark,brandAnimating,brandWords,toggleTheme,go,accountCommand,
         connectionClient,servicePanels,connectionEndpoint,connectionNote,connectionExamples,
-        authOpen,authMode,authLoading,authError,authForm,authFormRef,authRules,usernameInput,resetAuth,openAuth,switchAuth,focusAuth,submitAuth,logout,githubEnabled,githubLoading,startGitHubLogin,
+        authOpen,authMode,authView,authTitle,authLoading,authError,authForm,authFormRef,authRules,usernameInput,githubLoginButton,resetAuth,openAuth,switchAuth,focusAuth,choosePasswordLogin,showAuthMethods,submitAuth,logout,githubEnabled,githubLoading,startGitHubLogin,
         knowledges,selectedKnowledgeId,selectedKnowledgeIds,selectedKnowledge,knowledgeLoading,knowledgeError,loadKnowledges,selectKnowledge,createOpen,editOpen,knowledgeName,knowledgeDescription,knowledgeEdit,createKnowledge,openKnowledgeEdit,updateKnowledge,deleteKnowledge,
         documents,documentsLoading,documentsError,documentBusyId,loadDocuments,fileInput,replaceInput,isUploading,acceptedExtensions,uploadLimitLabel,uploadDocument,chooseReplacement,replaceDocument,documentAction,statusLabel,statusIcon,documentPending,openTryWithKnowledge,pageReview,pageReviewLoading,viewDocumentPage,
         scopeLabel,scopeNames,toolName,toolQuery,topK,knowledgeSettings,toolLoading,toolResult,toolError,runTool,messages,chatInput,chatLoading,chatLog,isComposing,sendChat,stopChat,handleChatKey,parseMarkdown,traceFacts,traceGroups,newChat,sessions,sessionsOpen,sessionsLoading,sessionsError,loadSessions,loadSession,deleteSession,
