@@ -11,6 +11,8 @@
 
 ## Local execution pitfalls
 
+- `.env.example` includes empty model and embedding values; empty environment variables override code defaults, and an empty `DENSE_EMBEDDING_DIM` fails integer parsing. Fill the required values before startup. The root README includes a minimal configuration.
+- `/docs` is ignored except for already-tracked files. The former README linked an untracked deployment guide, and `docs/deploy/DEPLOY_DOCKER.md` describes obsolete commands. Use the root README and current `deploy.sh` for the two-environment release flow; README links must resolve in a fresh checkout.
 - `.codegraph/` exists, but neither the `codegraph` shell command nor a CodeGraph MCP tool was available during this task. Attempt CodeGraph first, then use source inspection if it remains unavailable.
 - An application can finish starting between a readiness check and a new launch. Check the listener PID and process logs; a successful readiness response alone does not prove the newly spawned process owns the port. Do not run multiple maintenance workers against the same database. During this test an additional launch exited because port 8000 was already occupied; the existing listener was reused.
 - A listener on port 8000 belonged to `C:/Users/fengy/.codex/worktrees/a68e/SuperMew`, at a different Git revision. It shared PostgreSQL and Milvus with the main checkout but had separate uploaded files and BM25 vocabulary state. After it stopped, recovery from the main checkout failed to find its files. Never mix these storage roots or vocabularies when evaluating; use the isolated fixture. No scores were emitted from that interrupted attempt.

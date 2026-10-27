@@ -1,544 +1,252 @@
-# MeowConnectPlatform 项目说明
+# SuperMew
 
-Agent的项目记录，方便后续持续更新与展示。
+SuperMew（MeowConnectPlatform）是一个私有知识库与 MCP 服务平台。上传文档后，可以在网页中进行知识库问答，也可以通过 MCP 将检索能力接入外部 AI 客户端。用户、知识库、文件与会话按账号隔离。
 
-## 文本清洗、TXT 与本地 PDF OCR
+## 功能
 
-上传与替换支持 PDF、Word、Excel、TXT。TXT 支持 UTF-8（含 BOM）、带 BOM 的 UTF-16/UTF-32 和 GB18030；解码错误、二进制内容、空正文在上传时返回明确错误。同一知识库的新文件按 SHA-256 检查完全重复内容，其他用户或知识库可独立保存相同文件；旧文件重新处理后补齐哈希。
+- **知识库管理**：创建多个知识库，上传、替换、删除和重新处理文档，查看处理状态与提取质量。
+- **文档解析**：支持 PDF、Word（`.doc` / `.docx`）、Excel（`.xls` / `.xlsx`）和 TXT；PDF 支持逐页原生文字提取与本地 OCR。
+- **混合检索**：本地 BGE-M3 稠密向量与 BM25 稀疏向量召回，经 RRF 融合，可选远程重排，再按阈值合并父级上下文。
+- **站内问答**：LangChain Agent 与 LangGraph RAG 流程，支持流式回答、停止生成、检索步骤与来源、多知识库范围、历史会话及摘要记忆。
+- **远程 MCP**：提供 `listKnowledges` 和 `retrieve`，通过可撤销的个人 API Key 访问私有知识库。
+- **账号与管理**：邀请码注册、可选 GitHub 登录、管理员邀请码管理、调用审计、上传配额和 Redis 限流。
 
-所有格式都在三级分块前统一清洗：NFC 规范化、统一换行、去除 BOM/异常零宽空格和无意义控制字符、去掉行尾空格、收敛连续空行。保留数字、单位、标点、缩进和表格列间空格。不会使用大模型改写正文，也不会去除正常的重叠分块。
+## 技术栈与数据流
 
-PDF 使用 PDFium 提取原生文字和位置。默认 `PDF_OCR_MODE=auto`：文字过少、乱码明显或存在大面积图片时逐页调用本地 RapidOCR（ONNX CPU）；`always` 强制检查所有页，`off` 关闭 OCR。原生文字与 OCR 按位置和文本相似度去重，简单双栏按栏排序，明确相邻的中文正文行合并。页眉页脚仅在页面上/下 10% 区域且至少 3 页、80% 页面重复时清理；可设置 `PDF_REMOVE_REPEATED_MARGINS=false` 关闭。复杂表格、公式、手写和严重模糊扫描不保证结构还原。
+| 层 | 实现 |
+| --- | --- |
+| 前端 | Vue 3 浏览器版、Element Plus，本地静态资源，无需 npm 构建 |
+| API 与 Agent | FastAPI、LangChain、LangGraph、官方 Python MCP SDK |
+| 文档处理 | PDFium、RapidOCR（ONNX CPU）、三级滑动窗口分块 |
+| 检索 | Hugging Face Embedding、Milvus、BM25、可选重排 API |
+| 持久化 | PostgreSQL、SQLAlchemy、Alembic、Redis、本地文件 |
+| 部署 | Docker Compose、Nginx / HTTPS |
 
-OCR 默认 200 DPI，低质量最多重试一次（300 DPI），图片长边最多 3500 像素，PDF 最多 300 页。按文本长度加权的 OCR 分数低于 0.55 时，该识别结果留存供复核，扫描页暂不入库；存在低于 0.75 的结果时显示质量提示。分数不是准确率概率，需要用实际文件校准。正常页仍可入库，明显空白页单独计数，有可见内容但未识别的页显示缺页提示；全文件没有可用内容时处理失败。
+```text
+上传文件 → 格式校验与去重 → 后台解析 / OCR / 清洗 → 三级分块
+                                             ├─ 叶子块 → 稠密 / 稀疏向量 → Milvus
+                                             └─ 父级块与处理报告 → PostgreSQL
 
-安装与启动：`uv sync`，备份数据库后运行 `uv run alembic upgrade head`（新增 `0008_document_cleaning`），再启动应用。Docker 镜像构建时加载 OCR 模型；本地首次识别也会加载模型，运行期间不向云端发送文档。
-
-文档接口新增 `processing_report`，包括清洗版本、总页数、可检索页数、空白页、未可靠提取页和质量提示。文件列表可查看清洗前后内容并重新处理；聊天来源、工具调试和 MCP `retrieve` 的 `processingReport` 也携带质量信息。逐页原始文字、OCR 文字、框位置和分数存 PostgreSQL，并随文档删除。
-
-- `POST /knowledges/{knowledge_id}/documents/{document_id}/reprocess`：排队重新处理既有文件，处理中退出检索，完成后重新可检索。
-- `POST .../retry`：失败或部分完成的文件可重试；当前会重处理整个文件，避免重复写入分块和统计。
-- `GET .../pages/{page_number}`：当前用户查看自己文件的页面提取结果，路径页码从 1 开始；原有检索字段页码仍从 0 开始，界面显示时加 1。
-
-已有文件不会自动重建。可从页面逐份重新处理，或停止应用 worker 后运行 `uv run python -m backend.reindex_documents --all`。新 BM25 索引默认保留数字、年份、版本和型号；已有统计文件继续沿用旧分词规则。若要升级旧索引，先备份数据库、上传文件和 BM25 状态，在维护窗口停止应用，然后运行 `uv run python -m backend.reindex_documents --all --upgrade-tokenizer`。该命令先隐藏文档、清理对应旧向量，确认集合已空后重建统计与新向量；失败文件可重试。不要在应用 worker 运行时执行批量重建。
-
-验证：`uv run python -m unittest discover -s tests -p 'test_*.py'`；`node tests/frontend_platform_smoke.js`；本地实际 OCR/向量化验证见 `tests/ingestion_ocr_smoke.py`。
-
-## v0.2 前端
-
-前端已采用服务广场与工作空间布局，使用 Vue 3、Element Plus、官方图标、日夜主题和本地字体。首页提供 Codex / Claude Code 配置切换、高亮及复制，配置示例统一使用正式地址 https://fyism.cn/mcp/knowledge。知识库、文件处理、流式对话、历史会话、工具调试、个人 Key 和管理员页面均连接现有后端接口。无需前端构建或 npm 安装；启动后端后刷新网页即可。文件结构和检查命令见 [前端说明](frontend/README.md)。
-
-> 用户名密码注册使用管理员创建的一次性邀请码；可选开启 GitHub 登录，首次授权自动创建普通用户，无需邀请码。配置与验收见 [GitHub OAuth 接入说明](docs/deploy/GitHub-OAuth.md)。旧 `.env` 中的 `ADMIN_INVITE_CODE` 已停用；首次管理员运行 `uv run python -m backend.admin_bootstrap --username admin` 创建，登录后调用 `POST /admin/invitations` 获取新的 `invite_code`。启动前先运行 `uv run alembic upgrade head`。
-
-## M3 远程知识库 MCP
-
-站内登录后可在“个人管理”创建、查看元信息和撤销个人 API Key；明文只在创建时返回一次。知识库服务使用官方 Python MCP SDK `2.2.0`，端点为 `/mcp/knowledge`，提供 `listKnowledges`、`retrieve`。`retrieve` 必须指定 1–20 个不重复的 `knowledgeIds`，只返回原始检索片段。
-
-部署前备份 PostgreSQL 并运行 `uv run alembic upgrade head`。配置 `.env` 中的 `MCP_PUBLIC_BASE_URL=https://你的域名`、`MCP_ALLOWED_HOSTS=你的域名,localhost:*,127.0.0.1:*`；参考 [`deploy/nginx-mcp.conf.example`](deploy/nginx-mcp.conf.example) 保留认证和 MCP 请求头。完成实际 HTTPS 与客户端验收后设置 `MCP_EXTERNAL_ENABLED=true`，页面才会显示远程地址。个人 Key 是 Bearer 凭证，暂不支持 OAuth 自动授权。
-
-Codex CLI 的配置示例（把 Key 只放在 Codex 运行环境的环境变量中）：
-
-```toml
-[mcp_servers.meowconnect_knowledge]
-url = "https://你的域名/mcp/knowledge"
-bearer_token_env_var = "MCP_API_KEY"
+网页问答 → Agent → RAG 检索与相关性判断 / 查询扩展 → 生成流式回答
+MCP 调用 → API Key 鉴权 → 指定知识库检索 → 返回原始片段与来源
 ```
 
-本地验收：`uv run python tests/m3_local_integration.py` 会在临时数据库运行迁移、启动 HTTP 服务，用官方 SDK 验证双用户隔离、两个工具和撤销。Docker 中的 Milvus 可用时追加 `--milvus`，会在随机测试 collection 中上传并检索两份同名文件。真实部署后可用 `MCP_URL`、`MCP_API_KEY` 环境变量运行 `uv run python tests/m3_sdk_smoke.py`。服务端默认关闭远程入口；未完成 HTTPS 发布验收时保持关闭。
+网页会话使用 JWT，MCP 使用个人 API Key。OCR 和 Embedding 在本地执行；配置的聊天模型、相关性判断模型和远程重排服务会接收对应的查询或文本片段。
 
-## M4 上线边界与运行维护
+## 本地启动
 
-先备份数据库和 `data/`，再运行 `uv run alembic upgrade head`，最后启动服务。应用固定使用单个 Web worker（仓库 Dockerfile 已设置 `--workers 1`）：同一进程内的扫描器每 2 秒读取数据库中的待处理文件，最多并行处理 2 个；进程重启后会将中断时的 `processing` 文件重新排队，重建前清理残留索引。不要同时启动多个应用实例或手动恢复脚本，否则无法保证单机任务所有权。
+需要 Python **3.12+**（仓库使用 3.12）、`uv` 和 Docker Compose。在仓库根目录执行以下命令。
 
-可在 `.env` 调整以下初始运营边界，数值需按实际负载复核：`MAX_UPLOAD_BYTES`（默认 20 MiB）、`MAX_USER_DOCUMENTS`（100）、`MAX_USER_STORAGE_BYTES`（1 GiB）、`UPLOAD_RATE_PER_MINUTE`（10）、`RETRIEVAL_RATE_PER_MINUTE`（30）、`MAX_RETRIEVAL_RESULTS`（20）、`MCP_USER_RATE_PER_MINUTE`（60）、`MCP_KEY_RATE_PER_MINUTE`（30）、`MAX_DOCUMENT_PROCESSING`（2）和 `DOCUMENT_SCAN_INTERVAL_SECONDS`（2）。频率限制由 Redis 原子计数，超限返回 HTTP 429；容量超限返回 413；Redis 故障时调用返回 503。站内上传接口返回 202 后，文件状态先是 `pending`，可在知识库页面轮询到 `ready` 或 `failed`。
+### 1. 安装依赖并配置环境
 
-管理员在“邀请码管理”页可查看近 24 小时工具调用、异常类别、耗时及文件处理队列。审计仅保留用户/Key 标识、操作、时间、耗时、请求 ID 和结果类别，每 24 小时自动清理超过 90 天的数据，不保存查询全文、文件正文或完整 Key。排障时用响应头 `X-Request-ID` 对照服务日志。单用户无法读取其他用户知识库；删除文件后，新检索不会再返回该文件。对外发布前仍需在真实 HTTPS 环境复核代理请求头、密钥撤销、限流以及上传到检索闭环。
-
-[![zread](https://img.shields.io/badge/Ask_Zread-_.svg?style=plastic&color=00b0aa&labelColor=000000&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQuOTYxNTYgMS42MDAxSDIuMjQxNTZDMS44ODgxIDEuNjAwMSAxLjYwMTU2IDEuODg2NjQgMS42MDE1NiAyLjI0MDFWNC45NjAxQzEuNjAxNTYgNS4zMTM1NiAxLjg4ODEgNS42MDAxIDIuMjQxNTYgNS42MDAxSDQuOTYxNTZDNS4zMTUwMiA1LjYwMDEgNS42MDE1NiA1LjMxMzU2IDUuNjAxNTYgNC45NjAxVjIuMjQwMUM1LjYwMTU2IDEuODg2NjQgNS4zMTUwMiAxLjYwMDEgNC45NjE1NiAxLjYwMDFaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00Ljk2MTU2IDEwLjM5OTlIMi4yNDE1NkMxLjg4ODEgMTAuMzk5OSAxLjYwMTU2IDEwLjY4NjQgMS42MDE1NiAxMS4wMzk5VjEzLjc1OTlDMS42MDE1NiAxNC4xMTM0IDEuODg4MSAxNC4zOTk5IDIuMjQxNTYgMTQuMzk5OUg0Ljk2MTU2QzUuMzE1MDIgMTQuMzk5OSA1LjYwMTU2IDE0LjExMzQgNS42MDE1NiAxMy43NTk5VjExLjAzOTlDNS42MDE1NiAxMC42ODY0IDUuMzE1MDIgMTAuMzk5OSA0Ljk2MTU2IDEwLjM5OTlaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik0xMy43NTg0IDEuNjAwMUgxMS4wMzg0QzEwLjY4NSAxLjYwMDEgMTAuMzk4NCAxLjg4NjY0IDEwLjM5ODQgMi4yNDAxVjQuOTYwMUMxMC4zOTg0IDUuMzEzNTYgMTAuNjg1IDUuNjAwMSAxMS4wMzg0IDUuNjAwMUgxMy43NTg0QzE0LjExMTkgNS42MDAxIDE0LjM5ODQgNS4zMTM1NiAxNC4zOTg0IDQuOTYwMVYyLjI0MDFDMTQuMzk4NCAxLjg4NjY0IDE0LjExMTkgMS42MDAxIDEzLjc1ODQgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8cGF0aCBkPSJNNCAxMkwxMiA0TDQgMTJaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00IDEyTDEyIDQiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K&logoColor=ffffff)](https://zread.ai/fynism/MewAssistant)
-
-## 本地部署
-
-### 1) 环境准备
-- Python `3.12+`
-- 包管理建议：`uv`（也支持 `pip`）
-- Docker / Docker Compose（用于启动 Milvus 依赖）
-
-### 2) 使用 pyproject 安装依赖
-在项目根目录执行：
-
-```bash
-# 方式 A：推荐（uv）
-uv sync
-
-# 运行服务
-uv run python -m backend.app
-# 或
-uv run uvicorn backend.app:app --host 0.0.0.0 --port 8000 --reload
+```powershell
+uv sync --frozen
+Copy-Item .env.example .env
 ```
 
-```bash
-# 方式 B：pip
-python -m venv .venv
-source .venv/bin/activate
-pip install -U pip
-pip install -e .
+Bash 下将复制命令改为 `cp .env.example .env`。已有 `.env` 时直接编辑，保留现有配置。
 
-# 运行服务
-python -m backend.app
-# 或
-uvicorn backend.app:app --host 0.0.0.0 --port 8000 --reload
-```
+`.env.example` 中部分值为空，需要填写后才能启动；空值不会触发代码中的默认值。最小配置如下，替换模型凭证与 JWT 密钥：
 
-### 3) 创建 `.env` 文件
-在项目根目录新建 `.env`，可直接使用下面模板：
+```dotenv
+ARK_API_KEY=your-model-api-key
+MODEL=your-chat-model
+GRADE_MODEL=your-grading-model
+BASE_URL=https://your-openai-compatible-api.example/v1
 
-```env
-# ===== Model =====
-ARK_API_KEY=your_ark_api_key
-MODEL=your_model_name
-BASE_URL=https://your-llm-endpoint/v1
-
-# ===== 本地稠密向量（langchain_huggingface，默认 BAAI/bge-m3）=====
 EMBEDDING_MODEL=BAAI/bge-m3
 EMBEDDING_DEVICE=cpu
 DENSE_EMBEDDING_DIM=1024
 
-# ===== Rerank (可选，不配则自动降级) =====
-RERANK_MODEL=your_rerank_model
-RERANK_BINDING_HOST=https://your-rerank-host
-RERANK_API_KEY=your_rerank_api_key
-
-# ===== Milvus =====
 MILVUS_HOST=127.0.0.1
 MILVUS_PORT=19530
 MILVUS_COLLECTION=embeddings_collection
 MILVUS_M1_COLLECTION=embeddings_collection_m1
-
-# ===== Database / Cache =====
-DATABASE_URL=postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/langchain_app
-REDIS_URL=redis://127.0.0.1:6379/0
-
-# ===== Auth =====
-JWT_SECRET_KEY=replace-with-strong-random-secret
-JWT_ALGORITHM=HS256
-JWT_EXPIRE_MINUTES=1440
-PASSWORD_PBKDF2_ROUNDS=310000
-
-# ===== M1 BM25 稀疏统计持久化 =====
 BM25_M1_STATE_PATH=data/bm25_state_m1.json
 
-# ===== Tools （可选）=====
-AMAP_WEATHER_API=https://restapi.amap.com/v3/weather/weatherInfo
-AMAP_API_KEY=your_amap_api_key
+DATABASE_URL=postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/langchain_app
+REDIS_URL=redis://127.0.0.1:6379/0
+REDIS_KEY_PREFIX=supermew
+JWT_SECRET_KEY=replace-with-a-long-random-secret
 
+GITHUB_OAUTH_ENABLED=false
+MCP_EXTERNAL_ENABLED=false
 ```
 
-### 4) Docker 部署（应用 + 数据库 + 缓存 + 向量库）
-本地开发可只启动依赖：`docker compose up -d postgres redis etcd minio standalone`，然后运行 `uv run uvicorn backend.app:app --reload --host 127.0.0.1 --port 8000`。本地默认 PostgreSQL 密码为 `postgres`，Redis 不设密码；`DATABASE_URL` 和 `REDIS_URL` 应与之匹配。ECS 部署须使用 `.env.docker.example` 中的强密码及已推送的应用镜像。
+`ARK_API_KEY` 是项目沿用的配置名，用于 OpenAI 兼容模型 API。`GRADE_MODEL` 用于 RAG 相关性判断，可与 `MODEL` 填写相同的可用模型；需支持结构化输出。生成随机密钥可运行：
 
-服务器部署请先阅读 [本地开发、测试环境与正式发布](docs/deploy/本地开发-测试环境-正式发布.md)。同一份 `docker-compose.yml` 通过不同项目名、私有配置文件、宿主机端口和数据目录运行测试与正式两套环境。应用镜像在开发机或 CI 构建并推送；服务器只需部署目录中的 `docker-compose.yml`、`deploy.sh` 和私有环境配置，不必检出应用源码或运行 `git pull`。
-- 应用：`app`（FastAPI + 前端静态文件）
-- 业务依赖：`postgres`、`redis`
-- 向量依赖：`etcd`、`minio`、`standalone`；`attu` 仅在 `debug` profile 启动
-
-发布命令：`bash deploy.sh staging /opt/supermew-config/staging.env <镜像标签或摘要>`；测试验收后使用相同镜像执行 `bash deploy.sh production /opt/supermew-config/production.env <镜像标签或摘要>`。应用、PostgreSQL、Redis、Milvus 和 Attu 的宿主机端口均只绑定 `127.0.0.1`；MinIO 不映射宿主机端口。
-
-### 5) 访问应用
-Compose 会自动启动应用；在 ECS 上通过 Nginx/HTTPS 对外提供服务。本机可访问：
-- 前端页面：`http://127.0.0.1:8000/`
-- API 文档：`http://127.0.0.1:8000/docs`
-
-## 项目概览
-- **核心能力**：
-  - LangChain Agent + 自定义工具。
-  - 文档上传后执行三级滑动窗口分块，叶子分块向量化写入 Milvus，父级分块写入 PostgreSQL。
-  - 用户注册/登录、JWT 鉴权、基于角色的 RBAC 权限控制（admin/user）。
-  - 会话记忆与摘要，聊天与历史记录落地 PostgreSQL，并引入 Redis 缓存热点会话与父文档。
-- **运行形态**：FastAPI 后端 + Vue 3 浏览器版单页前端 + Milvus 向量库。
-
-## 关键创新点
-- **混合检索落地**：稠密向量 + BM25 稀疏向量，Milvus Hybrid Search + RRF 排序，兼顾语义与词匹配。
-- **Jina Rerank 接入**：Hybrid/Dense 召回后进行 API 级精排，支持返回 `rerank_score` 并在前端可视化。
-- **双向降级**：稀疏生成或 Hybrid 调用失败时自动降级为纯稠密检索，提升稳定性。
-- **流式输出（Streaming）**：后端基于 `agent.astream(stream_mode="messages")` 逐 token 推送，前端 SSE + ReadableStream 实现打字机效果。
-- **实时 RAG 过程可视化**：检索过程在模型"思考中"阶段就开始展示，通过 `asyncio.Queue` + 后台任务架构实现工具执行期间的实时推送。
-- **回答终止功能**：前端 `AbortController` + 后端 `StreamingResponse` 支持用户随时中断正在生成的回答。
-- **会话摘要记忆**：自动摘要旧消息并注入系统提示，维持上下文且控制 token。
-- **文档处理链路**：上传 → 切分 → 稠密/稀疏向量同步生成 → Milvus 入库，支持重复上传自动清理旧 chunk。
-- **BM25 统计持久化**：`词表 + 文档频次 df + 文档数 N` 落盘到 `data/bm25_state.json`，入库时增量增加、删除/覆盖上传前按文件名从 Milvus 拉取 chunk 文本后增量扣减，与向量库同步；`embedding_service` 在 API 与检索模块间单例共享。
-- **三级分块 + Auto-merging**：L1/L2/L3 三层滑窗切分；检索时优先召回 L3，满足阈值后自动合并到父块（L3->L2->L1）。
-- **Leaf-only 向量化存储**：仅叶子分块写入 Milvus，父块写入 DocStore，减少向量冗余并保留上下文聚合能力。
-- **工具可扩展**：天气查询示例 + 知识库检索，便于按需增添第三方 API 或企业数据源。
-- **RAG 过程可观测**：记录检索、评分、重写与来源信息，前端可展开查看每一步细节。
-- **查询重写体系**：Step-Back 与 HyDE 两种扩展方式 + 路由选择，必要时触发重写检索。
-- **相关性评分门控**：基于结构化输出的 `grade_documents` 判断是否需要重写检索。
-- **实时思考链路展示**：通过 `asyncio` 事件循环穿透技术，实现 Agent 在执行 RAG、评分、重写等同步工具时，实时向前端推送思考步骤（Searching -> Grading -> Rewriting），彻底解决"静默思考"问题。
-
-## 未来迭代（Todo Lists）
-
-### RAG部分
-
-#### 数据层、Chunk分块
-
-1. 先做文档结构解析，按文档结构做粗拆分，再用递归字符分块兜底，保证打的主题单元不被拆分（2000-3000token）；再用语义分块做精细化拆分，控制单块大小（512-1024token）
-2. 代码块、表格、图片特殊处理
-3. 实现 ParentDocument/Auto-merging Retriever 策略 --done
-
-#### 召回层
-
-1. BM25的k1和b新增参数扫描
-2. RRF额外做BM25和dense的权重，可以通过AB test确定
-3. 做一个小型标注集比较dense only、sparse only、hybrid、hybrid + rerank的gold chunk
-
-#### 生成层
-
-1. 子问题分解（CoT、专门的分解小模型、判断分几个子问题）
-2. 多文档Refine（一次拼接、串行Refine）
-3. 多文档冲突处理（A文档说X，B文档说非X），回答中显式输出“来源存在冲突”
-
-#### 其他
-
-1. 向量嵌入：新增多模态 embedding 能力
-2. 搭建 RAG 评估体系
-3. Rerank 策略评估（top_k、candidate_k、召回/精排比例）
-
-### 其他能力拓展
-
-1. 开发 SQL assistant Skill
-2. 实现暂停功能与人工介入机制 --done
-3. 新增问题类型判断，简单问题跳过复杂处理流程
-4. 扩展网络搜索能力
-5. 支持多步骤规划与任务并行执行
-6. 搭建路由器节点，由 LLM 自主判断下一步动作
-7. 优化 memory 管理：集成 MemO、LangMem 等方案
-8. multi-agent：工具过多，把工具拆分给职责明确的专业化agent，提升工具选择的准确性和整体稳定性
-9. 历史记录会话名称可修改
-10. 死循环检测与恢复：_is_stuck + attempt_loop_recovery
-
-### 后端服务建设（本轮已完成）
-
-1. 账号体系与权限体系
-- 新增注册登录接口：`/auth/register`、`/auth/login`。
-- 新增用户信息接口：`/auth/me`。
-- 引入 JWT 鉴权中间能力：请求通过 Bearer Token 识别当前用户。
-- 权限隔离：
-  - `admin`：可执行文档上传、删除、文档列表查询。
-  - `user`：仅可聊天、查询和删除自己的会话历史。
-
-2. 数据库建模与持久化迁移
-- 使用 SQLAlchemy 建立核心模型：`User`、`ChatSession`、`ChatMessage`、`ParentChunk`。
-- 聊天历史由本地 JSON 迁移到 PostgreSQL。
-- 父级分块文档（L1/L2）由本地 JSON 迁移到 PostgreSQL。
-
-3. Redis 缓存策略
-- 会话消息缓存：按 `user + session` 维度缓存消息列表。
-- 会话列表缓存：按 `user` 维度缓存会话摘要列表。
-- 父文档缓存：按 `chunk_id` 缓存父级分块内容。
-- 写入/删除后执行缓存失效，保证一致性。
-
-4. 密码安全与兼容
-- 新注册用户采用 PBKDF2-SHA256 存储密码哈希（避免 bcrypt 后端兼容问题）。
-- 登录校验兼容历史 bcrypt 哈希，支持平滑迁移。
-
-## 目录与架构
-后端结构及依赖规则见 [后端架构说明](backend/README.md)。
-
-- 后端：`backend/`
-  - `app.py`：应用装配与生命周期，保留 `backend.app:app` 入口。
-  - `api/`：HTTP 路由、请求/响应模型、鉴权依赖、中间件与静态页面。
-  - `services/`：知识库、文件生命周期、聊天、账号与平台业务。
-  - `documents/`：文档提取、OCR、文本清洗与分块。
-  - `rag/`：检索图、扩展、重排和父块合并。
-  - `infrastructure/`：数据库与分域 ORM、Redis、embedding、Milvus、共享资源与文件路径。
-  - `integrations/mcp/`：MCP 协议适配与工具注册。
-  - `workers/`、`cli/`：后台调度与运维命令。
-  - `core/`：配置、安全原语与日志；`legacy/`：隔离的旧版全局文档实现。
-- 前端：`frontend/`
-  - [index.html](frontend/index.html) + [app.js](frontend/app.js) + [theme.css](frontend/theme.css) + [styles.css](frontend/styles.css)：Vue 3 + Element Plus，提供服务广场、工作空间、聊天与接入管理；浏览器依赖位于 `frontend/vendor`。
-- 数据：`data/`
-  - `bm25_state.json`：BM25 词表与 `doc_freq` / `total_docs` 等统计（稀疏检索 IDF 与入库、删除同步）。
-  - `documents/`：上传文档原文件。
-- 向量库：Milvus（可由 `docker-compose` 或自建服务提供）。
-
-## 核心流程
-
-### 1) 项目全链路（端到端）
-1. 用户在前端输入问题，调用 `POST /chat/stream`（流式）。
-2. FastAPI `api/routers/chat.py` 返回 `StreamingResponse(media_type="text/event-stream")`。
-3. LangChain Agent 根据问题类型决定是否调用工具：
-  - 天气问题 → `get_current_weather`
-  - 知识问答 → `search_knowledge_base`
-4. 若命中知识库工具，进入 `rag_pipeline.py` 执行检索工作流，各阶段通过 `emit_rag_step()` 实时推送到前端。
-5. 检索结果与 RAG Trace 一起返回，Agent 流式生成最终回答（逐 token 推送）。
-6. 前端 ReadableStream 逐块解析 SSE，打字机效果实时渲染。
-7. 同时消息持久化到 PostgreSQL，并通过 Redis 缓存加速历史会话回放。
-
-### 2) RAG 全链路（重点）
-1. **初次召回**：`retrieve_initial`
-  - 调用 `retrieve_documents`。
-  - 先按 `chunk_level == 3` 执行 Milvus Hybrid 检索（Dense + Sparse + RRF）。
-  - 取更大候选集后走 Jina Rerank 精排。
-  - 对召回叶子块执行 Auto-merging（L3->L2->L1），父块从 DocStore 读取。
-2. **相关性打分门控**：`grade_documents`
-  - 使用结构化输出打分 `yes/no`。
-  - `yes` 直接进入生成回答；`no` 进入重写阶段。
-3. **查询重写路由**：`rewrite_question`
-  - 在 `step_back / hyde / complex` 中选择策略。
-  - 生成 `rewrite_query`、`step_back_question`、`hypothetical_doc` 等中间结果。
-4. **二次召回**：`retrieve_expanded`
-  - 对重写后的查询（或 HyDE 文档）再次检索。
-  - 同样执行 L3 召回 + Auto-merging，结果去重后返回上下文。
-5. **答案生成**：Agent 结合上下文生成最终回答。
-6. **可观测追踪**：返回 `rag_trace`，包括
-  - 评分结果与路由决策
-  - 重写策略与重写内容
-  - 初次/二次检索结果
-  - 三级检索与合并信息（`leaf_retrieve_level`、`auto_merge_*`）
-  - 检索分数 `score` 与精排分数 `rerank_score`
-
-### 3) 文档入库链路
-1. 前端上传 PDF/Word 到 `POST /documents/upload`。
-2. 若同名文件已存在：先从 Milvus **分页查询**该文件全部叶子 chunk 的 `text`，对 BM25 统计执行 **increment_remove**，再删除旧向量与父块缓存，避免统计与库不一致。
-3. `document_loader.py` 执行三级滑动窗口分块并写入层级元数据（chunk_id / parent_chunk_id / root_chunk_id / chunk_level）。
-4. L1/L2 父级分块写入 `parent_chunk_store.py`（DocStore）。
-5. L3 叶子分块在 `milvus_writer` 中先对本轮 chunk 文本执行 BM25 **increment_add**（更新 `N`、`df`、总长度并写回 `bm25_state.json`），再经 `embedding.py` 生成 Dense 与 Sparse 向量并写入 Milvus。
-6. 后续检索可直接利用新文档参与召回。
-
-### 4) BM25 状态文件（`data/bm25_state.json`）
-- **内容**：`version`、全局 `total_docs`（chunk 篇数）、`sum_token_len`、`vocab`（词 → 稀疏维度下标）、`doc_freq`（词 → 文档频次，用于 IDF）。`vocab` 与 `doc_freq` 职责不同：前者定 Milvus 稀疏向量维度，后者定 BM25 统计。
-- **增量**：每入库一批叶子 chunk 增加统计；删除文档或覆盖上传前按文件名扣减。词表下标不回收，避免与历史稀疏向量维度冲突。
-- **注意**：`data/` 默认被 `.gitignore` 忽略，状态文件通常不落库；若 Milvus 已有数据但状态文件缺失，需清空重导或自行重建统计。
-
-### 5) 会话记忆链路
-1. 每轮问答按当前登录用户 + `session_id` 写入 PostgreSQL。
-2. 当消息过长时触发摘要压缩，保留长期上下文。
-3. Redis 缓存会话列表与会话消息，减少高频读取数据库压力。
-4. 前端可通过会话接口读取、删除当前用户自己的历史对话。
-
-## 技术栈
-- 后端：FastAPI、LangChain Agents、Pydantic、Uvicorn、SQLAlchemy、PostgreSQL、Redis。
-- 向量与检索：Milvus（HNSW 稠密索引 + SPARSE_INVERTED_INDEX 稀疏索引）、RRF 融合、Jina Rerank 精排。
-- 嵌入与稀疏：`langchain_huggingface` 本地稠密向量（默认 `BAAI/bge-m3`）；中英混合规则分词 + BM25 手写稀疏向量，统计持久化至 `bm25_state.json`。
-- 前端：Vue 3、Element Plus、官方图标、marked、DOMPurify，依赖由项目提供，纯静态部署。
-- 工具链：dotenv 配置、requests、langchain_text_splitters、langchain_community.loaders。
-
-## 环境变量
-需在仓库根目录或运行环境配置：
-- 模型相关：`ARK_API_KEY`、`MODEL`、`BASE_URL`
-- 稠密向量：`EMBEDDING_MODEL`、`EMBEDDING_DEVICE`、`DENSE_EMBEDDING_DIM`（需与 Milvus 集合 `dense_embedding` 维度一致）
-- BM25 持久化：`BM25_M1_STATE_PATH`（可选，默认 `data/bm25_state_m1.json`）
-- Rerank 相关：`RERANK_MODEL`、`RERANK_BINDING_HOST`、`RERANK_API_KEY`
-- Milvus：`MILVUS_HOST`、`MILVUS_PORT`、`MILVUS_M1_COLLECTION`；旧 `MILVUS_COLLECTION` 仅供显式旧数据导入使用
-- 数据库缓存：`DATABASE_URL`、`REDIS_URL`
-- 鉴权相关：`JWT_SECRET_KEY`、`JWT_ALGORITHM`、`JWT_EXPIRE_MINUTES`
-- 日志：`LOG_REQUESTS=true` 记录接口方法、路径、状态、耗时和请求 ID；`LOG_SQL=true` 记录 SQL 模板与耗时；`LOG_SQL_PARAMETERS=true` 才记录绑定参数（仅限本地排查）。
-- 密码参数：`PASSWORD_PBKDF2_ROUNDS`
-- Auto-merging：`AUTO_MERGE_ENABLED`、`AUTO_MERGE_THRESHOLD`、`LEAF_RETRIEVE_LEVEL`
-- 工具：`AMAP_WEATHER_API`、`AMAP_API_KEY`
-
-## API 速览
-- 鉴权
-  - `POST /auth/register`：使用管理员发放的邀请码注册普通用户。
-  - `POST /auth/login`：登录，返回 Bearer Token。
-  - `GET /auth/me`：获取当前登录用户信息。
-  - `POST /admin/invitations`：管理员创建邀请码；明文仅在创建响应中出现。
-- 聊天
-  - `POST /chat`：聊天（非流式），入参 `message`、`session_id`。
-  - `POST /chat/stream`：聊天（流式 SSE），入参同上，返回 `text/event-stream`。
-- 会话（用户隔离）
-  - `GET /sessions`：列出当前用户会话。
-  - `GET /sessions/{session_id}`：拉取当前用户某会话消息。
-  - `DELETE /sessions/{session_id}`：删除当前用户会话。
-- 私有知识库与文档（需登录）
-  - `GET/POST /knowledges`：列出、创建当前用户的知识库。
-  - `GET/PATCH/DELETE /knowledges/{knowledge_id}`：查看、修改、删除自己的知识库。
-  - `GET/POST /knowledges/{knowledge_id}/documents`：列出、上传自己的文件。
-  - `GET/DELETE /knowledges/{knowledge_id}/documents/{document_id}`：查看状态、删除自己的文件。
-
-## 流式输出与实时检索过程 — 技术细节
-
-#### 1. 跨线程事件调度（Cross-Thread Event Scheduling）
-这是一个解决 **"同步工具阻塞异步事件循环"** 问题的关键架构设计，常用于 Python 异步 Web 服务与 CPU 密集型/IO 密集型任务的混合场景。
-
-**痛点**：
-FastAPI 运行在单线程的 asyncio Event Loop 上。为了不阻塞主线程，LangChain 通常将同步工具（如 `search_knowledge_base`）放到 `ThreadPoolExecutor` 中运行。但在子线程中，无法直接访问主线程的 `asyncio.Queue`，且 `asyncio.get_event_loop()` 通常会失败。
-
-**解决方案**：
-我们采用了 **"Global Loop Capture + Threadsafe Callback"** 模式：
-
-1.  **Loop 捕获 (Main Thread)**:
-    在 Agent 开始生成前，主线程调用 `set_rag_step_queue()`。此时我们捕获当前的运行循环：`_RAG_STEP_LOOP = asyncio.get_running_loop()` 并保存为全局变量。
-2.  **跨线程发射 (Worker Thread)**:
-    当 RAG 工具在子线程运行时，调用 `emit_rag_step()`。
-    函数内部使用 `_RAG_STEP_LOOP.call_soon_threadsafe(queue.put_nowait, step_data)`。
-3.  **原理**:
-    `call_soon_threadsafe` 是 asyncio 唯一允许从其他线程向 Loop 注入回调的方法。它相当于向主 Loop 的"待办事项箱"投递了一个任务（即 `queue.put_nowait`），主 Loop 会在下一次 tick 立即执行它，从而实现数据的平滑流转。
-
-```python
-# 核心代码摘要 (tools.py)
-def set_rag_step_queue(queue):
-    global _RAG_STEP_QUEUE, _RAG_STEP_LOOP
-    _RAG_STEP_QUEUE = queue
-    # 关键：在主线程捕获 Loop
-    _RAG_STEP_LOOP = asyncio.get_running_loop()
-
-def emit_rag_step(icon, label):
-    # 关键：从子线程安全调度回主 Loop
-    if _RAG_STEP_LOOP and not _RAG_STEP_LOOP.is_closed():
-        _RAG_STEP_LOOP.call_soon_threadsafe(
-            _RAG_STEP_QUEUE.put_nowait, 
-            {"icon": icon, "label": label}
-        )
+```powershell
+uv run python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-### 2. 混合检索（Hybrid Search）深度实现
-项目并非简单调用 Milvus 接口，而是手动构建了稀疏-稠密双塔检索：
+可选能力及完整参数见 [.env.example](.env.example)：
 
-- **Dense Pathway**：使用 `langchain_huggingface.HuggingFaceEmbeddings`（默认 `BAAI/bge-m3`）生成稠密向量，维度由 `DENSE_EMBEDDING_DIM` 与集合 schema 对齐（默认 1024），向量可做 L2 归一化后与 Milvus `IP` 度量配合。
-- **Sparse Pathway**：
-    - 在 `embedding.py` 中基于中英混合规则分词（单字中文 + 英文单词）实现 BM25，生成 `{稀疏维度下标: BM25 分数}`，写入 Milvus `SPARSE_FLOAT_VECTOR`。
-    - 全局 `N` / `doc_freq` / 平均文档长等统计持久化在 `bm25_state.json`，入库与删除走增量更新；检索与写入共用同一 `embedding_service` 单例。
-- **Milvus 融合**：
-    - 使用 Milvus 的 `AnnSearchRequest` 同时发起两个请求。
-    - **RRFRanker (Reciprocal Rank Fusion)**: 采用 `k=60` 的倒数排名融合算法，将两路召回结果无参数化地合并，避免了加权求和中调节 `alpha` 参数的困难。
+| 能力 | 配置 |
+| --- | --- |
+| 远程重排 | 同时设置 `RERANK_MODEL`、`RERANK_BINDING_HOST`、`RERANK_API_KEY`；未配置或调用失败时降级 |
+| GitHub 登录 | `GITHUB_OAUTH_ENABLED`、`GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET`、`GITHUB_REDIRECT_URI`，见 [接入说明](docs/deploy/GitHub-OAuth.md) |
+| PDF OCR | `PDF_OCR_MODE=auto`，可改为 `always` 或 `off` |
+| 父块合并 | `AUTO_MERGE_ENABLED`、`AUTO_MERGE_THRESHOLD` |
+| 天气工具 | `AMAP_WEATHER_API`、`AMAP_API_KEY` |
 
-### 3. 前端 "Thinking State Machine"
-前端 `script.js` 维护了一个微型状态机来处理通过 SSE 传回的复杂混合流：
+首次运行需要下载 Embedding 模型，本地首次 OCR 也需要加载模型。依赖锁文件使用 CPU 版 PyTorch；下载完成前不要开启 `HF_HUB_OFFLINE=1`。
 
-1.  **Idle**: 等待用户输入。
-2.  **Thinking (Initial)**: 收到请求，创建消息气泡，`isThinking=true`，显示默认动画。
-3.  **Thinking (Active RAG)**: 收到 `type: rag_step` 事件。
-    - 状态机保持 `isThinking=true`。
-    - 动态更新 Header 文字（如 "正在重写查询..."）。
-    - 向 `ragSteps` 数组追加步骤，触发 Vue 列表渲染。
-4.  **Streaming**: 收到第一个 `type: content` 事件。
-    - **立即切换**: 设置 `isThinking=false`。
-    - 并不销毁气泡，而是隐藏思考 header，开始在同一气泡内追加 Markdown 文本。
-    - 这样实现了从"思考"到"回答"的无缝视觉过渡，没有突兀的 UI 抖动。
+### 2. 启动数据库、缓存与向量服务
 
-## 整体架构
-
-```
-用户发送消息
-    │
-    ▼
-POST /chat/stream → StreamingResponse(text/event-stream)
-    │
-    ▼
-chat_with_agent_stream()
-    │
-    ├── 创建统一输出队列 (asyncio.Queue)
-    ├── 设置 _RagStepProxy → emit_rag_step() 的输出直接入队
-    ├── 启动 _agent_worker 后台任务 (asyncio.create_task)
-    │     └── agent.astream(stream_mode="messages") 逐 token 产出
-    │           ├── AIMessageChunk (文本) → {"type": "content"} 入队
-    │           └── tool_call_chunks (工具调用) → 跳过
-    │
-    └── 主循环：await output_queue.get() → yield SSE
-          ▲
-          │ (并发) RAG 工具在线程池中执行
-          │ emit_rag_step() → loop.call_soon_threadsafe → 入队
-          │ {"type": "rag_step"} 立即从队列取出并推送到前端
+```powershell
+docker compose up -d postgres redis etcd minio standalone
+docker compose ps
 ```
 
-### 后端实现
+以上仅启动依赖，应用在下一步由本机 Python 启动。默认 PostgreSQL 用户与密码均为 `postgres`，数据库为 `langchain_app`；Redis 默认无密码。若设置 `POSTGRES_PASSWORD` 或 `REDIS_PASSWORD`，同步修改连接 URL；URL 中的特殊字符需要编码。已有数据卷继续使用原凭证。
 
-#### 1) 流式生成 (`agent.py`)
-- 使用 LangGraph `agent.astream(stream_mode="messages")` 获取逐 token 的 `AIMessageChunk`。
-- 过滤 `tool_call_chunks`，只转发文本内容给前端。
-- **关键设计**：Agent 流式循环运行在 `asyncio.create_task` 后台任务中，主生成器只负责从统一 `output_queue` 取事件并 yield。这样 RAG 步骤在工具执行期间（agent 阻塞等待工具返回时）仍然可以实时推送到前端。
+### 3. 迁移数据库并创建管理员
 
-#### 2) 实时 RAG 步骤推送 (`tools.py` + `rag_pipeline.py`)
-- `emit_rag_step(icon, label, detail)` 通过 `asyncio.get_event_loop().call_soon_threadsafe()` 将步骤从同步线程安全地推送到异步队列。
-- `_RagStepProxy` 代理对象将原始 step dict 包装为 `{"type": "rag_step", "step": {...}}` 后放入统一输出队列，**无需额外 relay 任务**。
-- `rag_pipeline.py` 在每个关键节点发射步骤：
-  - `retrieve_initial` → "正在检索知识库..."
-  - `grade_documents` → "正在评估文档相关性..."
-  - `rewrite_question` → "正在重写查询..."（含策略选择）
-  - `retrieve_expanded` → "使用扩展查询重新检索..."
-
-#### 3) SSE 协议格式
-每个事件格式：`data: {JSON}\n\n`，类型字段：
-- `content`：文本 token（打字机效果）
-- `rag_step`：实时检索步骤（`{icon, label, detail}`）
-- `trace`：完整 RAG 追踪信息（回答完成后发送）
-- `error`：错误信息
-- `[DONE]`：流结束标记
-
-#### 4) StreamingResponse 配置 (`api.py`)
-```python
-StreamingResponse(
-    event_generator(),
-    media_type="text/event-stream",
-    headers={
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        "Connection": "keep-alive",
-        "X-Accel-Buffering": "no",  # 禁用 Nginx 缓冲
-    },
-)
+```powershell
+uv run alembic upgrade head
+uv run python -m backend.admin_bootstrap --username admin
 ```
 
-### 前端实现
+管理员密码在终端交互输入，至少 12 个字符。该命令只用于首次初始化，已有管理员时不会创建第二个或覆盖账户。
 
-#### 1) ReadableStream 解析 (`script.js`)
-- 使用 `response.body.getReader()` + `TextDecoder` 逐块读取。
-- 手动按 `\n\n` 分割 SSE 事件，解析 `data: ` 前缀后的 JSON。
-- `content` 事件追加到消息文本；`rag_step` 事件追加到检索步骤数组并同步更新思考状态文字。
+### 4. 启动应用
 
-#### 2) 思考气泡二合一
-- 发送消息后立即创建带 `isThinking: true` 的气泡，显示跳动圆点 + 动态文字。
-- 收到 `rag_step` 时，`thinkingLabel` 更新为当前步骤（如"正在检索知识库..."）。
-- 收到第一个 `content` token 时，`isThinking = false`，同一气泡无缝切换为正常文本流。
-- **不存在两个分离的气泡**，从思考 → 检索 → 回答全程在同一个气泡内完成。
+```powershell
+uv run uvicorn backend.app:app --host 127.0.0.1 --port 8000 --workers 1
+```
 
-#### 3) Vue 3 响应式注意事项
-- 通过 `this.messages[botMsgIdx]` 索引访问（而非缓存对象引用），确保拿到 Vue 的 reactive proxy。
-- `ragSteps` 数组通过 `push()` 触发响应式更新。
+- 网页：[http://127.0.0.1:8000/](http://127.0.0.1:8000/)
+- API 文档：[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 
-### 终止功能
+也可运行 `uv run python -m backend.app`。前端由后端直接提供，修改静态文件后刷新网页即可。
 
-#### 前端
-- 发送按钮在 `isLoading` 期间切换为红色终止按钮（`v-if/v-else`）。
-- 点击调用 `AbortController.abort()`，取消正在进行的 `fetch` 请求。
-- 捕获 `AbortError`，在气泡中显示"(已终止回答)"。
+登录管理员账号后，在邀请码管理页面创建邀请码。普通用户通过邀请码注册；启用 GitHub 登录后，首次授权会自动创建普通用户，无需邀请码。旧配置 `ADMIN_INVITE_CODE` 已停用。
 
-#### 后端
-- FastAPI 的 `StreamingResponse` 在客户端断开连接（如浏览器触发 `abort()` 或关闭标签页）时，会检测到 socket 断开。
-- Python 的生成器协议会向响应生成器抛出 `GeneratorExit` 异常。
-- **实现细节**：采用**主动防御式编程**，显式捕获 `GeneratorExit` 并执行 `agent_task.cancel()`。
-- **为什么不依赖框架自动取消？**：虽然 Starlette/FastAPI 拥有基于 `BaseHTTPMiddleware` 的级联取消机制（Cascading Cancellation），但在复杂的后台任务结构或特定中间件配置下，取消信号可能延迟或在传递链中丢失。显式调用 `.cancel()` 提供了**确定性的资源回收**保证。
-- **即时止损原理**：`agent_task.cancel()` 会立即在任务挂起点注入 `asyncio.CancelledError`。对于流式 LLM 请求，这会触发 `httpx` 关闭 TCP 连接。服务端（OpenAI 等）检测到 client 掉线后会立即停止推理，从而实现**真正的 Token 节省**。
+## 使用知识库与 MCP
 
-## 更新日志
+1. 登录网页，创建知识库并上传文件。
+2. 等待文件完成处理；只有 `ready` 文件进入检索范围。质量提示和页面提取结果可在文件列表查看。
+3. 在站内选择知识库问答，或先使用工具调试验证检索结果。
+4. 需要外部客户端访问时，在个人管理中创建 API Key，立即保存明文；之后只可查看元信息或撤销。
 
-### 2026-04-08 本地嵌入与 BM25 持久化
-- **稠密向量**：由兼容 API 改为 `langchain_huggingface` 本地模型（默认 `BAAI/bge-m3`），支持 `EMBEDDING_MODEL` / `EMBEDDING_DEVICE`；Milvus `dense_embedding` 维度与 `DENSE_EMBEDDING_DIM` 对齐（默认 1024）。
-- **BM25 统计**：`词表 vocab + 文档频次 doc_freq + 文档数 N` 持久化至 `data/bm25_state.json`（可选 `BM25_STATE_PATH`）；每个叶子 chunk 视为一篇文档，入库时 **increment_add**，删除文档或覆盖上传前按文件名从 Milvus 拉取 chunk 文本后 **increment_remove**；`embedding_service` 在 `api` 与 `rag_utils` 间单例共享，避免写入与检索状态分裂。
-- **Milvus 查询**：单次 `query` 的 `limit` 受服务端窗口限制（如 16384），新增 **`query_all`** 分页拉取，供删除/覆盖前取回全文以同步 BM25；修复单次 `limit=100000` 导致的 RPC 报错。
-- **说明**：README「环境变量」「文档入库」「混合检索」「数据目录」等已同步为上述行为；`data/` 下 `bm25_state.json` 通常被 git 忽略，空库仅有 Milvus 无状态文件时需自行重建或重导。
+MCP 使用 Streamable HTTP，端点为 `/mcp/knowledge`。发布前配置 HTTPS 反向代理，以及以下变量：
 
-### 2026-03-21 后端服务建设升级（认证 + 数据库 + 缓存）
-- 新增认证与权限模块：注册、登录、JWT、管理员权限控制。
-- 聊天历史从本地 JSON 迁移到 PostgreSQL，按用户隔离会话数据。
-- 父级分块存储从本地 JSON 迁移到 PostgreSQL。
-- 引入 Redis 缓存会话与父文档，提高读取性能并降低数据库压力。
-- API 升级为 Token 驱动，移除前端直接传 `user_id` 的历史模式。
-- 文档管理接口收敛到管理员角色，避免普通用户误操作知识库。
-- 密码哈希方案升级为 PBKDF2-SHA256，兼容历史 bcrypt 校验。
+```dotenv
+MCP_PUBLIC_BASE_URL=https://your-domain.example
+MCP_ALLOWED_HOSTS=your-domain.example,localhost:*,127.0.0.1:*
+MCP_EXTERNAL_ENABLED=true
+```
 
-### 2026-03-13 三级分块与 Auto-merging 升级
-- 新增三级滑动窗口分块（L1/L2/L3），并为分块写入层级元数据。
-- 存储策略调整为 Leaf-only：仅 L3 叶子块写入 Milvus，L1/L2 写入本地 DocStore。
-- Auto-merging 改为从 DocStore 拉取父块，减少向量冗余存储。
-- 思考链路新增三级检索与自动合并步骤事件。
-- `rag_trace` 新增 `leaf_retrieve_level` 与 `auto_merge_*` 字段，且历史会话读取同样保留这些字段。
+在完成 HTTPS 与客户端联调后启用远程入口。Nginx 请求头、流式响应与代理设置见 [配置示例](deploy/nginx-mcp.conf.example)。MCP 认证使用 Bearer API Key。
 
-### 2026-02-19 RAG 实时思考链路修复
-- **问题**：Agent 在执行同步工具（如 `search_knowledge_base`）时，由于运行在线程池中，无法正确获取主线程的 asyncio 事件循环，导致 `emit_rag_step` 事件丢失，前端"思考中"气泡一直静止。
-- **修复**：
-  1. **Backend (`tools.py`)**：在 `set_rag_step_queue` 中显式捕获主线程的 `loop`。
-  2. **Backend (`tools.py`)**：更新 `emit_rag_step` 使用捕获的 `_RAG_STEP_LOOP.call_soon_threadsafe` 跨线程调度事件。
-  3. **Frontend (`script.js`)**：在发送消息时初始化空的 `ragSteps: []` 数组，确保 Vue 响应式系统能立即追踪后续的 push 操作。
-- **效果**：用户提问后，思考气泡内实时跳动显示检索步骤（如"🔍 正在检索知识库..." -> "📊 正在评估文档相关性..."），不再只有静态的"正在思考中..."。
+| 工具 | 用途与主要参数 |
+| --- | --- |
+| `listKnowledges` | 列出当前账号知识库与可检索状态；支持 `limit`、`cursor` |
+| `retrieve` | 传入 `query`、1–20 个不重复的 `knowledgeIds`、`topK`（默认 5，默认上限 20） |
 
+先列出知识库，再显式指定 ID 检索。`retrieve` 返回片段、文件名、来源标识、页码、检索 / 重排分数及处理报告，不生成回答。站内工具调试接口为 `POST /tools/debug/listKnowledges` 和 `POST /tools/debug/retrieve`，使用登录 JWT。
 
+## Docker 发布
+
+应用镜像由开发机或 CI 构建推送，服务器通过 [deploy.sh](deploy.sh) 拉取指定版本；[docker-compose.yml](docker-compose.yml) 没有应用构建配置。
+
+```bash
+docker buildx build --platform linux/amd64 -t YOUR_REGISTRY/supermew:YOUR_RELEASE --push .
+```
+
+从 [.env.docker.example](.env.docker.example) 分别创建私有的 `staging.env` 和 `production.env`，填写模型配置、强密码、JWT 密钥及对外域名，并补充 `GRADE_MODEL`。容器内连接地址必须使用服务名 `postgres`、`redis`、`standalone`。
+
+两套环境的 `SUPERMEW_ENV_NAME`、`DOCKER_VOLUME_DIRECTORY`、宿主机端口及 Redis 前缀应分别配置。数据目录必须是以环境名结尾的绝对路径，例如 `/opt/supermew-data/staging`；测试与正式环境不能共享数据目录或端口。
+
+```bash
+bash deploy.sh staging /opt/supermew-config/staging.env YOUR_REGISTRY/supermew:YOUR_RELEASE
+# 测试验收后，以同一镜像发布正式环境
+bash deploy.sh production /opt/supermew-config/production.env YOUR_REGISTRY/supermew:YOUR_RELEASE
+```
+
+使用固定、不可复用的版本标签或镜像摘要；脚本拒绝 `:latest` 和 `:dev`。部署会拉取应用镜像、启动依赖、备份 PostgreSQL、停止旧应用、运行迁移，再等待新应用就绪；不会自动升级已有依赖容器。默认数据库备份目录为 `/opt/supermew-backups/<环境名>`，可通过 `SUPERMEW_BACKUP_DIR` 修改。
+
+首次部署后，在对应环境中初始化管理员：
+
+```bash
+docker compose -p supermew-staging --env-file /opt/supermew-config/staging.env exec app python -m backend.admin_bootstrap --username admin
+```
+
+正式环境将项目名和私有配置路径替换为对应值。应用及依赖的宿主机端口仅绑定 `127.0.0.1`，对外通过 Nginx / HTTPS 提供服务。
+
+## 运行边界与维护
+
+应用目前按**单实例、单 Web worker**运行。进程内扫描器默认每 2 秒读取待处理文件，最多并行处理 2 份；重启后恢复中断任务。多个实例共用一套数据库、向量集合和文件状态时，不能保证处理任务所有权。
+
+| 默认限制 | 配置 |
+| --- | --- |
+| 单文件 20 MiB，PDF 最多 300 页 | `MAX_UPLOAD_BYTES`、`MAX_PDF_PAGES` |
+| 每用户 100 份文件、1 GiB 存储 | `MAX_USER_DOCUMENTS`、`MAX_USER_STORAGE_BYTES` |
+| 上传 10 次 / 分钟，站内检索 30 次 / 分钟 | `UPLOAD_RATE_PER_MINUTE`、`RETRIEVAL_RATE_PER_MINUTE` |
+| MCP 每用户 60 次 / 分钟、每 Key 30 次 / 分钟 | `MCP_USER_RATE_PER_MINUTE`、`MCP_KEY_RATE_PER_MINUTE` |
+| 文档处理并发 2，扫描间隔 2 秒 | `MAX_DOCUMENT_PROCESSING`、`DOCUMENT_SCAN_INTERVAL_SECONDS` |
+
+频率超限返回 429，容量超限返回 413；Redis 不可用时受限操作返回 503。上传返回 202 后异步处理，应根据文件状态判断是否可检索。
+
+OCR 默认以 200 DPI 识别，低质量页最多以 300 DPI 重试一次。识别不可靠的页面留存结果供复核并显示提示；复杂表格、公式与手写内容可能无法完整还原。质量分数不是准确率概率。OCR 和 Embedding 会消耗本机 CPU / 内存，远程模型与重排增加请求延迟和调用费用；调高并发前应以实际文件及上游限额验收。
+
+升级前同时备份 PostgreSQL、上传原文件、BM25 状态和 Milvus 及其依赖数据。`deploy.sh` 的数据库备份不替代完整数据备份。Docker 运行数据位于 `DOCKER_VOLUME_DIRECTORY` 下的 `data/` 和 `volumes/`，模型缓存在 `volumes/huggingface/`。
+
+已有文档不会因解析规则更新而自动重建，可在页面中逐份重新处理。批量重建须先停止应用和文档 worker，并保留备份：
+
+```powershell
+uv run python -m backend.reindex_documents --all
+# 将旧 BM25 索引升级为保留数字、年份、版本与型号的新分词规则
+uv run python -m backend.reindex_documents --all --upgrade-tokenizer
+```
+
+批量重建会清理旧索引，不要与在线应用并行执行。排障时使用响应头 `X-Request-ID` 对照日志；管理员可查看近 24 小时调用与队列。调用审计保留 90 天，不记录查询全文、文件正文或完整 Key。
+
+## 测试与检索评测
+
+```powershell
+uv run python -m unittest discover -s tests -p 'test_*.py'
+node tests/frontend_platform_smoke.js
+node tests/frontend_knowledge_smoke.js
+node tests/frontend_github_smoke.js
+```
+
+前端冒烟检查需要 Node.js，应用本身无需 Node.js。HTTP / MCP 集成验证使用临时数据库；加上 `--milvus` 可在独立测试集合验证上传检索，需要本地 Milvus 可用：
+
+```powershell
+uv run python tests/m3_local_integration.py
+uv run python tests/m3_local_integration.py --milvus
+```
+
+中文检索评测见 [benchmarks/README.md](benchmarks/README.md)，脚本覆盖 TXT 上传、处理、检索和按文档 ID 评分。测试包与原始结果位于 Git 忽略的 `data/` 中，需要自行生成。
+
+2026-10-26 的隔离测试记录如下：
+
+| 自定义测试集 | Recall@5 | Recall@10 | Hit@10 | MRR@10 | nDCG@10 |
+| --- | --- | --- | --- | --- | --- |
+| 10 题 / 80 份文档 | 76.92% | 89.42% | 100% | 1.0000 | 0.8984 |
+| 100 题 / 1,000 份文档 | 72.05% | 82.63% | 99% | 0.9833 | 0.8602 |
+
+以上是 T2Retrieval 子集的检索成绩，不代表完整官方基准或生成答案准确率。两组问题集不同；相同 10 题扩库后的 Recall@10 为 88.17%。100 题结果来自每题间隔 4 秒的完整重测，以避开上游重排限额；平均请求耗时 1.725 秒，不含主动等待，不代表并发吞吐。详细条件与限制见 [HANDOFF.md](HANDOFF.md)。
+
+## 目录
+
+```text
+backend/
+  app.py              # FastAPI 入口
+  api/                # HTTP 路由、请求模型与前端静态路由
+  services/           # 认证、知识库、聊天与平台业务
+  documents/          # 解析、清洗、OCR 与分块
+  rag/                # 召回、重排、查询扩展与父块合并
+  infrastructure/     # 数据库、缓存、Embedding、Milvus 与文件存储
+  integrations/mcp/   # MCP 协议与认证
+  workers/            # 后台扫描、任务恢复与审计清理
+  cli/                # 管理员初始化、旧数据导入与索引重建
+frontend/             # 无构建步骤的网页客户端
+migrations/           # Alembic 数据库迁移
+benchmarks/           # T2Retrieval 测试工具
+tests/                # 单元、集成与前端冒烟测试
+deploy/               # Nginx 配置示例
+```
+
+模块边界与开发约定见 [后端说明](backend/README.md)、[前端说明](frontend/README.md) 和 [AGENTS.md](AGENTS.md)。
