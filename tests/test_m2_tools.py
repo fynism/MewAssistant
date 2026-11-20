@@ -1,16 +1,20 @@
+import io
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from PIL import Image, ImageChops
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from backend.core.security import create_access_token
 from backend.api.dependencies import get_db
+from backend.infrastructure import storage
 from backend.infrastructure.database.session import Base
 from backend.infrastructure.database.models import KnowledgeBase, KnowledgeDocument, User
+from tests.test_pdf_extraction import write_native_pdf
 
 
 class M2ToolTests(unittest.TestCase):
@@ -102,6 +106,52 @@ class M2ToolTests(unittest.TestCase):
                    return_value={"docs": [], "meta": {"retrieval_mode": "failed"}}):
             self.assertEqual(self.client.post(endpoint, headers=self.alice,
                 json={"query": "error", "knowledgeIds": ["alice-kb"]}).status_code, 503)
+
+    def test_workspace_browses_and_searches_only_owned_documents(self):
+        self.assertEqual(self.client.get("/documents").status_code, 401)
+        listing = self.client.get("/documents", headers=self.alice).json()
+        self.assertEqual([item["id"] for item in listing["documents"]], ["alice-doc"])
+        hit = {"document_id": "alice-doc", "page_number": 0, "text": "target"}
+        foreign = {"document_id": "bob-doc", "page_number": 0, "text": "target"}
+        with (patch("backend.api.routers.knowledges.enforce_rate_limits"),
+              patch("backend.rag.retrieval.retrieve_documents",
+                    return_value={"docs": [hit, foreign], "meta": {}}) as search):
+            endpoint = "/documents/search"
+            response = self.client.post(endpoint, headers=self.alice, json={"query": "target"})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual([item["documentId"] for item in response.json()["results"]], ["alice-doc"])
+            self.assertIsNone(search.call_args.kwargs["knowledge_ids"])
+            query = {"query": "target", "knowledgeId": "alice-kb"}
+            self.assertEqual(self.client.post(endpoint, headers=self.alice, json=query).status_code, 200)
+            self.assertEqual(search.call_args.kwargs["knowledge_ids"], ["alice-kb"])
+            query["knowledgeId"] = "bob-kb"
+            self.assertEqual(self.client.post(endpoint, headers=self.alice, json=query).status_code, 404)
+
+    def test_pdf_preview_highlights_native_text_and_protects_original(self):
+        root = Path(self.temp.name)
+        original = root / "a.pdf"
+        write_native_pdf(original)
+        endpoint = "/knowledges/alice-kb/documents/alice-doc"
+        with patch.object(storage, "KNOWLEDGE_DOCUMENTS_DIR", root):
+            response = self.client.get(endpoint + "/content", headers=self.alice)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.content, original.read_bytes())
+            self.assertIn("attachment", response.headers["content-disposition"])
+            self.assertIn("no-store", response.headers["cache-control"])
+            self.assertEqual(self.client.get(endpoint + "/content", headers=self.bob).status_code, 404)
+            self.assertEqual(self.client.post(endpoint + "/preview/1", json={}).status_code, 401)
+            self.assertEqual(self.client.post(endpoint + "/preview/1",
+                headers=self.bob, json={}).status_code, 404)
+            self.assertEqual(self.client.post(endpoint + "/preview/2",
+                headers=self.alice, json={}).status_code, 404)
+            preview = self.client.post(endpoint + "/preview/1", headers=self.alice, json={"query": "2025"})
+            plain = self.client.post(endpoint + "/preview/1", headers=self.alice, json={})
+        self.assertEqual(preview.status_code, 200)
+        self.assertEqual(preview.headers["x-pdf-page-count"], "1")
+        self.assertEqual(preview.headers["content-type"], "image/png")
+        with Image.open(io.BytesIO(preview.content)) as marked, Image.open(io.BytesIO(plain.content)) as unmarked:
+            self.assertEqual(max(marked.size), 1600)
+            self.assertIsNotNone(ImageChops.difference(marked, unmarked).getbbox())
 
 
 if __name__ == "__main__":

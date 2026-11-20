@@ -3,6 +3,8 @@
 import math
 import threading
 from difflib import SequenceMatcher
+from io import BytesIO
+from itertools import islice
 
 import numpy as np
 
@@ -92,6 +94,41 @@ def _render_page(path: str, number: int, dpi: int) -> np.ndarray:
                 bitmap.close()
         finally:
             page.close()
+
+
+def render_preview(path: str, number: int, query: str) -> tuple[bytes, int]:
+    """Render one original page and mark literal hits from its embedded text."""
+    import pypdfium2 as pdfium
+    from PIL import ImageDraw
+
+    boxes = []
+    with _pdf_lock, pdfium.PdfDocument(path) as pdf:
+        count = len(pdf)
+        if not 1 <= number <= count:
+            raise IndexError(number)
+        page = pdf[number - 1]
+        width, height = page.get_size()
+        if not all(math.isfinite(v) and v > 0 for v in (width, height)):
+            raise ProcessingError("PDF 页面尺寸无效")
+        # Render only one page and bound the bitmap even for poster-size PDFs.
+        bitmap = page.render(scale=1600 / max(width, height))
+        image = bitmap.to_pil().convert("RGB")
+        bitmap.close()
+        if query:
+            text = page.get_textpage()
+            text.count_rects()
+            search = text.search(query)
+            for start, length in islice(iter(search.get_next, None), 100):
+                for index in range(text.count_rects(start, length)):
+                    boxes.append(_normalized_bbox(text.get_rect(index), page))
+
+    draw = ImageDraw.Draw(image, "RGBA")
+    for x0, y0, x1, y1 in boxes:
+        draw.rectangle((x0 * image.width, y0 * image.height,
+                        x1 * image.width, y1 * image.height), fill=(255, 213, 40, 90))
+    output = BytesIO()
+    image.save(output, format="PNG", compress_level=3)
+    return output.getvalue(), count
 
 
 def _recognize(pixels: np.ndarray) -> list[TextBlock]:

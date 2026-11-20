@@ -50,7 +50,8 @@ const responder = async url => {
   await callback.mount();
   assert.equal(callback.app.isAuthenticated,true);
   assert.equal(callback.app.displayName,'gh_cat_123');
-  assert.equal(callback.app.role,'user');
+  assert.equal(callback.app.currentUser.role,'user');
+  assert.equal(callback.app.isAdmin,false);
   assert.equal(callback.app.authChecking,false);
   assert.equal(callback.stored.get('accessToken'),'site-jwt');
   assert.equal(callback.location.pathname,'/try');

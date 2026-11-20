@@ -1,13 +1,25 @@
 /* Vue 3 + Element Plus. Business data comes exclusively from the existing API. */
 (() => {
   'use strict';
-  const {createApp, ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick} = Vue;
+  const {createApp, ref, shallowRef, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick} = Vue;
   const {ElMessage, ElMessageBox} = ElementPlus;
   const routes = ['/', '/services/knowledge', '/workspace/knowledges', '/try', '/account', '/admin'];
-  const titles = {'/':'MCP 服务广场', '/services/knowledge':'知识库检索 MCP', '/workspace/knowledges':'我的知识库', '/try':'试一下', '/account':'个人管理', '/admin':'管理页面'};
+  const titles = {'/':'个人知识库', '/services/knowledge':'客户端接入', '/workspace/knowledges':'个人知识库', '/try':'问资料', '/account':'个人管理', '/admin':'管理页面'};
   const routePath = () => routes.includes(location.pathname.replace(/\/$/, '') || '/') ? location.pathname.replace(/\/$/, '') || '/' : '/';
   const storage = {get(key) {try {return localStorage.getItem(key);} catch {return null;}}, set(key, value) {try {value ? localStorage.setItem(key, value) : localStorage.removeItem(key);} catch {}}};
   const newSessionId = () => 'session_' + crypto.randomUUID();
+  function highlightParts(text, query) {
+    if (!query) return [{text, match:false}];
+    const literal = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return text.split(new RegExp(`(${literal})`, 'giu')).map((text, index) => ({text, match:index % 2 === 1}));
+  }
+  function searchSnippet(text, query) {
+    const compact = (text || '').replace(/\s+/g, ' ').trim();
+    const match = compact.toLowerCase().indexOf(query.toLowerCase());
+    const start = Math.max(0, match - 28);
+    const end = start + Math.max(115, Math.min(query.length + 40, 224));
+    return highlightParts((start ? '…' : '') + compact.slice(start, end) + (end < compact.length ? '…' : ''), query);
+  }
   function tokenizeConfig(source, language) {
     const pattern = /#[^\n]*|"(?:\\.|[^"\\])*"|\[[^\]\n]+\]|\b[A-Za-z_][\w.-]*\b|[{}\[\]:=,]/g;
     const tokens = []; let cursor = 0;
@@ -29,24 +41,12 @@
       const isAdmin = computed(() => role.value === 'admin');
       const displayName = computed(() => currentUser.value?.username || '');
       const pageTitle = computed(() => titles[page.value]);
-      const workspaceLinks = [{path:'/workspace/knowledges',label:'我的知识库',icon:'FolderOpened'}, {path:'/try',label:'试一下',icon:'ChatDotRound'}, {path:'/account',label:'个人管理',icon:'User'}];
-      const isExplore = computed(() => page.value === '/' || page.value === '/services/knowledge');
-      const isWorkspace = computed(() => workspaceLinks.some(link => link.path === page.value));
+      const isLibrary = computed(() => page.value === '/' || page.value === '/workspace/knowledges');
       const isDark = ref(document.documentElement.classList.contains('dark'));
-      const motionQuery = matchMedia('(prefers-reduced-motion: reduce)'), systemTheme = matchMedia('(prefers-color-scheme: dark)');
-      const brandAnimating = ref(false), brandWords = [{initial:'M',suffix:'eow',offset:0},{initial:'C',suffix:'onnect',offset:3},{initial:'P',suffix:'latform',offset:9}];
-      let brandPlayed = false, brandTimer;
-      try {brandPlayed = sessionStorage.getItem('mcp-brand-seen-v02') === '1';} catch {}
-      function playBrand() {
-        if (page.value !== '/' || brandPlayed) return;
-        brandPlayed = true; try {sessionStorage.setItem('mcp-brand-seen-v02', '1');} catch {}
-        if (motionQuery.matches) return;
-        brandAnimating.value = true; brandTimer = setTimeout(() => {brandAnimating.value = false;}, 1100);
-      }
+      const systemTheme = matchMedia('(prefers-color-scheme: dark)');
       function toggleTheme() {isDark.value = !isDark.value; document.documentElement.classList.toggle('dark', isDark.value); storage.set('mcp-theme', isDark.value ? 'dark' : 'light');}
       const onSystemTheme = event => {if (!storage.get('mcp-theme')) {isDark.value = event.matches; document.documentElement.classList.toggle('dark', event.matches);}};
-      const onMotion = event => {if (event.matches) brandAnimating.value = false;};
-      systemTheme.addEventListener('change', onSystemTheme); motionQuery.addEventListener('change', onMotion);
+      systemTheme.addEventListener('change', onSystemTheme);
 
       const connectionClient = ref('codex'), servicePanels = ref([]);
       const connectionEndpoint = 'https://fyism.cn/mcp/knowledge';
@@ -66,6 +66,18 @@
       const authRules = {username:[{required:true,whitespace:true,message:'请输入用户名',trigger:'blur'}],password:[{required:true,message:'请输入密码',trigger:'blur'}],invite:[{required:true,whitespace:true,message:'请输入邀请码',trigger:'blur'}]};
       const knowledges = ref([]), selectedKnowledgeId = ref(''), selectedKnowledgeIds = ref([]), knowledgeLoading = ref(false), knowledgeError = ref('');
       const documents = ref([]), documentsLoading = ref(false), documentsError = ref(''), documentBusyId = ref('');
+      const searchQuery = ref(''), submittedQuery = ref(''), searchResult = shallowRef(null), searchLoading = ref(false), searchError = ref('');
+      const activeSource = shallowRef(null), previewOpen = ref(false), previewLoading = ref(false), previewError = ref('');
+      const previewUrl = ref(''), previewText = ref(null), previewPage = ref(1), previewPageCount = ref(0), previewZoom = ref(100);
+      const downloadLoading = ref(false), searchInput = ref(null), previewTitle = ref(null), readingList = ref(null), previewCanvas = ref(null);
+      let searchController, previewController;
+      const previewType = computed(() => activeSource.value?.filename.split('.').at(-1).toLowerCase());
+      const activeDocument = computed(() => documents.value.find(doc => doc.id === activeSource.value?.documentId));
+      const previewTextParts = computed(() => highlightParts(previewText.value || '', activeSource.value?.query));
+      const readingRows = computed(() => submittedQuery.value
+        ? (searchResult.value?.results || []).map(source => ({...source, key:source.sourceId, query:submittedQuery.value, snippet:searchSnippet(source.text, submittedQuery.value)}))
+        : documents.value.map(doc => ({key:doc.id, documentId:doc.id, knowledgeId:doc.knowledge_id,
+          knowledgeName:knowledges.value.find(kb => kb.id === doc.knowledge_id)?.name, filename:doc.filename, doc})));
       const pageReview = ref(null), pageReviewLoading = ref(false);
       const knowledgeSettings = ref({allowed_extensions:[],max_upload_bytes:0,max_retrieval_results:20});
       const createOpen = ref(false), editOpen = ref(false), knowledgeName = ref(''), knowledgeDescription = ref(''), knowledgeEdit = reactive({name:'',description:''});
@@ -166,6 +178,7 @@
       function clearToolResults() {resultEpoch++; toolResult.value = null; toolError.value = ''; toolLoading.value = false;}
       function logout(navigateHome = true) {
         identityEpoch++; knowledgeEpoch++; documentEpoch++; sessionEpoch++; stopChat(); stopDocumentPolling(); clearToolResults();
+        searchQuery.value = ''; clearSearch(); downloadLoading.value = false;
         token.value = ''; storage.set('accessToken',''); currentUser.value = null;
         newKey.value = ''; newInvite.value = ''; keys.value = []; invites.value = []; operations.value = null;
         knowledges.value = []; documents.value = []; selectedKnowledgeId.value = ''; selectedKnowledgeIds.value = []; scopeInitialized = false;
@@ -177,7 +190,11 @@
         knowledgeError.value = ''; documentsError.value = ''; keyError.value = ''; inviteError.value = ''; operationsError.value = '';
         if (navigateHome) go('/');
       }
-      function accountCommand(command) {command === 'account' ? go('/account') : logout();}
+      function accountCommand(command) {
+        if (command === 'logout') logout();
+        else if (command === 'theme') toggleTheme();
+        else go('/' + command);
+      }
       function go(path) {
         mobileNav.value = false; if (!routes.includes(path) || page.value === path) return;
         history.pushState({},'',path); page.value = path; window.scrollTo({top:0,behavior:'instant'});
@@ -185,7 +202,7 @@
       const onPopState = () => {page.value = routePath(); mobileNav.value = false;};
       async function loadPageData() {
         if (!isAuthenticated.value) return;
-        if (['/workspace/knowledges', '/try', '/services/knowledge'].includes(page.value)) await loadKnowledges();
+        if (isLibrary.value || ['/try', '/services/knowledge'].includes(page.value)) await loadKnowledges();
         else if (page.value === '/account') await loadKeys();
         else if (page.value === '/admin' && isAdmin.value) await Promise.all([loadInvites(),loadOperations()]);
       }
@@ -204,26 +221,141 @@
             selectedKnowledgeIds.value = requested && owned.has(requested) ? [requested] : knowledges.value.filter(kb => kb.has_ready_documents).slice(0,20).map(kb => kb.id);
             scopeInitialized = true;
           } else selectedKnowledgeIds.value = selectedKnowledgeIds.value.filter(id => owned.has(id));
-          if (!owned.has(selectedKnowledgeId.value)) selectedKnowledgeId.value = knowledges.value[0]?.id || '';
+          if (!owned.has(selectedKnowledgeId.value)) selectedKnowledgeId.value = '';
           topK.value = Math.min(topK.value, knowledgeSettings.value.max_retrieval_results || 20);
-          if (page.value === '/workspace/knowledges') await loadDocuments();
+          if (isLibrary.value) await loadDocuments();
         } catch (error) {if (epoch === identityEpoch && call === knowledgeEpoch && error.name !== 'AbortError') knowledgeError.value = error.message;}
         finally {if (epoch === identityEpoch && call === knowledgeEpoch) knowledgeLoading.value = false;}
       }
-      function selectKnowledge(id) {selectedKnowledgeId.value = id; documents.value = []; documentsError.value = ''; stopDocumentPolling(); loadDocuments();}
+      function selectKnowledge(id) {
+        if (selectedKnowledgeId.value === id) return;
+        selectedKnowledgeId.value = id;
+        documents.value = [];
+        resetPreview();
+        const loading = loadDocuments();
+        if (submittedQuery.value) runSearch(submittedQuery.value);
+        readingList.value?.scrollTo(0, 0);
+        return loading;
+      }
       async function loadDocuments() {
         const id = selectedKnowledgeId.value, epoch = identityEpoch, call = ++documentEpoch; stopDocumentPolling();
-        if (!id || !isAuthenticated.value) {documents.value = []; documentsLoading.value = false; return;}
+        if (!isAuthenticated.value || !isLibrary.value) return;
         documentsLoading.value = true; documentsError.value = '';
         try {
-          const data = await jsonRequest(`/knowledges/${encodeURIComponent(id)}/documents`);
-          if (epoch !== identityEpoch || call !== documentEpoch || id !== selectedKnowledgeId.value || page.value !== '/workspace/knowledges') return;
+          const data = await jsonRequest(id ? `/knowledges/${encodeURIComponent(id)}/documents` : '/documents');
+          if (epoch !== identityEpoch || call !== documentEpoch || id !== selectedKnowledgeId.value || !isLibrary.value) return;
           documents.value = data.documents || [];
-          const knowledge = selectedKnowledge.value;
-          if (knowledge) {knowledge.ready_document_count = documents.value.filter(doc => doc.status === 'ready').length; knowledge.has_ready_documents = knowledge.ready_document_count > 0;}
+          const readyCounts = new Map();
+          for (const doc of documents.value) if (doc.status === 'ready') readyCounts.set(doc.knowledge_id, (readyCounts.get(doc.knowledge_id) || 0) + 1);
+          for (const kb of knowledges.value) {
+            if (!id || id === kb.id) {
+              kb.ready_document_count = readyCounts.get(kb.id) || 0;
+              kb.has_ready_documents = kb.ready_document_count > 0;
+            }
+          }
           if (documents.value.some(doc => ['pending','processing','replacing','deleting'].includes(doc.status))) documentTimer = setTimeout(loadDocuments,2500);
         } catch (error) {if (epoch === identityEpoch && call === documentEpoch && error.name !== 'AbortError') documentsError.value = error.message;}
         finally {if (epoch === identityEpoch && call === documentEpoch) documentsLoading.value = false;}
+      }
+      function clearSearch() {
+        searchController?.abort();
+        submittedQuery.value = ''; searchResult.value = null; searchError.value = ''; searchLoading.value = false;
+        resetPreview();
+      }
+      function clearSearchInput() {
+        searchQuery.value = '';
+        clearSearch();
+        readingList.value?.scrollTo(0, 0);
+        searchInput.value?.focus();
+      }
+      async function runSearch(query = searchQuery.value.trim()) {
+        if (!query) {clearSearch(); return;}
+        searchController?.abort();
+        const controller = new AbortController(); searchController = controller;
+        submittedQuery.value = query; searchLoading.value = true; searchError.value = ''; searchResult.value = null;
+        resetPreview(); readingList.value?.scrollTo(0, 0);
+        try {
+          const body = jsonBody('POST', {query, knowledgeId:selectedKnowledgeId.value || null, topK:Math.min(10, knowledgeSettings.value.max_retrieval_results || 20)});
+          const data = await jsonRequest('/documents/search', {...body, signal:controller.signal});
+          if (!controller.signal.aborted) searchResult.value = data;
+        } catch (error) {
+          if (!controller.signal.aborted && error.name !== 'AbortError') searchError.value = error.message;
+        } finally {
+          if (!controller.signal.aborted) searchLoading.value = false;
+        }
+      }
+      function releasePreview() {
+        previewController?.abort();
+        if (previewUrl.value) URL.revokeObjectURL(previewUrl.value);
+        previewUrl.value = ''; previewText.value = null; previewError.value = ''; previewLoading.value = false;
+      }
+      function resetPreview() {
+        releasePreview();
+        activeSource.value = null; previewOpen.value = false; previewPageCount.value = 0; previewZoom.value = 100;
+      }
+      function sourcePath(source) {
+        return `/knowledges/${encodeURIComponent(source.knowledgeId)}/documents/${encodeURIComponent(source.documentId)}`;
+      }
+      async function loadPreview(pageNumber = previewPage.value) {
+        const source = activeSource.value, format = previewType.value;
+        if (!source || !['pdf', 'txt'].includes(format)) return;
+        releasePreview();
+        const controller = new AbortController(); previewController = controller;
+        previewPage.value = pageNumber; previewLoading.value = true;
+        previewCanvas.value?.scrollTo(0, 0);
+        try {
+          const path = sourcePath(source);
+          if (format === 'pdf') {
+            const response = await request(`${path}/preview/${pageNumber}`, {...jsonBody('POST', {query:source.query || ''}), signal:controller.signal});
+            const blob = await response.blob();
+            if (controller.signal.aborted) return;
+            previewPageCount.value = Number(response.headers.get('X-PDF-Page-Count')) || 0;
+            previewUrl.value = URL.createObjectURL(blob);
+          } else {
+            const response = await request(`${path}/content`, {signal:controller.signal});
+            const bytes = await response.arrayBuffer();
+            if (controller.signal.aborted) return;
+            try {previewText.value = new TextDecoder('utf-8', {fatal:true}).decode(bytes);}
+            catch {previewText.value = new TextDecoder('gb18030').decode(bytes);}
+          }
+        } catch (error) {
+          if (!controller.signal.aborted && error.name !== 'AbortError') previewError.value = error.message;
+        } finally {
+          if (!controller.signal.aborted) previewLoading.value = false;
+        }
+      }
+      async function openPreview(source, event) {
+        if (activeSource.value?.key !== source.key) {
+          resetPreview();
+          activeSource.value = source;
+          previewPage.value = (source.pageNumber ?? 0) + 1;
+          loadPreview();
+        }
+        previewOpen.value = true;
+        if (event.detail === 0 || matchMedia('(max-width: 880px)').matches) {
+          await nextTick();
+          previewTitle.value?.focus({preventScroll:true});
+        }
+      }
+      async function closePreview() {
+        previewOpen.value = false;
+        await nextTick();
+        readingList.value?.querySelector('[aria-pressed="true"]')?.focus({preventScroll:true});
+      }
+      async function downloadSource() {
+        const source = activeSource.value, epoch = identityEpoch;
+        if (!source || downloadLoading.value) return;
+        downloadLoading.value = true;
+        try {
+          const response = await request(`${sourcePath(source)}/content`);
+          const blob = await response.blob();
+          if (epoch !== identityEpoch) return;
+          const url = URL.createObjectURL(blob), link = document.createElement('a');
+          link.href = url; link.download = source.filename;
+          document.body.append(link); link.click(); link.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } catch (error) {report(error);}
+        finally {if (epoch === identityEpoch) downloadLoading.value = false;}
       }
       async function createKnowledge() {
         if (!knowledgeName.value.trim() || knowledgeLoading.value) return;
@@ -231,8 +363,8 @@
         try {
           const data = await jsonRequest('/knowledges',jsonBody('POST',{name:knowledgeName.value.trim(),description:knowledgeDescription.value.trim()}));
           if (epoch !== identityEpoch) return;
-          knowledges.value.unshift(data); selectedKnowledgeId.value = data.id; createOpen.value = false; knowledgeName.value = ''; knowledgeDescription.value = '';
-          await loadDocuments(); ElMessage.success('知识库已创建');
+          knowledges.value.unshift(data); createOpen.value = false; knowledgeName.value = ''; knowledgeDescription.value = '';
+          clearSearchInput(); await selectKnowledge(data.id); ElMessage.success('知识库已创建');
         } catch (error) {report(error);} finally {if (epoch === identityEpoch) knowledgeLoading.value = false;}
       }
       function openKnowledgeEdit() {Object.assign(knowledgeEdit,{name:selectedKnowledge.value?.name || '',description:selectedKnowledge.value?.description || ''}); editOpen.value = true;}
@@ -246,7 +378,7 @@
       async function deleteKnowledge() {
         const id = selectedKnowledgeId.value, epoch = identityEpoch;
         if (!id || !await confirmAction(`删除“${selectedKnowledge.value.name}”及其文件、索引？此操作无法恢复。`,'删除知识库') || epoch !== identityEpoch) return;
-        try {await jsonRequest(`/knowledges/${encodeURIComponent(id)}`,{method:'DELETE'}); if (epoch !== identityEpoch) return; selectedKnowledgeIds.value = selectedKnowledgeIds.value.filter(value => value !== id); await loadKnowledges(); ElMessage.success('知识库已删除');} catch (error) {report(error);}
+        try {await jsonRequest(`/knowledges/${encodeURIComponent(id)}`,{method:'DELETE'}); if (epoch !== identityEpoch) return; selectedKnowledgeIds.value = selectedKnowledgeIds.value.filter(value => value !== id); clearSearchInput(); await loadKnowledges(); ElMessage.success('知识库已删除');} catch (error) {report(error);}
       }
       function validateFile(file) {
         const ext = '.' + (file.name.split('.').pop() || '').toLowerCase();
@@ -259,32 +391,37 @@
         if (!file || !id || isUploading.value) return;
         const validationError = validateFile(file); if (validationError) {ElMessage.warning(validationError); return;}
         isUploading.value = true;
-        try {const body = new FormData(); body.append('file',file); await jsonRequest(`/knowledges/${encodeURIComponent(id)}/documents`,{method:'POST',body}); if (epoch !== identityEpoch) return; if (id === selectedKnowledgeId.value) await loadDocuments(); ElMessage.success('已上传，处理状态将自动更新');}
+        try {const body = new FormData(); body.append('file',file); await jsonRequest(`/knowledges/${encodeURIComponent(id)}/documents`,{method:'POST',body}); if (epoch !== identityEpoch) return; if (!selectedKnowledgeId.value || id === selectedKnowledgeId.value) await loadDocuments(); ElMessage.success('已上传，处理状态将自动更新');}
         catch (error) {report(error);} finally {if (epoch === identityEpoch) isUploading.value = false;}
       }
-      function chooseReplacement(doc) {replacingDocumentId.value = doc.id; replaceInput.value?.click();}
+      function chooseReplacement(doc) {replacingDocumentId.value = {id:doc.id, knowledgeId:doc.knowledge_id}; replaceInput.value?.click();}
       async function replaceDocument(event) {
-        const file = event.target.files?.[0], id = selectedKnowledgeId.value, documentId = replacingDocumentId.value, epoch = identityEpoch; event.target.value = ''; replacingDocumentId.value = '';
-        if (!file || !documentId || !id) return;
+        const file = event.target.files?.[0], replacement = replacingDocumentId.value, epoch = identityEpoch; event.target.value = ''; replacingDocumentId.value = '';
+        if (!file || !replacement) return;
+        const {id:documentId, knowledgeId:id} = replacement;
         const validationError = validateFile(file); if (validationError) {ElMessage.warning(validationError); return;}
         if (!await confirmAction(`用“${file.name}”替换此文档？旧内容会立即退出检索。`,'替换文档') || epoch !== identityEpoch) return;
         documentBusyId.value = documentId;
-        try {const body = new FormData(); body.append('file',file); await jsonRequest(`/knowledges/${encodeURIComponent(id)}/documents/${encodeURIComponent(documentId)}/content`,{method:'PUT',body}); if (epoch === identityEpoch && id === selectedKnowledgeId.value) await loadDocuments();}
+        try {const body = new FormData(); body.append('file',file); await jsonRequest(`/knowledges/${encodeURIComponent(id)}/documents/${encodeURIComponent(documentId)}/content`,{method:'PUT',body}); if (epoch === identityEpoch) await refreshChangedDocument(id, documentId);}
         catch (error) {report(error);} finally {if (epoch === identityEpoch) documentBusyId.value = '';}
       }
       async function documentAction(doc, action) {
-        const id = selectedKnowledgeId.value, epoch = identityEpoch;
+        const id = doc.knowledge_id, epoch = identityEpoch;
         if (action === 'delete' && !await confirmAction(`删除“${doc.filename}”？此文件将退出检索。`,'删除文档')) return;
         if (epoch !== identityEpoch) return;
         documentBusyId.value = doc.id;
-        try {await jsonRequest(`/knowledges/${encodeURIComponent(id)}/documents/${encodeURIComponent(doc.id)}${action === 'delete' ? '' : '/' + action}`,{method:action === 'delete' ? 'DELETE' : 'POST'}); if (epoch === identityEpoch && id === selectedKnowledgeId.value) await loadDocuments();}
+        try {await jsonRequest(`/knowledges/${encodeURIComponent(id)}/documents/${encodeURIComponent(doc.id)}${action === 'delete' ? '' : '/' + action}`,{method:action === 'delete' ? 'DELETE' : 'POST'}); if (epoch === identityEpoch) await refreshChangedDocument(id, doc.id);}
         catch (error) {report(error);} finally {if (epoch === identityEpoch) documentBusyId.value = '';}
       }
+      async function refreshChangedDocument(knowledgeId, documentId) {
+        if (activeSource.value?.documentId === documentId) resetPreview();
+        if (searchResult.value?.results?.some(source => source.documentId === documentId)) runSearch(submittedQuery.value);
+        if (!selectedKnowledgeId.value || knowledgeId === selectedKnowledgeId.value) await loadDocuments();
+      }
       const statusLabel = status => ({pending:'等待处理',processing:'处理中',ready:'可检索',failed:'处理失败',replacing:'替换中',deleting:'删除中'}[status] || status);
-      const statusIcon = status => ({ready:'CircleCheck',failed:'CircleClose'}[status] || 'Loading');
       const documentPending = doc => ['pending','processing','replacing','deleting'].includes(doc.status);
       async function viewDocumentPage(doc, pageNumber) {
-        const id = selectedKnowledgeId.value, epoch = identityEpoch;
+        const id = doc.knowledge_id, epoch = identityEpoch;
         const review = reactive({filename:doc.filename,pageNumber,data:null,error:''});
         pageReview.value = review; pageReviewLoading.value = true;
         try {const data = await jsonRequest(`/knowledges/${encodeURIComponent(id)}/documents/${encodeURIComponent(doc.id)}/pages/${pageNumber}`); if (epoch === identityEpoch && pageReview.value === review) review.data = data;}
@@ -436,11 +573,12 @@
       watch(page, async () => {
         newKey.value = ''; newInvite.value = ''; stopDocumentPolling(); documentEpoch++; clearToolResults(); sessionEpoch++; stopChat();
         createOpen.value = false; editOpen.value = false; sessionsOpen.value = false; helpTopic.value = ''; qualityReview.value = null;
-        document.title = pageTitle.value + ' · MeowConnectPlatform'; playBrand(); await loadPageData(); await nextTick();
+        searchQuery.value = ''; clearSearch(); pageReview.value = null;
+        document.title = pageTitle.value + ' · MeowConnectPlatform'; await loadPageData(); await nextTick();
         document.getElementById('main')?.focus({preventScroll:true});
       });
       onMounted(async () => {
-        document.title = pageTitle.value + ' · MeowConnectPlatform'; playBrand(); window.addEventListener('popstate',onPopState);
+        document.title = pageTitle.value + ' · MeowConnectPlatform'; window.addEventListener('popstate',onPopState);
         try {githubEnabled.value = (await jsonRequest('/auth/providers',{},false)).github === true;} catch {}
         const githubRestored = await restoreGitHubLogin();
         if (token.value && !githubRestored) {
@@ -449,13 +587,15 @@
         }
         await loadPageData();
       });
-      onBeforeUnmount(() => {identityEpoch++; stopChat(); stopDocumentPolling(); clearTimeout(brandTimer); window.removeEventListener('popstate',onPopState); systemTheme.removeEventListener('change',onSystemTheme); motionQuery.removeEventListener('change',onMotion);});
+      onBeforeUnmount(() => {identityEpoch++; stopChat(); stopDocumentPolling(); clearSearch(); window.removeEventListener('popstate',onPopState); systemTheme.removeEventListener('change',onSystemTheme);});
       return {
-        locale:ElementPlusLocaleZhCn,page,mobileNav,currentUser,authChecking,role,isAuthenticated,isAdmin,displayName,pageTitle,workspaceLinks,isExplore,isWorkspace,isDark,brandAnimating,brandWords,toggleTheme,go,accountCommand,
+        locale:ElementPlusLocaleZhCn,page,mobileNav,currentUser,authChecking,isAuthenticated,isAdmin,displayName,pageTitle,isLibrary,isDark,toggleTheme,go,accountCommand,
         connectionClient,servicePanels,connectionEndpoint,connectionExamples,helpTopic,helpTitle,qualityReview,
         authOpen,authMode,authView,authTitle,authLoading,authError,authForm,authFormRef,authRules,usernameInput,githubLoginButton,resetAuth,openAuth,switchAuth,focusAuth,choosePasswordLogin,showAuthMethods,submitAuth,logout,githubEnabled,githubLoading,startGitHubLogin,
         knowledges,selectedKnowledgeId,selectedKnowledgeIds,selectedKnowledge,knowledgeLoading,knowledgeError,loadKnowledges,selectKnowledge,createOpen,editOpen,knowledgeName,knowledgeDescription,knowledgeEdit,createKnowledge,openKnowledgeEdit,updateKnowledge,deleteKnowledge,
-        documents,documentsLoading,documentsError,documentBusyId,loadDocuments,fileInput,replaceInput,isUploading,acceptedExtensions,uploadLimitLabel,uploadDocument,chooseReplacement,replaceDocument,documentAction,statusLabel,statusIcon,documentPending,openTryWithKnowledge,pageReview,pageReviewLoading,viewDocumentPage,
+        documents,documentsLoading,documentsError,documentBusyId,loadDocuments,fileInput,replaceInput,isUploading,acceptedExtensions,uploadLimitLabel,uploadDocument,chooseReplacement,replaceDocument,documentAction,statusLabel,documentPending,openTryWithKnowledge,pageReview,pageReviewLoading,viewDocumentPage,
+        searchQuery,submittedQuery,searchResult,searchLoading,searchError,readingRows,searchInput,readingList,runSearch,clearSearchInput,
+        activeSource,activeDocument,previewType,previewOpen,previewLoading,previewError,previewUrl,previewText,previewTextParts,previewTitle,previewCanvas,previewPage,previewPageCount,previewZoom,openPreview,closePreview,loadPreview,downloadSource,downloadLoading,
         scopeLabel,scopeNames,toolName,toolQuery,topK,knowledgeSettings,toolLoading,toolResult,toolError,runTool,messages,chatInput,chatLoading,chatLog,isComposing,sendChat,stopChat,handleChatKey,parseMarkdown,traceFacts,traceGroups,newChat,sessions,sessionsOpen,sessionsLoading,sessionsError,loadSessions,loadSession,deleteSession,
         keys,keyName,newKey,keysLoading,keyBusy,keyError,loadKeys,createKey,revokeKey,invites,newInvite,invitesLoading,inviteBusy,inviteError,invitationForm,loadInvites,createInvite,revokeInvite,invitationStatus,formatDate,operations,operationsLoading,operationsError,loadOperations,copyText
       };

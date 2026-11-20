@@ -1,12 +1,16 @@
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from backend.api.schemas.knowledge import KnowledgeInput
+from backend.api.schemas.knowledge import KnowledgeInput, PreviewInput
+from backend.api.schemas.tools import DocumentSearchInput
 from backend.api.dependencies import get_current_user, get_db
 from backend.core.config import settings
+from backend.infrastructure import storage
 from backend.infrastructure.database.models import KnowledgeBase, KnowledgeDocument, KnowledgeDocumentPage, User
 from backend.services.knowledge import (
     create_knowledge, delete_document, delete_knowledge, get_owned_document,
@@ -14,6 +18,7 @@ from backend.services.knowledge import (
     ALLOWED_EXTENSIONS, queue_reprocessing,
 )
 from backend.services.platform.rate_limits import enforce_rate_limits
+from backend.services.knowledge.tools import retrieve
 
 router = APIRouter()
 
@@ -104,10 +109,65 @@ def list_documents(knowledge_id: str, user: User = Depends(get_current_user), db
     return {"documents": [document_payload(i) for i in items]}
 
 
+@router.get("/documents")
+def list_all_documents(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    items = db.query(KnowledgeDocument).join(KnowledgeBase).filter(
+        KnowledgeBase.owner_id == user.id, KnowledgeBase.status == "active",
+        KnowledgeDocument.status != "deleting",
+    ).order_by(KnowledgeDocument.created_at.desc()).all()
+    return {"documents": [document_payload(i) for i in items]}
+
+
+@router.post("/documents/search")
+def search_documents(data: DocumentSearchInput, user: User = Depends(get_current_user),
+                     db: Session = Depends(get_db)):
+    enforce_rate_limits((f"retrieve:user:{user.id}", settings.retrieval_rate_per_minute))
+    scope = [data.knowledge_id] if data.knowledge_id is not None else None
+    return retrieve(db, user.id, data.query, scope, data.top_k)
+
+
 @router.get("/knowledges/{knowledge_id}/documents/{document_id}")
 def get_document(knowledge_id: str, document_id: str, user: User = Depends(get_current_user),
                  db: Session = Depends(get_db)):
     return document_payload(get_owned_document(db, user.id, knowledge_id, document_id))
+
+
+def original_path(item: KnowledgeDocument) -> Path:
+    root = storage.KNOWLEDGE_DOCUMENTS_DIR.resolve()
+    path = (root / item.storage_key).resolve()
+    if not path.is_relative_to(root) or not path.is_file():
+        raise HTTPException(status_code=404, detail="原文件不存在")
+    return path
+
+
+@router.get("/knowledges/{knowledge_id}/documents/{document_id}/content")
+def get_document_content(knowledge_id: str, document_id: str, user: User = Depends(get_current_user),
+                         db: Session = Depends(get_db)):
+    item = get_owned_document(db, user.id, knowledge_id, document_id)
+    path = original_path(item)
+    return FileResponse(path, filename=item.filename,
+                        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
+
+
+@router.post("/knowledges/{knowledge_id}/documents/{document_id}/preview/{page_number}")
+def preview_document_page(knowledge_id: str, document_id: str, page_number: int, data: PreviewInput,
+                          user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from pypdfium2 import PdfiumError
+    from backend.documents.cleaning import ProcessingError
+    from backend.documents.pdf import render_preview
+
+    item = get_owned_document(db, user.id, knowledge_id, document_id)
+    path = original_path(item)
+    if path.suffix.lower() != ".pdf":
+        raise HTTPException(status_code=415, detail="此格式不支持页面预览")
+    try:
+        image, count = render_preview(str(path), page_number, data.query.replace("\x00", "").strip())
+    except IndexError as exc:
+        raise HTTPException(status_code=404, detail="页面不存在") from exc
+    except (PdfiumError, ProcessingError, OSError) as exc:
+        raise HTTPException(status_code=422, detail="无法预览此 PDF") from exc
+    return Response(image, media_type="image/png",
+                    headers={"X-PDF-Page-Count": str(count), "Cache-Control": "private, no-store"})
 
 
 @router.put("/knowledges/{knowledge_id}/documents/{document_id}/content", status_code=202)
