@@ -219,6 +219,7 @@ h3 { font-size: 15px; line-height: 1.6; font-weight: 600; }
   --reading-hover: #edf1f8;
   --reading-mark: #fff0a4;
   --reading-pdf: #d82c25;
+  --reading-scroll-thumb: #aeb7c6;
   --reading-paper-width: clamp(640px, 58.4vw, 920px);
   display: grid;
   grid-template-columns: clamp(294px, 22.3vw, 356px) minmax(0, 1fr);
@@ -243,6 +244,7 @@ html.dark .reading-workspace {
   --reading-hover: #2a3343;
   --reading-mark: #ffe17b;
   --reading-pdf: #ff8983;
+  --reading-scroll-thumb: #59657a;
 }
 .reading-brand {
   grid-column: 1 / -1;
@@ -493,7 +495,14 @@ html.dark .reading-workspace {
   content: "";
 }
 .reading-preview-warning { background: var(--el-color-warning-light-9); color: var(--el-color-warning); padding: 8px 18px; font-size: 13px; overflow-wrap: anywhere; }
-.reading-canvas { flex: 1; min-height: 0; overflow: auto; padding: 27px 20px 28px; }
+.reading-canvas {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 27px 20px 28px;
+  scrollbar-color: var(--reading-scroll-thumb) transparent;
+  scrollbar-width: thin;
+}
 .reading-page-image, .reading-text-page {
   display: block;
   width: calc(min(100%, var(--reading-paper-width)) * var(--reading-zoom, 1));
@@ -508,6 +517,18 @@ html.dark .reading-workspace {
 
 .mobile-nav a { display: flex; align-items: center; gap: 9px; }
 .mobile-nav .el-button { justify-content: flex-start; width: 100%; margin: 0; }
+@media (min-width: 881px) {
+  .reading-tabs button, .reading-search input, .reading-submit, .reading-upload,
+  .reading-sidebar-footer a, .reading-account, .reading-download { font-size: 16px; }
+  .reading-search { margin-top: 20px; }
+  .reading-list-toolbar { min-height: 49px; font-size: 14px; }
+  .reading-row { padding-block-end: 17px; }
+  .reading-row-meta, .reading-snippet { font-size: 14px; }
+  .reading-canvas { padding-inline-end: 30px; }
+}
+@media (min-width: 1101px) {
+  .reading-page-controls select { min-width: 104px; }
+}
 @media (max-width: 1100px) {
   .reading-preview-bar { gap: 7px; padding-inline: 10px; }
   .reading-preview-title { padding-inline-start: 10px; }

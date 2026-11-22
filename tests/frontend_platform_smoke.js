@@ -32,7 +32,10 @@ responder = async (url,options={}) => {
   if(url === '/auth/login' || url === '/auth/register') return json({access_token:'fixture-token',username:'alice',role:userRole});
   if(url === '/knowledge-settings') return json({allowed_extensions:['.pdf','.txt'],max_upload_bytes:1000000,max_retrieval_results:20});
   if(url === '/knowledges') return json(options.method === 'POST' ? {id:knowledgeId,name:'Private',has_ready_documents:true} : {knowledges:[{id:knowledgeId,name:'Private',has_ready_documents:true}]});
-  if(url === '/documents/search') return json({status:'no_match',results:[]});
+  if(url === '/documents/search') return json({status:'ok',results:[{
+    sourceId:'hit',documentId:'doc',knowledgeId,knowledgeName:'Private',filename:'same.pdf',pageNumber:7,
+    text:'这是匹配词之前的一段长文本，用来验证侧栏的命中标记可见。接下来是测试检索相关内容。'
+  }]});
   if(url.endsWith('/documents') && options.method !== 'POST') return json({documents:[{id:'doc',knowledge_id:knowledgeId,filename:'same.pdf',status:'ready'}]});
   if(url.includes('/documents')) return json({id:'doc',status:'pending'});
   if(url === '/tools/debug/retrieve') return json({status:'no_match',results:[]});
@@ -70,6 +73,10 @@ vm.runInContext(fs.readFileSync(path.join(root,'frontend/app.js'),'utf8'),contex
   assert.ok(requests.some(item=>item.url==='/documents'&&item.method==='GET'));
   app.searchQuery = '测试检索'; await app.runSearch();
   assert.equal(JSON.parse(requests.find(item=>item.url==='/documents/search').body).knowledgeId ?? null,null);
+  const [prefix, match] = app.readingRows[0].snippet;
+  assert.equal(prefix.text, '…记可见。接下来是');
+  assert.equal(match.text, '测试检索');
+  assert.equal(match.match, true);
   await app.selectKnowledge(knowledgeId); await tick();
   assert.equal(JSON.parse(requests.filter(item=>item.url==='/documents/search').at(-1).body).knowledgeId,knowledgeId);
   app.clearSearchInput();

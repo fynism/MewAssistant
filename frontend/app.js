@@ -16,7 +16,8 @@
   function searchSnippet(text, query) {
     const compact = (text || '').replace(/\s+/g, ' ').trim();
     const match = compact.toLowerCase().indexOf(query.toLowerCase());
-    const start = Math.max(0, match - 28);
+    // Keep the match within the visible line of the results sidebar.
+    const start = Math.max(0, match - 8);
     const end = start + Math.max(115, Math.min(query.length + 40, 224));
     return highlightParts((start ? '…' : '') + compact.slice(start, end) + (end < compact.length ? '…' : ''), query);
   }
