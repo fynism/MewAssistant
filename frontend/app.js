@@ -44,9 +44,13 @@
       const isLibrary = computed(() => page.value === '/' || page.value === '/workspace/knowledges');
       const isDark = ref(document.documentElement.classList.contains('dark'));
       const systemTheme = matchMedia('(prefers-color-scheme: dark)');
+      const readerMedia = matchMedia('(max-width: 880px)');
+      const compactReader = ref(readerMedia.matches);
+      const onReaderWidth = event => {compactReader.value = event.matches;};
       function toggleTheme() {isDark.value = !isDark.value; document.documentElement.classList.toggle('dark', isDark.value); storage.set('mcp-theme', isDark.value ? 'dark' : 'light');}
       const onSystemTheme = event => {if (!storage.get('mcp-theme')) {isDark.value = event.matches; document.documentElement.classList.toggle('dark', event.matches);}};
       systemTheme.addEventListener('change', onSystemTheme);
+      readerMedia.addEventListener('change', onReaderWidth);
 
       const connectionClient = ref('codex'), servicePanels = ref([]);
       const connectionEndpoint = 'https://fyism.cn/mcp/knowledge';
@@ -67,6 +71,7 @@
       const knowledges = ref([]), selectedKnowledgeId = ref(''), selectedKnowledgeIds = ref([]), knowledgeLoading = ref(false), knowledgeError = ref('');
       const documents = ref([]), documentsLoading = ref(false), documentsError = ref(''), documentBusyId = ref('');
       const searchQuery = ref(''), submittedQuery = ref(''), searchResult = shallowRef(null), searchLoading = ref(false), searchError = ref('');
+      const sidebarPane = ref('results'), sidebarHidden = ref(false);
       const activeSource = shallowRef(null), previewOpen = ref(false), previewLoading = ref(false), previewError = ref('');
       const previewUrl = ref(''), previewText = ref(null), previewPage = ref(1), previewPageCount = ref(0), previewZoom = ref(100);
       const downloadLoading = ref(false), searchInput = ref(null), previewTitle = ref(null), readingList = ref(null), previewCanvas = ref(null);
@@ -178,7 +183,7 @@
       function clearToolResults() {resultEpoch++; toolResult.value = null; toolError.value = ''; toolLoading.value = false;}
       function logout(navigateHome = true) {
         identityEpoch++; knowledgeEpoch++; documentEpoch++; sessionEpoch++; stopChat(); stopDocumentPolling(); clearToolResults();
-        searchQuery.value = ''; clearSearch(); downloadLoading.value = false;
+        searchQuery.value = ''; clearSearch(); sidebarPane.value = 'results'; sidebarHidden.value = false; downloadLoading.value = false;
         token.value = ''; storage.set('accessToken',''); currentUser.value = null;
         newKey.value = ''; newInvite.value = ''; keys.value = []; invites.value = []; operations.value = null;
         knowledges.value = []; documents.value = []; selectedKnowledgeId.value = ''; selectedKnowledgeIds.value = []; scopeInitialized = false;
@@ -234,8 +239,13 @@
         resetPreview();
         const loading = loadDocuments();
         if (submittedQuery.value) runSearch(submittedQuery.value);
-        readingList.value?.scrollTo(0, 0);
+        nextTick(() => readingList.value?.scrollTo(0, 0));
         return loading;
+      }
+      function browseKnowledge(id) {
+        sidebarPane.value = 'results';
+        selectKnowledge(id);
+        nextTick(() => searchInput.value?.focus({preventScroll:true}));
       }
       async function loadDocuments() {
         const id = selectedKnowledgeId.value, epoch = identityEpoch, call = ++documentEpoch; stopDocumentPolling();
@@ -267,6 +277,9 @@
         clearSearch();
         readingList.value?.scrollTo(0, 0);
         searchInput.value?.focus();
+      }
+      function guardSearchComposition(event) {
+        if (event.isComposing || event.keyCode === 229) event.preventDefault();
       }
       async function runSearch(query = searchQuery.value.trim()) {
         if (!query) {clearSearch(); return;}
@@ -332,15 +345,22 @@
           loadPreview();
         }
         previewOpen.value = true;
-        if (event.detail === 0 || matchMedia('(max-width: 880px)').matches) {
+        if (event.detail === 0 || compactReader.value) {
           await nextTick();
           previewTitle.value?.focus({preventScroll:true});
         }
       }
-      async function closePreview() {
-        previewOpen.value = false;
+      async function toggleReadingSidebar() {
+        if (!compactReader.value && !sidebarHidden.value) {
+          sidebarHidden.value = true;
+          return;
+        }
+        if (compactReader.value) previewOpen.value = false;
+        sidebarHidden.value = false;
+        sidebarPane.value = 'results';
         await nextTick();
-        readingList.value?.querySelector('[aria-pressed="true"]')?.focus({preventScroll:true});
+        const target = readingList.value?.querySelector('[aria-pressed="true"]') || searchInput.value;
+        target?.focus({preventScroll:true});
       }
       async function downloadSource() {
         const source = activeSource.value, epoch = identityEpoch;
@@ -573,7 +593,7 @@
       watch(page, async () => {
         newKey.value = ''; newInvite.value = ''; stopDocumentPolling(); documentEpoch++; clearToolResults(); sessionEpoch++; stopChat();
         createOpen.value = false; editOpen.value = false; sessionsOpen.value = false; helpTopic.value = ''; qualityReview.value = null;
-        searchQuery.value = ''; clearSearch(); pageReview.value = null;
+        searchQuery.value = ''; clearSearch(); sidebarPane.value = 'results'; sidebarHidden.value = false; pageReview.value = null;
         document.title = pageTitle.value + ' · MeowConnectPlatform'; await loadPageData(); await nextTick();
         document.getElementById('main')?.focus({preventScroll:true});
       });
@@ -587,15 +607,16 @@
         }
         await loadPageData();
       });
-      onBeforeUnmount(() => {identityEpoch++; stopChat(); stopDocumentPolling(); clearSearch(); window.removeEventListener('popstate',onPopState); systemTheme.removeEventListener('change',onSystemTheme);});
+      onBeforeUnmount(() => {identityEpoch++; stopChat(); stopDocumentPolling(); clearSearch(); window.removeEventListener('popstate',onPopState); systemTheme.removeEventListener('change',onSystemTheme); readerMedia.removeEventListener('change',onReaderWidth);});
       return {
         locale:ElementPlusLocaleZhCn,page,mobileNav,currentUser,authChecking,isAuthenticated,isAdmin,displayName,pageTitle,isLibrary,isDark,toggleTheme,go,accountCommand,
         connectionClient,servicePanels,connectionEndpoint,connectionExamples,helpTopic,helpTitle,qualityReview,
         authOpen,authMode,authView,authTitle,authLoading,authError,authForm,authFormRef,authRules,usernameInput,githubLoginButton,resetAuth,openAuth,switchAuth,focusAuth,choosePasswordLogin,showAuthMethods,submitAuth,logout,githubEnabled,githubLoading,startGitHubLogin,
         knowledges,selectedKnowledgeId,selectedKnowledgeIds,selectedKnowledge,knowledgeLoading,knowledgeError,loadKnowledges,selectKnowledge,createOpen,editOpen,knowledgeName,knowledgeDescription,knowledgeEdit,createKnowledge,openKnowledgeEdit,updateKnowledge,deleteKnowledge,
         documents,documentsLoading,documentsError,documentBusyId,loadDocuments,fileInput,replaceInput,isUploading,acceptedExtensions,uploadLimitLabel,uploadDocument,chooseReplacement,replaceDocument,documentAction,statusLabel,documentPending,openTryWithKnowledge,pageReview,pageReviewLoading,viewDocumentPage,
-        searchQuery,submittedQuery,searchResult,searchLoading,searchError,readingRows,searchInput,readingList,runSearch,clearSearchInput,
-        activeSource,activeDocument,previewType,previewOpen,previewLoading,previewError,previewUrl,previewText,previewTextParts,previewTitle,previewCanvas,previewPage,previewPageCount,previewZoom,openPreview,closePreview,loadPreview,downloadSource,downloadLoading,
+        searchQuery,submittedQuery,searchResult,searchLoading,searchError,readingRows,searchInput,readingList,runSearch,clearSearchInput,guardSearchComposition,
+        compactReader,sidebarPane,sidebarHidden,browseKnowledge,toggleReadingSidebar,
+        activeSource,activeDocument,previewType,previewOpen,previewLoading,previewError,previewUrl,previewText,previewTextParts,previewTitle,previewCanvas,previewPage,previewPageCount,previewZoom,openPreview,loadPreview,downloadSource,downloadLoading,
         scopeLabel,scopeNames,toolName,toolQuery,topK,knowledgeSettings,toolLoading,toolResult,toolError,runTool,messages,chatInput,chatLoading,chatLog,isComposing,sendChat,stopChat,handleChatKey,parseMarkdown,traceFacts,traceGroups,newChat,sessions,sessionsOpen,sessionsLoading,sessionsError,loadSessions,loadSession,deleteSession,
         keys,keyName,newKey,keysLoading,keyBusy,keyError,loadKeys,createKey,revokeKey,invites,newInvite,invitesLoading,inviteBusy,inviteError,invitationForm,loadInvites,createInvite,revokeInvite,invitationStatus,formatDate,operations,operationsLoading,operationsError,loadOperations,copyText
       };

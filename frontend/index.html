@@ -76,48 +76,35 @@
               <h1>{{ pageTitle }}</h1>
               <div class="actions"><el-button type="primary" @click="openAuth('login')">登录</el-button><el-button @click="openAuth('register')">邀请注册</el-button></div>
             </section>
-            <div v-else-if="isLibrary" class="reading-workspace" :class="{'is-reading':previewOpen}">
-              <aside class="reading-sidebar" aria-label="知识库">
-                <div class="reading-brand"><mcp-icon name="Reading" :size="23"></mcp-icon>个人知识库</div>
-                <div class="reading-library-head"><span>知识库</span><button type="button" class="reading-icon-button" title="创建知识库" aria-label="创建知识库" @click="createOpen = true"><mcp-icon name="Plus" :size="16"></mcp-icon></button></div>
-                <nav class="reading-collections" aria-label="检索范围">
-                  <button type="button" :aria-pressed="!selectedKnowledgeId" @click="selectKnowledge('')"><mcp-icon name="Files" :size="18"></mcp-icon><span>全部文档</span></button>
-                  <button v-for="kb in knowledges" :key="kb.id" type="button" :aria-pressed="selectedKnowledgeId === kb.id" :title="kb.name" @click="selectKnowledge(kb.id)"><mcp-icon name="Folder" :size="18"></mcp-icon><span>{{ kb.name }}</span></button>
-                </nav>
-                <div class="reading-sidebar-footer">
-                  <a href="/try" @click.prevent="go('/try')"><mcp-icon name="ChatDotRound" :size="17"></mcp-icon>问资料</a>
-                  <el-dropdown trigger="click" placement="top-start" @command="accountCommand">
-                    <button class="reading-account" type="button"><mcp-icon name="User" :size="17"></mcp-icon><span>{{ displayName }}</span><mcp-icon name="ArrowDown" :size="12"></mcp-icon></button>
-                    <template #dropdown><el-dropdown-menu><el-dropdown-item command="account">个人管理</el-dropdown-item><el-dropdown-item command="theme">{{ isDark ? '切换日间模式' : '切换夜间模式' }}</el-dropdown-item><el-dropdown-item v-if="isAdmin" command="admin">管理页面</el-dropdown-item><el-dropdown-item command="logout" divided>退出登录</el-dropdown-item></el-dropdown-menu></template>
-                  </el-dropdown>
-                </div>
-              </aside>
-
-              <section class="reading-index" aria-labelledby="search-title">
+            <div v-else-if="isLibrary" class="reading-workspace" :class="{'is-reading':previewOpen, 'sidebar-hidden':sidebarHidden}">
+              <header class="reading-brand"><mcp-icon name="Reading" :size="26"></mcp-icon><h1>个人知识库</h1></header>
+              <aside id="reading-sidebar" class="reading-sidebar" aria-label="知识库与检索结果">
                 <div class="reading-index-head">
-                  <div class="reading-index-heading">
-                    <h1 id="search-title">文档检索</h1>
-                    <button type="button" class="reading-icon-button reading-mobile" title="打开导航" aria-label="打开导航" @click="mobileNav = true"><mcp-icon name="Operation" :size="20"></mcp-icon></button>
+                  <div class="reading-tabs" role="group" aria-label="侧栏视图">
+                    <button type="button" aria-controls="reading-collections" :aria-pressed="sidebarPane === 'collections'" @click="sidebarPane = 'collections'">知识库</button>
+                    <button type="button" aria-controls="reading-results" :aria-pressed="sidebarPane === 'results'" @click="sidebarPane = 'results'">结果</button>
                   </div>
-                  <form class="reading-search" role="search" @submit.prevent="runSearch()">
-                    <input id="document-search" ref="searchInput" v-model="searchQuery" type="search" maxlength="500" placeholder="搜索文档内容" aria-label="搜索文档内容" autocomplete="off">
-                    <button type="submit" class="reading-icon-button search-submit" title="搜索" aria-label="搜索"><mcp-icon name="Search" :size="19"></mcp-icon></button>
-                    <button v-if="searchQuery || submittedQuery" type="button" class="reading-icon-button search-clear" title="清除搜索" aria-label="清除搜索" @click="clearSearchInput"><mcp-icon name="CircleClose" :size="17"></mcp-icon></button>
+                  <form v-show="sidebarPane === 'results'" class="reading-search" role="search" @submit.prevent="runSearch()">
+                    <div class="reading-search-field">
+                      <mcp-icon name="Search" :size="18"></mcp-icon>
+                      <input id="document-search" ref="searchInput" v-model="searchQuery" type="search" maxlength="500" placeholder="搜索文档内容" aria-label="搜索文档内容" autocomplete="off" @keydown.enter="guardSearchComposition">
+                      <button v-if="searchQuery || submittedQuery" type="button" class="reading-icon-button search-clear" title="清除搜索" aria-label="清除搜索" @click="clearSearchInput"><mcp-icon name="Close" :size="16"></mcp-icon></button>
+                    </div>
+                    <button type="submit" class="reading-submit">搜索</button>
                   </form>
-                  <div class="reading-scope reading-mobile">
-                    <select :value="selectedKnowledgeId" aria-label="检索范围" @change="selectKnowledge($event.target.value)">
-                      <option value="">全部文档</option>
-                      <option v-for="kb in knowledges" :key="kb.id" :value="kb.id">{{ kb.name }}</option>
-                    </select>
-                    <button type="button" class="reading-icon-button" title="创建知识库" aria-label="创建知识库" @click="createOpen = true"><mcp-icon name="Plus" :size="17"></mcp-icon></button>
-                  </div>
-                </div>
-                <div class="reading-list-toolbar">
-                  <span role="status">{{ searchLoading ? '正在检索…' : submittedQuery ? readingRows.length + ' 条结果' : documentsLoading && !readingRows.length ? '正在加载…' : readingRows.length + ' 个文档' }}</span>
-                  <div v-if="selectedKnowledge" class="reading-toolbar-actions">
-                    <button type="button" class="reading-icon-button" title="上传文件" aria-label="上传文件" :disabled="isUploading" @click="fileInput?.click()"><mcp-icon :name="isUploading ? 'Loading' : 'Upload'" :class="{'processing-icon':isUploading}" :size="18"></mcp-icon></button>
-                    <el-dropdown trigger="click">
-                      <button type="button" class="reading-icon-button" title="知识库操作" aria-label="知识库操作"><mcp-icon name="MoreFilled" :size="18"></mcp-icon></button>
+                  <div class="reading-scope">
+                    <label v-if="sidebarPane === 'results'" class="reading-range">
+                      <span>{{ selectedKnowledge?.name || '全部文档' }}</span><mcp-icon name="ArrowDown" :size="12"></mcp-icon>
+                      <select :value="selectedKnowledgeId" aria-label="检索范围" @change="selectKnowledge($event.target.value)">
+                        <option value="">全部文档</option>
+                        <option v-for="kb in knowledges" :key="kb.id" :value="kb.id">{{ kb.name }}</option>
+                      </select>
+                    </label>
+                    <span v-else class="reading-library-label">知识库</span>
+                    <button type="button" class="reading-icon-button" title="创建知识库" aria-label="创建知识库" @click="createOpen = true"><mcp-icon name="Plus" :size="19"></mcp-icon></button>
+                    <button v-if="selectedKnowledge" type="button" class="reading-upload" title="上传文件" aria-label="上传文件" :disabled="isUploading" @click="fileInput?.click()"><mcp-icon :name="isUploading ? 'Loading' : 'Upload'" :class="{'processing-icon':isUploading}" :size="17"></mcp-icon>上传</button>
+                    <el-dropdown v-if="sidebarPane === 'collections' && selectedKnowledge" trigger="click">
+                      <button type="button" class="reading-icon-button" title="知识库操作" aria-label="知识库操作"><mcp-icon name="MoreFilled" :size="16"></mcp-icon></button>
                       <template #dropdown><el-dropdown-menu>
                         <el-dropdown-item @click="openKnowledgeEdit">编辑知识库</el-dropdown-item>
                         <el-dropdown-item @click="openTryWithKnowledge(selectedKnowledgeId)">向这个知识库提问</el-dropdown-item>
@@ -129,13 +116,18 @@
                 </div>
                 <input ref="fileInput" class="native-file-input" type="file" :accept="acceptedExtensions" @change="uploadDocument" aria-label="上传文件">
                 <input ref="replaceInput" class="native-file-input" type="file" :accept="acceptedExtensions" @change="replaceDocument" aria-label="替换文件">
-                <div ref="readingList" class="reading-items" :aria-busy="searchLoading || (documentsLoading && !submittedQuery && !readingRows.length)">
-                  <div v-if="knowledgeError" class="reading-feedback" role="alert"><p>{{ knowledgeError }}</p><el-button link type="primary" @click="loadKnowledges">重试</el-button></div>
-                  <div v-if="submittedQuery ? searchError : documentsError" class="reading-feedback" role="alert"><p>{{ submittedQuery ? searchError : documentsError }}</p><el-button link type="primary" @click="submittedQuery ? runSearch(submittedQuery) : loadDocuments()">重试</el-button></div>
-                  <div v-else-if="readingRows.length" class="reading-row-list">
-                    <div v-for="row in readingRows" :key="row.key" class="reading-row-slot">
-                      <button type="button" class="reading-row" :aria-pressed="activeSource?.key === row.key" @click="openPreview(row, $event)">
-                        <mcp-icon name="Document" class="reading-file-icon" :size="21"></mcp-icon>
+                <div v-if="knowledgeError" class="reading-feedback" role="alert"><p>{{ knowledgeError }}</p><el-button link type="primary" @click="loadKnowledges">重试</el-button></div>
+                <nav v-show="sidebarPane === 'collections'" id="reading-collections" class="reading-collections" aria-label="知识库">
+                  <button type="button" :aria-pressed="!selectedKnowledgeId" @click="browseKnowledge('')"><mcp-icon name="Files" :size="18"></mcp-icon><span>全部文档</span></button>
+                  <button v-for="kb in knowledges" :key="kb.id" type="button" :aria-pressed="selectedKnowledgeId === kb.id" :title="kb.name" @click="browseKnowledge(kb.id)"><mcp-icon name="Folder" :size="18"></mcp-icon><span>{{ kb.name }}</span></button>
+                </nav>
+                <div v-show="sidebarPane === 'results'" id="reading-results" class="reading-results">
+                  <div class="reading-list-toolbar" role="status">{{ searchLoading ? '正在检索…' : submittedQuery ? readingRows.length + ' 条结果' : (knowledgeLoading || documentsLoading) && !readingRows.length ? '正在加载…' : readingRows.length + ' 个文档' }}</div>
+                  <div ref="readingList" class="reading-items" :aria-busy="searchLoading || (documentsLoading && !submittedQuery && !readingRows.length)">
+                    <div v-if="submittedQuery ? searchError : documentsError" class="reading-feedback" role="alert"><p>{{ submittedQuery ? searchError : documentsError }}</p><el-button link type="primary" @click="submittedQuery ? runSearch(submittedQuery) : loadDocuments()">重试</el-button></div>
+                    <div v-else-if="readingRows.length" class="reading-row-list">
+                      <button v-for="row in readingRows" :key="row.key" type="button" class="reading-row" :aria-pressed="activeSource?.key === row.key" @click="openPreview(row, $event)">
+                        <mcp-icon name="Document" class="reading-file-icon" :class="{'is-pdf':row.filename.toLowerCase().endsWith('.pdf')}" :size="22"></mcp-icon>
                         <span class="reading-row-copy">
                           <strong :title="row.filename">{{ row.filename }}</strong>
                           <span class="reading-row-meta">{{ row.knowledgeName }}<template v-if="row.pageNumber != null && row.filename.toLowerCase().endsWith('.pdf')"> · 第 {{ row.pageNumber + 1 }} 页</template><template v-if="row.doc && row.doc.status !== 'ready'"> · <span :class="'status-' + row.doc.status">{{ statusLabel(row.doc.status) }}</span></template></span>
@@ -143,28 +135,34 @@
                         </span>
                       </button>
                     </div>
-                  </div>
-                  <div v-else-if="!searchLoading && !documentsLoading && !knowledgeLoading && !knowledgeError" class="reading-list-empty">
-                    <p>{{ submittedQuery ? (searchResult?.status === 'no_documents' ? '当前范围没有可检索文档' : '没有匹配的文档片段') : '还没有文档' }}</p>
-                    <el-button v-if="!submittedQuery && !knowledges.length" link type="primary" @click="createOpen = true">创建知识库</el-button>
-                    <el-button v-else-if="!submittedQuery && selectedKnowledge" link type="primary" @click="fileInput?.click()">上传文件</el-button>
+                    <div v-else-if="!searchLoading && !documentsLoading && !knowledgeLoading && !knowledgeError" class="reading-list-empty">
+                      <p>{{ submittedQuery ? (searchResult?.status === 'no_documents' ? '当前范围没有可检索文档' : '没有匹配的文档片段') : '还没有文档' }}</p>
+                      <el-button v-if="!submittedQuery && !knowledges.length" link type="primary" @click="createOpen = true">创建知识库</el-button>
+                      <el-button v-else-if="!submittedQuery && selectedKnowledge" link type="primary" @click="fileInput?.click()">上传文件</el-button>
+                    </div>
                   </div>
                 </div>
-              </section>
+                <footer class="reading-sidebar-footer">
+                  <a href="/try" @click.prevent="go('/try')"><mcp-icon name="ChatDotRound" :size="19"></mcp-icon>问资料</a>
+                  <el-dropdown trigger="click" placement="top-end" @command="accountCommand">
+                    <button class="reading-account" type="button" :title="displayName"><mcp-icon name="User" :size="19"></mcp-icon>个人管理</button>
+                    <template #dropdown><el-dropdown-menu><el-dropdown-item command="account">个人管理</el-dropdown-item><el-dropdown-item command="theme">{{ isDark ? '切换日间模式' : '切换夜间模式' }}</el-dropdown-item><el-dropdown-item v-if="isAdmin" command="admin">管理页面</el-dropdown-item><el-dropdown-item command="logout" divided>退出登录</el-dropdown-item></el-dropdown-menu></template>
+                  </el-dropdown>
+                </footer>
+              </aside>
 
               <section class="reading-preview" aria-label="原文预览">
                 <header class="reading-preview-bar">
-                  <button type="button" class="reading-icon-button reading-mobile" title="返回列表" aria-label="返回列表" @click="closePreview"><mcp-icon name="ArrowLeft" :size="20"></mcp-icon></button>
-                  <mcp-icon name="Document" class="reading-preview-icon" :size="20"></mcp-icon>
+                  <button type="button" class="reading-sidebar-toggle" aria-controls="reading-sidebar" :aria-expanded="!sidebarHidden && !compactReader" :title="compactReader ? '返回列表' : sidebarHidden ? '展开侧栏' : '收起侧栏'" @click="toggleReadingSidebar"><mcp-icon :name="compactReader ? 'ArrowLeft' : 'Fold'" :size="20"></mcp-icon>结果</button>
                   <h2 ref="previewTitle" class="reading-preview-title" tabindex="-1" :title="activeSource?.filename">{{ activeSource?.filename || '原文预览' }}</h2>
                   <div v-if="activeSource" class="reading-preview-controls">
                     <div v-if="previewType === 'pdf' && previewPageCount" class="reading-page-controls">
-                      <button type="button" class="reading-icon-button" aria-label="上一页" title="上一页" :disabled="previewPage <= 1" @click="loadPreview(previewPage - 1)"><mcp-icon name="ArrowLeft" :size="15"></mcp-icon></button>
+                      <button type="button" class="reading-icon-button" aria-label="上一页" title="上一页" :disabled="previewPage <= 1" @click="loadPreview(previewPage - 1)"><mcp-icon name="ArrowLeft" :size="16"></mcp-icon></button>
                       <span aria-live="polite">{{ previewPage }} / {{ previewPageCount }}</span>
-                      <button type="button" class="reading-icon-button" aria-label="下一页" title="下一页" :disabled="previewPage >= previewPageCount" @click="loadPreview(previewPage + 1)"><mcp-icon name="ArrowRight" :size="15"></mcp-icon></button>
+                      <button type="button" class="reading-icon-button" aria-label="下一页" title="下一页" :disabled="previewPage >= previewPageCount" @click="loadPreview(previewPage + 1)"><mcp-icon name="ArrowRight" :size="16"></mcp-icon></button>
                       <select v-model.number="previewZoom" aria-label="预览缩放" title="预览缩放"><option :value="75">75%</option><option :value="100">100%</option><option :value="125">125%</option><option :value="150">150%</option><option :value="200">200%</option></select>
                     </div>
-                    <button type="button" class="reading-icon-button" title="下载原文件" aria-label="下载原文件" :disabled="downloadLoading" @click="downloadSource"><mcp-icon :name="downloadLoading ? 'Loading' : 'Download'" :class="{'processing-icon':downloadLoading}" :size="19"></mcp-icon></button>
+                    <button type="button" class="reading-download" title="下载原文件" aria-label="下载原文件" :disabled="downloadLoading" @click="downloadSource"><mcp-icon :name="downloadLoading ? 'Loading' : 'Download'" :class="{'processing-icon':downloadLoading}" :size="19"></mcp-icon><span>下载</span></button>
                     <el-dropdown v-if="activeDocument || activeSource.processingReport?.incomplete_pages?.length || activeSource.processingReport?.warnings?.length" trigger="click">
                       <button type="button" class="reading-icon-button" title="文档操作" aria-label="文档操作"><mcp-icon name="MoreFilled" :size="18"></mcp-icon></button>
                       <template #dropdown><el-dropdown-menu>
@@ -182,7 +180,7 @@
                   <div v-if="!activeSource" class="reading-preview-empty"><mcp-icon name="Document" :size="31"></mcp-icon><p>选择文档查看原文</p></div>
                   <div v-else-if="previewLoading" class="reading-preview-empty" role="status"><mcp-icon name="Loading" class="processing-icon" :size="24"></mcp-icon><p>正在加载原文…</p></div>
                   <div v-else-if="previewError" class="reading-preview-empty" role="alert"><p>{{ previewError }}</p><el-button link type="primary" @click="loadPreview()">重试</el-button></div>
-                  <img v-else-if="previewUrl" :src="previewUrl" :alt="activeSource.filename + ' · 第 ' + previewPage + ' 页'" class="reading-page-image" :style="{width:'calc(min(100%, 700px) * ' + previewZoom / 100 + ')'}">
+                  <img v-else-if="previewUrl" :src="previewUrl" :alt="activeSource.filename + ' · 第 ' + previewPage + ' 页'" class="reading-page-image" :style="{'--reading-zoom':previewZoom / 100}">
                   <pre v-else-if="previewText !== null" class="reading-text-page" tabindex="0"><template v-for="(part, index) in previewTextParts" :key="index"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></pre>
                   <div v-else class="reading-preview-empty"><mcp-icon name="Document" :size="31"></mcp-icon><p>此文件格式可下载后打开</p><el-button link type="primary" :loading="downloadLoading" @click="downloadSource">下载原文件</el-button></div>
                 </div>
