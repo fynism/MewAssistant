@@ -21,6 +21,24 @@
     const end = start + Math.max(115, Math.min(query.length + 40, 224));
     return highlightParts((start ? '…' : '') + compact.slice(start, end) + (end < compact.length ? '…' : ''), query);
   }
+  function collectChatSources(chunks = []) {
+    const sources = new Map();
+    for (const [index, chunk] of chunks.entries()) {
+      if (!chunk || (!chunk.filename && !chunk.document_id && !chunk.text)) continue;
+      const {knowledge_id:knowledgeId, document_id:documentId, page_number:rawPage} = chunk;
+      const numericPage = rawPage == null || rawPage === '' ? NaN : Number(rawPage);
+      const pageNumber = Number.isSafeInteger(numericPage) && numericPage >= 0 && numericPage < Number.MAX_SAFE_INTEGER
+        ? numericPage + 1 : null;
+      const key = knowledgeId && documentId ? JSON.stringify([knowledgeId,documentId,pageNumber]) : index;
+      let source = sources.get(key);
+      if (!source) {
+        source = {key,knowledgeId,documentId,pageNumber,filename:chunk.filename || '未命名文档',passages:[]};
+        sources.set(key,source);
+      }
+      if (chunk.text && !source.passages.includes(chunk.text)) source.passages.push(chunk.text);
+    }
+    return [...sources.values()];
+  }
   function tokenizeConfig(source, language) {
     const pattern = /#[^\n]*|"(?:\\.|[^"\\])*"|\[[^\]\n]+\]|\b[A-Za-z_][\w.-]*\b|[{}\[\]:=,]/g;
     const tokens = []; let cursor = 0;
@@ -95,6 +113,12 @@
       let documentTimer = null, scopeInitialized = false;
       const toolName = ref('retrieve'), toolQuery = ref(''), topK = ref(5), toolLoading = ref(false), toolResult = ref(null), toolError = ref('');
       const messages = ref([]), chatInput = ref(''), chatLoading = ref(false), chatLog = ref(null), isComposing = ref(false);
+      const chatSourcesOpen = ref(false), chatSourceView = shallowRef(null), chatSourcesHeading = ref(null);
+      let chatSourceTrigger = null;
+      const chatSourcesByMessage = computed(() => new Map(messages.value
+        .map(message => [message.id,collectChatSources(message.trace?.retrieved_chunks || [])])));
+      const chatSources = computed(() => chatSourcesByMessage.value.get(chatSourceView.value?.messageId) || []);
+      const chatSource = computed(() => chatSources.value.find(source => source.key === chatSourceView.value?.sourceKey) || chatSources.value[0]);
       const sessions = ref([]), sessionsOpen = ref(false), sessionsLoading = ref(false), sessionsError = ref('');
       let sessionId = newSessionId(), streamController = null;
       const keys = ref([]), keyName = ref(''), newKey = ref(''), keysLoading = ref(false), keyBusy = ref(false), keyError = ref('');
@@ -189,6 +213,7 @@
         newKey.value = ''; newInvite.value = ''; keys.value = []; invites.value = []; operations.value = null;
         knowledges.value = []; documents.value = []; selectedKnowledgeId.value = ''; selectedKnowledgeIds.value = []; scopeInitialized = false;
         messages.value = []; sessions.value = []; sessionId = newSessionId(); authChecking.value = false;
+        chatInput.value = ''; resetChatSources();
         knowledgeLoading.value = false; documentsLoading.value = false; keysLoading.value = false; invitesLoading.value = false; sessionsLoading.value = false; operationsLoading.value = false;
         keyBusy.value = false; inviteBusy.value = false; isUploading.value = false; documentBusyId.value = '';
         createOpen.value = false; editOpen.value = false; sessionsOpen.value = false;
@@ -487,6 +512,25 @@
           {label:'重写后检索',items:trace.expanded_retrieved_chunks}
         ].filter(group => group.items?.length);
       }
+      async function toggleChatSources(messageId, event) {
+        if (chatSourcesOpen.value && chatSourceView.value?.messageId === messageId) return closeChatSources();
+        if (chatSourceView.value?.messageId !== messageId) chatSourceView.value = {messageId,sourceKey:null};
+        chatSourceTrigger = event?.currentTarget || null;
+        chatSourcesOpen.value = true;
+        await nextTick();
+        chatSourcesHeading.value?.focus({preventScroll:true});
+      }
+      function selectChatSource(source) {
+        chatSourceView.value = {...chatSourceView.value,sourceKey:source.key};
+      }
+      async function closeChatSources() {
+        chatSourcesOpen.value = false;
+        await nextTick();
+        chatSourceTrigger?.focus({preventScroll:true});
+      }
+      function resetChatSources() {
+        chatSourcesOpen.value = false; chatSourceView.value = null; chatSourceTrigger = null;
+      }
       async function scrollChat() {await nextTick(); if (chatLog.value) chatLog.value.scrollTop = chatLog.value.scrollHeight;}
       async function sendChat() {
         const text = chatInput.value.trim(); if (!text || chatLoading.value || isComposing.value || !isAuthenticated.value) return;
@@ -519,7 +563,7 @@
         finally {reader?.releaseLock(); bot.thinking = false; if (streamController === controller) {chatLoading.value = false; streamController = null;} scrollChat();}
       }
       function handleChatKey(event) {if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && !isComposing.value) {event.preventDefault(); sendChat();}}
-      function newChat() {stopChat(); sessionEpoch++; messages.value = []; sessionId = newSessionId(); sessionsOpen.value = false;}
+      function newChat() {stopChat(); sessionEpoch++; resetChatSources(); messages.value = []; sessionId = newSessionId(); sessionsOpen.value = false;}
       async function loadSessions() {
         sessionsOpen.value = true; sessionsLoading.value = true; sessionsError.value = ''; const epoch = identityEpoch;
         try {const data = await jsonRequest('/sessions'); if (epoch === identityEpoch) sessions.value = data.sessions || [];}
@@ -528,7 +572,15 @@
       }
       async function loadSession(item) {
         stopChat(); const epoch = identityEpoch, call = ++sessionEpoch; sessionsLoading.value = true;
-        try {const data = await jsonRequest(`/sessions/${encodeURIComponent(item.session_id)}`); if (epoch !== identityEpoch || call !== sessionEpoch || page.value !== '/try') return; sessionId = item.session_id; messages.value = data.messages.map(msg => ({id:crypto.randomUUID(),author:msg.type === 'human' ? 'user' : 'agent',text:msg.content,trace:msg.rag_trace,knowledgeIds:msg.knowledge_ids})); if (Array.isArray(data.last_knowledge_ids)) selectedKnowledgeIds.value = data.last_knowledge_ids.filter(id => knowledges.value.some(kb => kb.id === id)).slice(0,20); sessionsOpen.value = false; scrollChat();}
+        try {
+          const data = await jsonRequest(`/sessions/${encodeURIComponent(item.session_id)}`);
+          if (epoch !== identityEpoch || call !== sessionEpoch || page.value !== '/try') return;
+          resetChatSources(); sessionId = item.session_id;
+          messages.value = data.messages.map(msg => ({id:crypto.randomUUID(),author:msg.type === 'human' ? 'user' : 'agent',text:msg.content,trace:msg.rag_trace,knowledgeIds:msg.knowledge_ids}));
+          if (Array.isArray(data.last_knowledge_ids)) selectedKnowledgeIds.value = data.last_knowledge_ids.filter(id => knowledges.value.some(kb => kb.id === id)).slice(0,20);
+          else if (data.legacy_scope_unknown) selectedKnowledgeIds.value = [];
+          sessionsOpen.value = false; scrollChat();
+        }
         catch (error) {if (epoch === identityEpoch && call === sessionEpoch && error.name !== 'AbortError') sessionsError.value = error.message;}
         finally {if (epoch === identityEpoch && call === sessionEpoch) sessionsLoading.value = false;}
       }
@@ -593,6 +645,7 @@
       watch(toolName, clearToolResults);
       watch(page, async () => {
         newKey.value = ''; newInvite.value = ''; stopDocumentPolling(); documentEpoch++; clearToolResults(); sessionEpoch++; stopChat();
+        resetChatSources();
         createOpen.value = false; editOpen.value = false; sessionsOpen.value = false; helpTopic.value = ''; qualityReview.value = null;
         searchQuery.value = ''; clearSearch(); sidebarPane.value = 'results'; sidebarHidden.value = false; pageReview.value = null;
         document.title = pageTitle.value + ' · MeowConnectPlatform'; await loadPageData(); await nextTick();
@@ -608,7 +661,7 @@
         }
         await loadPageData();
       });
-      onBeforeUnmount(() => {identityEpoch++; stopChat(); stopDocumentPolling(); clearSearch(); window.removeEventListener('popstate',onPopState); systemTheme.removeEventListener('change',onSystemTheme); readerMedia.removeEventListener('change',onReaderWidth);});
+      onBeforeUnmount(() => {identityEpoch++; stopChat(); stopDocumentPolling(); clearSearch(); resetChatSources(); window.removeEventListener('popstate',onPopState); systemTheme.removeEventListener('change',onSystemTheme); readerMedia.removeEventListener('change',onReaderWidth);});
       return {
         locale:ElementPlusLocaleZhCn,page,mobileNav,currentUser,authChecking,isAuthenticated,isAdmin,displayName,pageTitle,isLibrary,isDark,toggleTheme,go,accountCommand,
         connectionClient,servicePanels,connectionEndpoint,connectionExamples,helpTopic,helpTitle,qualityReview,
@@ -619,6 +672,7 @@
         compactReader,sidebarPane,sidebarHidden,browseKnowledge,toggleReadingSidebar,
         activeSource,activeDocument,previewType,previewOpen,previewLoading,previewError,previewUrl,previewText,previewTextParts,previewTitle,previewCanvas,previewPage,previewPageCount,previewZoom,openPreview,loadPreview,downloadSource,downloadLoading,
         scopeLabel,scopeNames,toolName,toolQuery,topK,knowledgeSettings,toolLoading,toolResult,toolError,runTool,messages,chatInput,chatLoading,chatLog,isComposing,sendChat,stopChat,handleChatKey,parseMarkdown,traceFacts,traceGroups,newChat,sessions,sessionsOpen,sessionsLoading,sessionsError,loadSessions,loadSession,deleteSession,
+        chatSourcesOpen,chatSourceView,chatSourcesHeading,chatSourcesByMessage,chatSources,chatSource,toggleChatSources,selectChatSource,closeChatSources,
         keys,keyName,newKey,keysLoading,keyBusy,keyError,loadKeys,createKey,revokeKey,invites,newInvite,invitesLoading,inviteBusy,inviteError,invitationForm,loadInvites,createInvite,revokeInvite,invitationStatus,formatDate,operations,operationsLoading,operationsError,loadOperations,copyText
       };
     }
