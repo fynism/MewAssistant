@@ -14,7 +14,7 @@
   --mcp-code-string: #426B4E;
   --mcp-code-section: #58427E;
   --mcp-font-code: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
-  --mcp-font: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+  --mcp-font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro', 'PingFang SC', 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
   --el-color-primary: var(--mcp-accent);
   --el-color-primary-light-3: #397DCD;
   --el-color-primary-light-5: #79A9E3;
