@@ -220,7 +220,7 @@
                               <section v-for="group in traceGroups(message.trace)" :key="group.label" class="trace-group">
                                 <h3>{{ group.label }}</h3>
                                 <div v-for="(source,i) in group.items" :key="source.chunk_id || i" class="source">
-                                  <h3>{{ source.filename }}<span v-if="source.page_number != null && Number.isInteger(Number(source.page_number)) && Number(source.page_number) >= 0" class="small muted"> · 第 {{ Number(source.page_number) + 1 }} 页</span></h3>
+                                  <h3>{{ source.filename }}<span v-if="chatPageNumber(source.page_number)" class="small muted"> · 第 {{ chatPageNumber(source.page_number) }} 页</span></h3>
                                   <el-button v-if="(source.processingReport || source.processing_report)?.incomplete_pages?.length || (source.processingReport || source.processing_report)?.warnings?.length" link type="warning" @click="qualityReview = {report: source.processingReport || source.processing_report}"><mcp-icon name="Warning" :size="14"></mcp-icon>质量提示</el-button>
                                   <p>{{ source.text }}</p>
                                   <p class="small muted"><span v-if="source.knowledge_id">{{ scopeNames([source.knowledge_id]) }} · </span><span v-if="source.rrf_rank">召回 #{{ source.rrf_rank }} · </span><span v-if="source.rerank_score != null">重排 {{ Number(source.rerank_score).toFixed(4) }} · </span>{{ source.document_id }}</p>
@@ -255,10 +255,26 @@
                     </span>
                   </button>
                 </div>
-                <div v-if="chatSource" class="chat-source-preview">
-                  <div v-if="chatSource.passages.length" class="chat-source-passages"><p v-for="passage in chatSource.passages" :key="passage">{{ passage }}</p></div>
-                  <p v-else class="chat-source-status">此来源没有可显示的片段</p>
-                </div>
+                <template v-if="chatSource">
+                  <div v-if="hasChatOriginal" class="chat-source-controls">
+                    <div v-if="hasChatPdfPage" class="chat-source-pagination">
+                      <button type="button" class="reading-icon-button" aria-label="上一页" :disabled="chatPreviewLoading || chatPreviewPage <= 1" @click="loadChatPreview(chatPreviewPage - 1)"><mcp-icon name="ArrowLeft" :size="16"></mcp-icon></button>
+                      <span aria-live="polite">第 {{ chatPreviewPage }} 页</span>
+                      <button type="button" class="reading-icon-button" aria-label="下一页" :disabled="chatPreviewLoading || chatPreviewPage >= chatPreviewPageCount" @click="loadChatPreview(chatPreviewPage + 1)"><mcp-icon name="ArrowRight" :size="16"></mcp-icon></button>
+                    </div>
+                    <el-button link type="primary" class="chat-source-original" :loading="chatOriginalLoading" @click="downloadChatOriginal"><mcp-icon name="Download" :size="17"></mcp-icon>下载原文</el-button>
+                  </div>
+                  <div ref="chatSourcePreview" class="chat-source-preview" :aria-busy="chatPreviewLoading">
+                    <div v-if="chatPreviewLoading" class="chat-source-status" role="status"><mcp-icon name="Loading" class="processing-icon" :size="16"></mcp-icon>正在加载原文…</div>
+                    <div v-else-if="chatPreviewError" class="chat-source-status" role="alert"><p>{{ chatPreviewError }}</p><el-button link type="primary" @click="loadChatPreview()">重试</el-button></div>
+                    <img v-else-if="chatPreviewUrl" class="chat-source-page" :src="chatPreviewUrl" :alt="chatSource.filename + ' · 第 ' + chatPreviewPage + ' 页'" @load="restoreChatPreviewScroll">
+                    <component :is="chatPreviewUrl ? 'details' : 'div'" v-if="chatSource.passages.length" class="chat-source-passages">
+                      <summary v-if="chatPreviewUrl">检索片段</summary>
+                      <p v-for="passage in chatSource.passages" :key="passage">{{ passage }}</p>
+                    </component>
+                    <p v-else-if="!chatPreviewUrl && !chatPreviewLoading && !chatPreviewError" class="chat-source-status">此来源没有可显示的片段</p>
+                  </div>
+                </template>
               </aside>
             </div>
             <template v-else-if="page === '/account'">
@@ -270,7 +286,7 @@
               <section class="panel" v-loading="operationsLoading"><h2>近 {{ operations?.windowHours || 24 }} 小时运行概况</h2><el-alert v-if="operationsError" :title="operationsError" type="error" :closable="false" class="feedback"></el-alert><template v-if="operations"><dl class="info-list"><div><dt>工具调用</dt><dd>{{ operations.calls }}</dd></div><div><dt>异常调用</dt><dd>{{ operations.errors }}</dd></div><div><dt>平均耗时</dt><dd>{{ operations.averageDurationMs }} ms</dd></div><div><dt>等待处理</dt><dd>{{ operations.documents.pending }}</dd></div><div><dt>处理中</dt><dd>{{ operations.documents.processing }}</dd></div><div><dt>处理失败</dt><dd>{{ operations.documents.failed }}</dd></div></dl><el-collapse><el-collapse-item title="调用与失败详情" name="operations"><p v-for="item in operations.byOperation" :key="item.name">{{ item.name }}：{{ item.count }} 次</p><div v-for="item in operations.recentFailures" :key="item.requestId" class="source"><h3>{{ item.operation }} · {{ item.category }}</h3><p>{{ formatDate(item.createdAt) }}</p><code>{{ item.requestId }}</code></div><div v-for="item in operations.failedDocuments" :key="item.id" class="source"><h3>文件处理失败</h3><code>{{ item.id }}</code><p class="small">知识库 {{ item.knowledgeId }} · {{ formatDate(item.updatedAt) }}</p></div></el-collapse-item></el-collapse></template></section></div>
             </template>
           </main>
-        <footer v-if="!isLibrary" class="site-footer"><span>MeowConnectPlatform</span></footer>
+        <footer v-if="!isLibrary && !(isAuthenticated && page === '/try')" class="site-footer"><span>MeowConnectPlatform</span></footer>
       </div>
       <el-drawer v-model="mobileNav" title="导航" direction="rtl" size="min(320px, 90vw)">
         <nav class="mobile-nav" aria-label="移动导航">

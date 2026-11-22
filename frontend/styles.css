@@ -602,8 +602,44 @@ html.dark :is(.reading-workspace, .ask-workspace) {
 .chat-source-label { display: grid; min-width: 0; gap: 2px; font-size: 17px; line-height: 1.4; }
 .chat-source-label > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-source-meta { color: var(--reading-muted); font-size: 14px; }
-.chat-source-preview { min-height: 0; flex: 1; overflow: auto; }
+.chat-source-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  min-height: 53px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--reading-line);
+  background: var(--reading-toolbar);
+}
+.chat-source-pagination { display: flex; align-items: center; gap: 6px; }
+.chat-source-pagination span {
+  min-width: 90px;
+  padding: 3px 10px;
+  border: 1px solid var(--reading-line);
+  border-radius: 9px;
+  background: var(--reading-header);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.chat-source-original { margin-inline-start: auto; }
+.chat-source-preview {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  scrollbar-color: var(--reading-scroll-thumb) transparent;
+  scrollbar-width: thin;
+}
+.chat-source-page {
+  display: block;
+  width: calc(100% - clamp(28px, 5.6vw, 80px));
+  margin: 16px auto;
+  border-radius: 2px;
+  background: #fff;
+}
 .chat-source-passages { margin: 16px clamp(14px, 2.8vw, 40px); padding: 22px; background: var(--mcp-surface); border-radius: 2px; overflow-wrap: anywhere; }
+.chat-source-passages summary { cursor: pointer; }
+.chat-source-passages summary + p { margin-top: 12px; }
 .chat-source-passages p { white-space: pre-wrap; }
 .chat-source-passages p + p { margin-top: 12px; }
 .chat-source-status { padding: 22px; color: var(--reading-muted); text-align: center; overflow-wrap: anywhere; }

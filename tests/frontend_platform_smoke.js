@@ -37,6 +37,7 @@ responder = async (url,options={}) => {
     text:'这是匹配词之前的一段长文本，用来验证侧栏的命中标记可见。接下来是测试检索相关内容。'
   }]});
   if(url.endsWith('/documents') && options.method !== 'POST') return json({documents:[{id:'doc',knowledge_id:knowledgeId,filename:'same.pdf',status:'ready'}]});
+  if(url.includes('/preview/')) return {ok:true,headers:new Headers({'X-PDF-Page-Count':'12'}),blob:async()=>new Blob(['fixture page'])};
   if(url.includes('/documents')) return json({id:'doc',status:'pending'});
   if(url === '/tools/debug/retrieve') return json({status:'no_match',results:[]});
   if(url === '/tools/debug/listKnowledges') return json({items:[],nextCursor:null});
@@ -48,7 +49,12 @@ responder = async (url,options={}) => {
   if(url === '/sessions') return json({sessions:[{session_id:'existing',title:'Earlier'}]});
   if(url.startsWith('/sessions/')) return json(options.method === 'DELETE' ? {deleted:true} : {messages:[{type:'human',content:'Earlier question',knowledge_ids:[knowledgeId]}],last_knowledge_ids:[knowledgeId]});
   if(url === '/chat/stream') {
-    const bytes = new TextEncoder().encode('data: {"type":"rag_step","step":{"label":"检索"}}\r\n\r\ndata: {"type":"content","content":"真实协议"}\r\n\r\ndata: {"type":"trace","rag_trace":{"retrieved_chunks":[{"filename":"same.pdf","text":"来源"}]}}\r\n\r\ndata: [DONE]\r\n\r\n');
+    const source = {filename:'same.pdf',knowledge_id:knowledgeId,document_id:'doc',page_number:'7'};
+    const trace = {type:'trace',rag_trace:{retrieved_chunks:[
+      {...source,text:'来源'}, {...source,text:'同一页的另一段'},
+      {filename:'legacy.pdf',page_number:'未知',text:'旧会话片段'}
+    ]}};
+    const bytes = new TextEncoder().encode('data: {"type":"rag_step","step":{"label":"检索"}}\r\n\r\ndata: {"type":"content","content":"真实协议"}\r\n\r\ndata: ' + JSON.stringify(trace) + '\r\n\r\ndata: [DONE]\r\n\r\n');
     let cursor = 0;
     return {...json({}),body:{getReader:()=>({read:async()=>cursor<bytes.length ? {done:false,value:bytes.slice(cursor,cursor+=7)} : {done:true},releaseLock() {}})}};
   }
@@ -103,9 +109,33 @@ vm.runInContext(fs.readFileSync(path.join(root,'frontend/app.js'),'utf8'),contex
   assert.equal(app.messages[1].text,'真实协议');
   assert.equal(app.messages[1].steps[0].label,'检索');
   assert.equal(app.messages[1].trace.retrieved_chunks[0].filename,'same.pdf');
+  const previewPaths = () => requests.filter(item=>item.url.includes('/preview/'));
+  const messageId = app.messages[1].id;
+  assert.equal(previewPaths().length,0);
+  app.chatInput = '草稿';
+  await app.toggleChatSources(messageId); await tick();
+  assert.equal(app.chatSources.length,2);
+  assert.equal(app.chatSource.passages.join('|'),'来源|同一页的另一段');
+  assert.equal(app.chatPreviewPage,8);
+  assert.equal(app.chatPreviewPageCount,12);
+  assert.equal(previewPaths()[0].url,`/knowledges/${knowledgeId}/documents/doc/preview/8`);
+  assert.equal(previewPaths()[0].headers.get('Authorization'),'Bearer fixture-token');
+  assert.deepEqual(JSON.parse(previewPaths()[0].body),{query:''});
+  await app.loadChatPreview(9);
+  await app.closeChatSources();
+  assert.equal(app.chatPreviewUrl,'');
+  assert.equal(app.chatInput,'草稿');
+  await app.toggleChatSources(messageId); await tick();
+  assert.equal(app.chatPreviewPage,9);
+  app.selectChatSource(app.chatSources[1]); await tick();
+  assert.equal(app.chatSource.pageNumber,null);
+  assert.equal(app.chatSource.passages[0],'旧会话片段');
+  assert.equal(app.hasChatOriginal,false);
+  assert.equal(previewPaths().length,3);
   const chatPageRequests = requests.length;
   await app.runTool(); assert.equal(requests.length,chatPageRequests);
   app.go('/services/knowledge'); await tick();
+  assert.equal(app.chatSourcesOpen,false);
   assert.equal(app.knowledges[0].id,knowledgeId);
   app.toolQuery = '测试检索'; await app.runTool();
   assert.equal(app.toolResult.status,'no_match');
