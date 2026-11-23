@@ -1,0 +1,14 @@
+{
+  "name": "supermew-frontend-vendor",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "@element-plus/icons-vue": "2.3.2",
+    "@vue/shared": "3.5.43",
+    "element-plus": "2.14.7",
+    "esbuild": "0.25.11"
+  }
+}
