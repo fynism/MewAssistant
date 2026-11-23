@@ -177,7 +177,10 @@
                 </header>
                 <p v-if="activeDocument?.error_summary" class="reading-preview-warning" role="status">{{ activeDocument.error_summary }}</p>
                 <div ref="previewCanvas" class="reading-canvas" :aria-busy="previewLoading">
-                  <div v-if="!activeSource" class="reading-preview-empty"><mcp-icon name="Document" :size="31"></mcp-icon><p>选择文档查看原文</p></div>
+                  <div v-if="!activeSource" class="reading-preview-empty with-illustration">
+                    <span class="empty-state-art reading-preview-illustration" aria-hidden="true"></span>
+                    <p>选择文档查看原文</p>
+                  </div>
                   <div v-else-if="previewLoading" class="reading-preview-empty" role="status"><mcp-icon name="Loading" class="processing-icon" :size="24"></mcp-icon><p>正在加载原文…</p></div>
                   <div v-else-if="previewError" class="reading-preview-empty" role="alert"><p>{{ previewError }}</p><el-button link type="primary" @click="loadPreview()">重试</el-button></div>
                   <img v-else-if="previewUrl" :src="previewUrl" :alt="activeSource.filename + ' · 第 ' + previewPage + ' 页'" class="reading-page-image" :style="{'--reading-zoom':previewZoom / 100}">
@@ -199,8 +202,11 @@
               <section class="ask-conversation" aria-label="对话">
                 <el-alert v-if="knowledgeError" :title="knowledgeError" type="error" :closable="false" show-icon class="ask-knowledge-error"><template #default><el-button link type="primary" @click="loadKnowledges">重试</el-button></template></el-alert>
                 <div class="chat-log" ref="chatLog" role="log" aria-label="会话消息" aria-relevant="additions text">
-                  <div class="chat-log-inner">
-                    <div v-if="!messages.length" class="empty-state"><h2>输入资料相关问题</h2></div>
+                  <div class="chat-log-inner" :class="{'is-empty': !messages.length}">
+                    <div v-if="!messages.length" class="chat-empty-state">
+                      <span class="empty-state-art chat-empty-illustration" aria-hidden="true"></span>
+                      <h2>输入资料相关问题</h2>
+                    </div>
                     <article v-for="message in messages" :key="message.id" class="chat-message" :class="{'is-user':message.author === 'user'}" :aria-label="message.author === 'user' ? '你的提问' : '助手回答'">
                       <p v-if="message.author === 'user'" class="chat-body">{{ message.text }}</p>
                       <template v-else>
