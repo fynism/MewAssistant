@@ -1,4 +1,4 @@
-"""HTTP request tracing and cache policy for development assets."""
+"""HTTP request tracing and fallback cache policy for frontend responses."""
 
 import time
 from uuid import uuid4
@@ -31,7 +31,8 @@ def register_middleware(app: FastAPI) -> None:
             response = await call_next(request)
             status_code = response.status_code
             response.headers["X-Request-ID"] = current_id
-            if path == "/" or path.lstrip("/") in FRONTEND_ROUTES or path.endswith((".html", ".js", ".css")):
+            frontend_path = path == "/" or path.lstrip("/") in FRONTEND_ROUTES or path.endswith((".html", ".js", ".css"))
+            if frontend_path and "Cache-Control" not in response.headers:
                 response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
                 response.headers["Pragma"] = "no-cache"
                 response.headers["Expires"] = "0"

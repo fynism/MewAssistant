@@ -1,7 +1,8 @@
 """Verify that the real application ships the frontend and all of its assets."""
 from html.parser import HTMLParser
+from hashlib import sha256
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 import unittest
 
 from fastapi.testclient import TestClient
@@ -41,7 +42,17 @@ class FrontendRoutesTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertIn('MeowConnectPlatform', response.text)
                 self.assertIn('connection-example', response.text)
-                self.assertIn('no-store', response.headers['cache-control'])
+                self.assertEqual(response.headers['cache-control'], 'no-cache')
+        versioned = Assets()
+        versioned.feed(response.text)
+        self.assertEqual(len(versioned.paths), len(parser.paths))
+        for asset in versioned.paths:
+            with self.subTest(versioned_asset=asset):
+                fingerprint = parse_qs(urlsplit(asset).query)['v']
+                result = self.client.get(asset)
+                self.assertEqual(result.status_code, 200)
+                self.assertEqual(fingerprint, [sha256(result.content).hexdigest()])
+                self.assertIn('immutable', result.headers['cache-control'])
         for asset in parser.paths:
             with self.subTest(asset=asset):
                 self.assertTrue(asset.startswith('/'), 'Runtime assets must be served locally')

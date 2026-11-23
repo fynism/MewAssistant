@@ -2,7 +2,7 @@
 (() => {
   'use strict';
   const {createApp, ref, shallowRef, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick} = Vue;
-  const {ElMessage, ElMessageBox} = ElementPlus;
+  const {ElIcon, ElMessage, ElMessageBox, icons, locale} = ElementPlus;
   const routes = ['/', '/services/knowledge', '/workspace/knowledges', '/try', '/account', '/admin'];
   const titles = {'/':'个人知识库', '/services/knowledge':'客户端接入', '/workspace/knowledges':'个人知识库', '/try':'问资料', '/account':'个人管理', '/admin':'管理页面'};
   const routePath = () => routes.includes(location.pathname.replace(/\/$/, '') || '/') ? location.pathname.replace(/\/$/, '') || '/' : '/';
@@ -16,9 +16,30 @@
   function searchSnippet(text, query) {
     const compact = (text || '').replace(/\s+/g, ' ').trim();
     const match = compact.toLowerCase().indexOf(query.toLowerCase());
-    const start = Math.max(0, match - 28);
+    // Keep the match within the visible line of the results sidebar.
+    const start = Math.max(0, match - 8);
     const end = start + Math.max(115, Math.min(query.length + 40, 224));
     return highlightParts((start ? '…' : '') + compact.slice(start, end) + (end < compact.length ? '…' : ''), query);
+  }
+  function chatPageNumber(value) {
+    const page = typeof value === 'string' && value.trim() ? Number(value) : value;
+    return Number.isSafeInteger(page) && page >= 0 && page < Number.MAX_SAFE_INTEGER ? page + 1 : null;
+  }
+  function collectChatSources(chunks) {
+    const sources = new Map();
+    for (const [index, chunk] of chunks.entries()) {
+      if (!chunk || (!chunk.filename && !chunk.document_id && !chunk.text)) continue;
+      const {knowledge_id:knowledgeId, document_id:documentId, page_number:rawPage} = chunk;
+      const pageNumber = chatPageNumber(rawPage);
+      const key = knowledgeId && documentId ? JSON.stringify([knowledgeId,documentId,pageNumber]) : index;
+      let source = sources.get(key);
+      if (!source) {
+        source = {key,knowledgeId,documentId,pageNumber,filename:chunk.filename || '未命名文档',passages:[]};
+        sources.set(key,source);
+      }
+      if (chunk.text && !source.passages.includes(chunk.text)) source.passages.push(chunk.text);
+    }
+    return [...sources.values()];
   }
   function tokenizeConfig(source, language) {
     const pattern = /#[^\n]*|"(?:\\.|[^"\\])*"|\[[^\]\n]+\]|\b[A-Za-z_][\w.-]*\b|[{}\[\]:=,]/g;
@@ -44,9 +65,13 @@
       const isLibrary = computed(() => page.value === '/' || page.value === '/workspace/knowledges');
       const isDark = ref(document.documentElement.classList.contains('dark'));
       const systemTheme = matchMedia('(prefers-color-scheme: dark)');
+      const readerMedia = matchMedia('(max-width: 880px)');
+      const compactReader = ref(readerMedia.matches);
+      const onReaderWidth = event => {compactReader.value = event.matches;};
       function toggleTheme() {isDark.value = !isDark.value; document.documentElement.classList.toggle('dark', isDark.value); storage.set('mcp-theme', isDark.value ? 'dark' : 'light');}
       const onSystemTheme = event => {if (!storage.get('mcp-theme')) {isDark.value = event.matches; document.documentElement.classList.toggle('dark', event.matches);}};
       systemTheme.addEventListener('change', onSystemTheme);
+      readerMedia.addEventListener('change', onReaderWidth);
 
       const connectionClient = ref('codex'), servicePanels = ref([]);
       const connectionEndpoint = 'https://fyism.cn/mcp/knowledge';
@@ -67,6 +92,7 @@
       const knowledges = ref([]), selectedKnowledgeId = ref(''), selectedKnowledgeIds = ref([]), knowledgeLoading = ref(false), knowledgeError = ref('');
       const documents = ref([]), documentsLoading = ref(false), documentsError = ref(''), documentBusyId = ref('');
       const searchQuery = ref(''), submittedQuery = ref(''), searchResult = shallowRef(null), searchLoading = ref(false), searchError = ref('');
+      const sidebarPane = ref('results'), sidebarHidden = ref(false);
       const activeSource = shallowRef(null), previewOpen = ref(false), previewLoading = ref(false), previewError = ref('');
       const previewUrl = ref(''), previewText = ref(null), previewPage = ref(1), previewPageCount = ref(0), previewZoom = ref(100);
       const downloadLoading = ref(false), searchInput = ref(null), previewTitle = ref(null), readingList = ref(null), previewCanvas = ref(null);
@@ -85,10 +111,21 @@
       const selectedKnowledge = computed(() => knowledges.value.find(kb => kb.id === selectedKnowledgeId.value));
       const acceptedExtensions = computed(() => knowledgeSettings.value.allowed_extensions.join(','));
       const uploadLimitLabel = computed(() => knowledgeSettings.value.max_upload_bytes ? `${Math.round(knowledgeSettings.value.max_upload_bytes / 1048576)} MB` : '以服务端限制为准');
-      const scopeLabel = computed(() => selectedKnowledgeIds.value.length ? scopeNames(selectedKnowledgeIds.value) : '未选择知识库');
       let documentTimer = null, scopeInitialized = false;
       const toolName = ref('retrieve'), toolQuery = ref(''), topK = ref(5), toolLoading = ref(false), toolResult = ref(null), toolError = ref('');
       const messages = ref([]), chatInput = ref(''), chatLoading = ref(false), chatLog = ref(null), isComposing = ref(false);
+      const chatSourcesOpen = ref(false), chatSourceView = shallowRef(null), chatSourcesHeading = ref(null);
+      const chatSourcePreview = ref(null), chatPreviewPage = ref(null), chatPreviewPageCount = ref(0);
+      const chatPreviewUrl = ref(''), chatPreviewLoading = ref(false), chatPreviewError = ref('');
+      const chatOriginalLoading = ref(false);
+      let chatSourceTrigger = null, chatPreviewController = null, chatOriginalController = null, chatPreviewScroll = 0;
+      const chatSourcesByMessage = computed(() => new Map(messages.value
+        .map(message => [message.id,collectChatSources(message.trace?.retrieved_chunks || [])])));
+      const chatSources = computed(() => chatSourcesByMessage.value.get(chatSourceView.value?.messageId) || []);
+      const chatSource = computed(() => chatSources.value.find(source => source.key === chatSourceView.value?.sourceKey) || chatSources.value[0]);
+      const hasChatOriginal = computed(() => Boolean(chatSource.value?.knowledgeId && chatSource.value?.documentId));
+      const hasChatPdfPage = computed(() => hasChatOriginal.value && chatSource.value.pageNumber !== null
+        && chatSource.value.filename.toLowerCase().endsWith('.pdf'));
       const sessions = ref([]), sessionsOpen = ref(false), sessionsLoading = ref(false), sessionsError = ref('');
       let sessionId = newSessionId(), streamController = null;
       const keys = ref([]), keyName = ref(''), newKey = ref(''), keysLoading = ref(false), keyBusy = ref(false), keyError = ref('');
@@ -178,11 +215,12 @@
       function clearToolResults() {resultEpoch++; toolResult.value = null; toolError.value = ''; toolLoading.value = false;}
       function logout(navigateHome = true) {
         identityEpoch++; knowledgeEpoch++; documentEpoch++; sessionEpoch++; stopChat(); stopDocumentPolling(); clearToolResults();
-        searchQuery.value = ''; clearSearch(); downloadLoading.value = false;
+        searchQuery.value = ''; clearSearch(); sidebarPane.value = 'results'; sidebarHidden.value = false; downloadLoading.value = false;
         token.value = ''; storage.set('accessToken',''); currentUser.value = null;
         newKey.value = ''; newInvite.value = ''; keys.value = []; invites.value = []; operations.value = null;
         knowledges.value = []; documents.value = []; selectedKnowledgeId.value = ''; selectedKnowledgeIds.value = []; scopeInitialized = false;
         messages.value = []; sessions.value = []; sessionId = newSessionId(); authChecking.value = false;
+        chatInput.value = ''; resetChatSources();
         knowledgeLoading.value = false; documentsLoading.value = false; keysLoading.value = false; invitesLoading.value = false; sessionsLoading.value = false; operationsLoading.value = false;
         keyBusy.value = false; inviteBusy.value = false; isUploading.value = false; documentBusyId.value = '';
         createOpen.value = false; editOpen.value = false; sessionsOpen.value = false;
@@ -234,8 +272,13 @@
         resetPreview();
         const loading = loadDocuments();
         if (submittedQuery.value) runSearch(submittedQuery.value);
-        readingList.value?.scrollTo(0, 0);
+        nextTick(() => readingList.value?.scrollTo(0, 0));
         return loading;
+      }
+      function browseKnowledge(id) {
+        sidebarPane.value = 'results';
+        selectKnowledge(id);
+        nextTick(() => searchInput.value?.focus({preventScroll:true}));
       }
       async function loadDocuments() {
         const id = selectedKnowledgeId.value, epoch = identityEpoch, call = ++documentEpoch; stopDocumentPolling();
@@ -268,6 +311,9 @@
         readingList.value?.scrollTo(0, 0);
         searchInput.value?.focus();
       }
+      function guardSearchComposition(event) {
+        if (event.isComposing || event.keyCode === 229) event.preventDefault();
+      }
       async function runSearch(query = searchQuery.value.trim()) {
         if (!query) {clearSearch(); return;}
         searchController?.abort();
@@ -296,6 +342,12 @@
       function sourcePath(source) {
         return `/knowledges/${encodeURIComponent(source.knowledgeId)}/documents/${encodeURIComponent(source.documentId)}`;
       }
+      async function fetchPdfPage(source, pageNumber, signal) {
+        const response = await request(`${sourcePath(source)}/preview/${pageNumber}`, {
+          ...jsonBody('POST', {query:source.query || ''}), signal
+        });
+        return {blob:await response.blob(), pageCount:Number(response.headers.get('X-PDF-Page-Count')) || 0};
+      }
       async function loadPreview(pageNumber = previewPage.value) {
         const source = activeSource.value, format = previewType.value;
         if (!source || !['pdf', 'txt'].includes(format)) return;
@@ -306,10 +358,9 @@
         try {
           const path = sourcePath(source);
           if (format === 'pdf') {
-            const response = await request(`${path}/preview/${pageNumber}`, {...jsonBody('POST', {query:source.query || ''}), signal:controller.signal});
-            const blob = await response.blob();
+            const {blob,pageCount} = await fetchPdfPage(source, pageNumber, controller.signal);
             if (controller.signal.aborted) return;
-            previewPageCount.value = Number(response.headers.get('X-PDF-Page-Count')) || 0;
+            previewPageCount.value = pageCount;
             previewUrl.value = URL.createObjectURL(blob);
           } else {
             const response = await request(`${path}/content`, {signal:controller.signal});
@@ -332,15 +383,22 @@
           loadPreview();
         }
         previewOpen.value = true;
-        if (event.detail === 0 || matchMedia('(max-width: 880px)').matches) {
+        if (event.detail === 0 || compactReader.value) {
           await nextTick();
           previewTitle.value?.focus({preventScroll:true});
         }
       }
-      async function closePreview() {
-        previewOpen.value = false;
+      async function toggleReadingSidebar() {
+        if (!compactReader.value && !sidebarHidden.value) {
+          sidebarHidden.value = true;
+          return;
+        }
+        if (compactReader.value) previewOpen.value = false;
+        sidebarHidden.value = false;
+        sidebarPane.value = 'results';
         await nextTick();
-        readingList.value?.querySelector('[aria-pressed="true"]')?.focus({preventScroll:true});
+        const target = readingList.value?.querySelector('[aria-pressed="true"]') || searchInput.value;
+        target?.focus({preventScroll:true});
       }
       async function downloadSource() {
         const source = activeSource.value, epoch = identityEpoch;
@@ -350,12 +408,15 @@
           const response = await request(`${sourcePath(source)}/content`);
           const blob = await response.blob();
           if (epoch !== identityEpoch) return;
-          const url = URL.createObjectURL(blob), link = document.createElement('a');
-          link.href = url; link.download = source.filename;
-          document.body.append(link); link.click(); link.remove();
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
+          saveOriginal(blob, source.filename);
         } catch (error) {report(error);}
         finally {if (epoch === identityEpoch) downloadLoading.value = false;}
+      }
+      function saveOriginal(blob, filename) {
+        const url = URL.createObjectURL(blob), link = document.createElement('a');
+        link.href = url; link.download = filename;
+        document.body.append(link); link.click(); link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
       }
       async function createKnowledge() {
         if (!knowledgeName.value.trim() || knowledgeLoading.value) return;
@@ -466,6 +527,85 @@
           {label:'重写后检索',items:trace.expanded_retrieved_chunks}
         ].filter(group => group.items?.length);
       }
+      async function toggleChatSources(messageId, event) {
+        if (chatSourcesOpen.value && chatSourceView.value?.messageId === messageId) return closeChatSources();
+        if (chatSourceView.value?.messageId !== messageId) {
+          resetChatSources();
+          chatSourceView.value = {messageId,sourceKey:null};
+        }
+        chatSourceTrigger = event?.currentTarget || null;
+        chatSourcesOpen.value = true;
+        loadChatPreview(chatPreviewPage.value ?? chatSource.value?.pageNumber, chatPreviewScroll);
+        await nextTick();
+        chatSourcesHeading.value?.focus({preventScroll:true});
+      }
+      function selectChatSource(source) {
+        if (source.key === chatSource.value?.key) return;
+        clearChatSourceContent();
+        chatSourceView.value = {...chatSourceView.value,sourceKey:source.key};
+        chatPreviewPageCount.value = 0; chatPreviewPage.value = null; chatPreviewScroll = 0;
+        loadChatPreview(source.pageNumber);
+      }
+      async function closeChatSources() {
+        chatPreviewScroll = chatSourcePreview.value?.scrollTop || 0;
+        clearChatSourceContent();
+        chatSourcesOpen.value = false;
+        const trigger = chatSourceTrigger;
+        chatSourceTrigger = null;
+        await nextTick();
+        if (!chatSourcesOpen.value) trigger?.focus({preventScroll:true});
+      }
+      function resetChatSources() {
+        clearChatSourceContent();
+        chatSourcesOpen.value = false; chatSourceView.value = null; chatSourceTrigger = null;
+        chatPreviewPageCount.value = 0; chatPreviewPage.value = null; chatPreviewScroll = 0;
+      }
+      function clearChatPreview() {
+        chatPreviewController?.abort(); chatPreviewController = null;
+        if (chatPreviewUrl.value) URL.revokeObjectURL(chatPreviewUrl.value);
+        chatPreviewUrl.value = ''; chatPreviewLoading.value = false; chatPreviewError.value = '';
+      }
+      function clearChatSourceContent() {
+        clearChatPreview();
+        chatOriginalController?.abort(); chatOriginalController = null;
+        chatOriginalLoading.value = false;
+      }
+      async function loadChatPreview(pageNumber = chatPreviewPage.value, scroll = 0) {
+        if (!chatSourcesOpen.value || !hasChatPdfPage.value || !pageNumber) return;
+        clearChatPreview();
+        const controller = new AbortController();
+        chatPreviewController = controller;
+        chatPreviewPage.value = pageNumber; chatPreviewLoading.value = true; chatPreviewScroll = scroll;
+        chatSourcePreview.value?.scrollTo(0, 0);
+        try {
+          const {blob,pageCount} = await fetchPdfPage(chatSource.value, pageNumber, controller.signal);
+          if (controller.signal.aborted) return;
+          chatPreviewPageCount.value = pageCount;
+          chatPreviewUrl.value = URL.createObjectURL(blob);
+        } catch (error) {
+          if (!controller.signal.aborted) chatPreviewError.value = error.message;
+        } finally {
+          if (!controller.signal.aborted) chatPreviewLoading.value = false;
+        }
+      }
+      function restoreChatPreviewScroll(event) {
+        if (event.target.src === chatPreviewUrl.value) chatSourcePreview.value?.scrollTo(0, chatPreviewScroll);
+      }
+      async function downloadChatOriginal() {
+        if (!hasChatOriginal.value || chatOriginalLoading.value) return;
+        const source = chatSource.value, controller = new AbortController();
+        chatOriginalController = controller; chatOriginalLoading.value = true;
+        try {
+          const response = await request(`${sourcePath(source)}/content`, {signal:controller.signal});
+          const blob = await response.blob();
+          if (!controller.signal.aborted) saveOriginal(blob, source.filename);
+        } catch (error) {if (!controller.signal.aborted) report(error);}
+        finally {
+          if (!controller.signal.aborted) {
+            chatOriginalController = null; chatOriginalLoading.value = false;
+          }
+        }
+      }
       async function scrollChat() {await nextTick(); if (chatLog.value) chatLog.value.scrollTop = chatLog.value.scrollHeight;}
       async function sendChat() {
         const text = chatInput.value.trim(); if (!text || chatLoading.value || isComposing.value || !isAuthenticated.value) return;
@@ -498,7 +638,7 @@
         finally {reader?.releaseLock(); bot.thinking = false; if (streamController === controller) {chatLoading.value = false; streamController = null;} scrollChat();}
       }
       function handleChatKey(event) {if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && !isComposing.value) {event.preventDefault(); sendChat();}}
-      function newChat() {stopChat(); sessionEpoch++; messages.value = []; sessionId = newSessionId(); sessionsOpen.value = false;}
+      function newChat() {stopChat(); sessionEpoch++; resetChatSources(); messages.value = []; sessionId = newSessionId(); sessionsOpen.value = false;}
       async function loadSessions() {
         sessionsOpen.value = true; sessionsLoading.value = true; sessionsError.value = ''; const epoch = identityEpoch;
         try {const data = await jsonRequest('/sessions'); if (epoch === identityEpoch) sessions.value = data.sessions || [];}
@@ -507,7 +647,15 @@
       }
       async function loadSession(item) {
         stopChat(); const epoch = identityEpoch, call = ++sessionEpoch; sessionsLoading.value = true;
-        try {const data = await jsonRequest(`/sessions/${encodeURIComponent(item.session_id)}`); if (epoch !== identityEpoch || call !== sessionEpoch || page.value !== '/try') return; sessionId = item.session_id; messages.value = data.messages.map(msg => ({id:crypto.randomUUID(),author:msg.type === 'human' ? 'user' : 'agent',text:msg.content,trace:msg.rag_trace,knowledgeIds:msg.knowledge_ids})); if (Array.isArray(data.last_knowledge_ids)) selectedKnowledgeIds.value = data.last_knowledge_ids.filter(id => knowledges.value.some(kb => kb.id === id)).slice(0,20); sessionsOpen.value = false; scrollChat();}
+        try {
+          const data = await jsonRequest(`/sessions/${encodeURIComponent(item.session_id)}`);
+          if (epoch !== identityEpoch || call !== sessionEpoch || page.value !== '/try') return;
+          resetChatSources(); sessionId = item.session_id;
+          messages.value = data.messages.map(msg => ({id:crypto.randomUUID(),author:msg.type === 'human' ? 'user' : 'agent',text:msg.content,trace:msg.rag_trace,knowledgeIds:msg.knowledge_ids}));
+          if (Array.isArray(data.last_knowledge_ids)) selectedKnowledgeIds.value = data.last_knowledge_ids.filter(id => knowledges.value.some(kb => kb.id === id)).slice(0,20);
+          else if (data.legacy_scope_unknown) selectedKnowledgeIds.value = [];
+          sessionsOpen.value = false; scrollChat();
+        }
         catch (error) {if (epoch === identityEpoch && call === sessionEpoch && error.name !== 'AbortError') sessionsError.value = error.message;}
         finally {if (epoch === identityEpoch && call === sessionEpoch) sessionsLoading.value = false;}
       }
@@ -572,8 +720,9 @@
       watch(toolName, clearToolResults);
       watch(page, async () => {
         newKey.value = ''; newInvite.value = ''; stopDocumentPolling(); documentEpoch++; clearToolResults(); sessionEpoch++; stopChat();
+        resetChatSources();
         createOpen.value = false; editOpen.value = false; sessionsOpen.value = false; helpTopic.value = ''; qualityReview.value = null;
-        searchQuery.value = ''; clearSearch(); pageReview.value = null;
+        searchQuery.value = ''; clearSearch(); sidebarPane.value = 'results'; sidebarHidden.value = false; pageReview.value = null;
         document.title = pageTitle.value + ' · MeowConnectPlatform'; await loadPageData(); await nextTick();
         document.getElementById('main')?.focus({preventScroll:true});
       });
@@ -587,16 +736,20 @@
         }
         await loadPageData();
       });
-      onBeforeUnmount(() => {identityEpoch++; stopChat(); stopDocumentPolling(); clearSearch(); window.removeEventListener('popstate',onPopState); systemTheme.removeEventListener('change',onSystemTheme);});
+      onBeforeUnmount(() => {identityEpoch++; stopChat(); stopDocumentPolling(); clearSearch(); resetChatSources(); window.removeEventListener('popstate',onPopState); systemTheme.removeEventListener('change',onSystemTheme); readerMedia.removeEventListener('change',onReaderWidth);});
       return {
-        locale:ElementPlusLocaleZhCn,page,mobileNav,currentUser,authChecking,isAuthenticated,isAdmin,displayName,pageTitle,isLibrary,isDark,toggleTheme,go,accountCommand,
+        locale,page,mobileNav,currentUser,authChecking,isAuthenticated,isAdmin,displayName,pageTitle,isLibrary,isDark,toggleTheme,go,accountCommand,
         connectionClient,servicePanels,connectionEndpoint,connectionExamples,helpTopic,helpTitle,qualityReview,
         authOpen,authMode,authView,authTitle,authLoading,authError,authForm,authFormRef,authRules,usernameInput,githubLoginButton,resetAuth,openAuth,switchAuth,focusAuth,choosePasswordLogin,showAuthMethods,submitAuth,logout,githubEnabled,githubLoading,startGitHubLogin,
         knowledges,selectedKnowledgeId,selectedKnowledgeIds,selectedKnowledge,knowledgeLoading,knowledgeError,loadKnowledges,selectKnowledge,createOpen,editOpen,knowledgeName,knowledgeDescription,knowledgeEdit,createKnowledge,openKnowledgeEdit,updateKnowledge,deleteKnowledge,
         documents,documentsLoading,documentsError,documentBusyId,loadDocuments,fileInput,replaceInput,isUploading,acceptedExtensions,uploadLimitLabel,uploadDocument,chooseReplacement,replaceDocument,documentAction,statusLabel,documentPending,openTryWithKnowledge,pageReview,pageReviewLoading,viewDocumentPage,
-        searchQuery,submittedQuery,searchResult,searchLoading,searchError,readingRows,searchInput,readingList,runSearch,clearSearchInput,
-        activeSource,activeDocument,previewType,previewOpen,previewLoading,previewError,previewUrl,previewText,previewTextParts,previewTitle,previewCanvas,previewPage,previewPageCount,previewZoom,openPreview,closePreview,loadPreview,downloadSource,downloadLoading,
-        scopeLabel,scopeNames,toolName,toolQuery,topK,knowledgeSettings,toolLoading,toolResult,toolError,runTool,messages,chatInput,chatLoading,chatLog,isComposing,sendChat,stopChat,handleChatKey,parseMarkdown,traceFacts,traceGroups,newChat,sessions,sessionsOpen,sessionsLoading,sessionsError,loadSessions,loadSession,deleteSession,
+        searchQuery,submittedQuery,searchResult,searchLoading,searchError,readingRows,searchInput,readingList,runSearch,clearSearchInput,guardSearchComposition,
+        compactReader,sidebarPane,sidebarHidden,browseKnowledge,toggleReadingSidebar,
+        activeSource,activeDocument,previewType,previewOpen,previewLoading,previewError,previewUrl,previewText,previewTextParts,previewTitle,previewCanvas,previewPage,previewPageCount,previewZoom,openPreview,loadPreview,downloadSource,downloadLoading,
+        scopeNames,toolName,toolQuery,topK,knowledgeSettings,toolLoading,toolResult,toolError,runTool,messages,chatInput,chatLoading,chatLog,isComposing,sendChat,stopChat,handleChatKey,parseMarkdown,traceFacts,traceGroups,newChat,sessions,sessionsOpen,sessionsLoading,sessionsError,loadSessions,loadSession,deleteSession,
+        chatSourcesOpen,chatSourceView,chatSourcesHeading,chatSourcesByMessage,chatSources,chatSource,toggleChatSources,selectChatSource,closeChatSources,
+        chatPageNumber,chatSourcePreview,chatPreviewPage,chatPreviewPageCount,chatPreviewUrl,chatPreviewLoading,chatPreviewError,
+        hasChatOriginal,hasChatPdfPage,chatOriginalLoading,loadChatPreview,restoreChatPreviewScroll,downloadChatOriginal,
         keys,keyName,newKey,keysLoading,keyBusy,keyError,loadKeys,createKey,revokeKey,invites,newInvite,invitesLoading,inviteBusy,inviteError,invitationForm,loadInvites,createInvite,revokeInvite,invitationStatus,formatDate,operations,operationsLoading,operationsError,loadOperations,copyText
       };
     }
@@ -607,6 +760,6 @@
     emits:['update:modelValue','copy','help'],
     template:'#connection-example-template'
   });
-  app.component('mcp-icon',{props:{name:{type:String,required:true},size:{type:Number,default:20}},setup(props) {return () => Vue.h(ElementPlus.ElIcon,{size:props.size,'aria-hidden':'true'},() => Vue.h(ElementPlusIconsVue[props.name] || ElementPlusIconsVue.Document));}});
+  app.component('mcp-icon',{props:{name:{type:String,required:true},size:{type:Number,default:20}},setup(props) {return () => Vue.h(ElIcon,{size:props.size,'aria-hidden':'true'},() => Vue.h(icons[props.name] || icons.Document));}});
   app.mount('#app');
 })();
