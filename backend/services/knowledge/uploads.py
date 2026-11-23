@@ -103,7 +103,9 @@ async def _read_upload(file: UploadFile) -> tuple[str, str, bytes]:
         raise HTTPException(status_code=400, detail="仅支持 PDF、Word、Excel、TXT 和 Markdown 文档")
     data = await file.read(settings.max_upload_bytes + 1)
     _verify_file(data, suffix)
-    return filename[:255], suffix, data
+    if len(filename) > 255:
+        filename = filename[:255 - len(suffix)] + filename[-len(suffix):]
+    return filename, suffix, data
 
 
 async def replace_document(db: Session, owner_id: int, knowledge_id: str,
