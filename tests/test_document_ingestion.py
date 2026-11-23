@@ -136,6 +136,24 @@ class DocumentIngestionTests(unittest.TestCase):
         self.assertEqual(self.db.query(KnowledgeDocumentPage).count(), 0)
         self.assertEqual(self.embeddings.count, 0)
 
+    def test_markdown_upload_indexes_the_same_decoded_text_and_rejects_invalid_files(self):
+        text = "# 会议纪要\n\n- 项目进展\n- 2026 年发布计划"
+        doc = self.upload("notes.MD", text.encode("utf-16"))
+        service.process_document(doc.id)
+        self.db.expire_all()
+        self.assertIn(".md", routes.knowledge_settings()["allowed_extensions"])
+        self.assertEqual((doc.status, doc.file_type), ("ready", ".md"))
+        self.assertEqual(doc.processing_report["indexed_pages"], 1)
+        self.assertEqual(self.milvus.rows[0]["file_type"], "Markdown")
+        self.assertEqual(self.milvus.rows[0]["text"], text)
+        data = routes.page_details("a", doc.id, 1, self.db.get(User, 1), self.db)
+        self.assertEqual(data["raw_text"], text)
+        for invalid_data in (b"binary\x00data", b"\r\n\t "):
+            with self.assertRaises(HTTPException) as invalid:
+                self.upload("invalid.md", invalid_data)
+            self.assertEqual(invalid.exception.status_code, 400)
+            self.assertIn("Markdown", invalid.exception.detail)
+
     def test_all_failed_pages_keep_report_and_never_become_searchable(self):
         doc = self.upload("bad.pdf", b"%PDF-test")
         with patch("backend.documents.loader.extract_pdf", return_value=[

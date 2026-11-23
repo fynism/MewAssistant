@@ -133,8 +133,8 @@ class DocumentLoader:
         if file_lower.endswith(".pdf"):
             doc_type = "PDF"
             loader = None
-        elif file_lower.endswith(".txt"):
-            doc_type = "TXT"
+        elif file_lower.endswith((".txt", ".md")):
+            doc_type = "TXT" if file_lower.endswith(".txt") else "Markdown"
             loader = None
         elif file_lower.endswith((".docx", ".doc")):
             doc_type = "Word"
@@ -148,7 +148,7 @@ class DocumentLoader:
         try:
             if doc_type == "PDF":
                 pages = extract_pdf(file_path)
-            elif doc_type == "TXT":
+            elif doc_type in {"TXT", "Markdown"}:
                 pages = [ExtractedPage(0, decode_text(Path(file_path).read_bytes()))]
             else:
                 pages = [ExtractedPage(index, doc.page_content or "") for index, doc in enumerate(loader.load())]

@@ -46,3 +46,8 @@
 - Initial continuous serial requests hit the upstream rerank token limit (3 HTTP 429s) and TLS/network errors (49), producing Recall@10 82.12% with 52 rerank fallbacks. This full initial run is preserved in `continuous-run/`; the paced rerun is a separate complete 100-question run, not a per-question selection of better answers. The observed upstream limit was 100,000 tokens/minute.
 - CPU/GPU equivalence sample: 256 matching leaf texts; minimum cosine 0.999999999975, mean 0.999999999997. Model and float precision were retained; GPU/bulk timing still cannot be directly compared with the earlier CPU/per-file timing.
 - The benchmark now supports nested `--base-pack` preparation and `--query-interval` pacing. Safe GET reconnects do not replay POST uploads. Seven targeted tests pass, including pacing outside request timing. The original project CPU PyTorch was left unchanged; CUDA dependencies are confined to `data/benchmarks/gpu-runtime/`.
+
+## Markdown previews
+
+- Upload and ingestion are supported by commit `96c6921`. The frontend reads original bytes through the authenticated content route and renders Markdown with the bundled Marked and DOMPurify only when a preview is opened. Uploaded Markdown preview strips inline HTML and displays image alt text so opening a document does not fetch external images.
+- The repository virtual environment has unittest and does not include pytest. Run the ingestion suite with `python -m unittest discover -s tests -p test_document_ingestion.py`.

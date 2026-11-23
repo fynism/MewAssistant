@@ -7,6 +7,31 @@
   const titles = {'/':'个人知识库', '/services/knowledge':'客户端接入', '/workspace/knowledges':'个人知识库', '/try':'问资料', '/account':'个人管理', '/admin':'管理页面'};
   const routePath = () => routes.includes(location.pathname.replace(/\/$/, '') || '/') ? location.pathname.replace(/\/$/, '') || '/' : '/';
   const storage = {get(key) {try {return localStorage.getItem(key);} catch {return null;}}, set(key, value) {try {value ? localStorage.setItem(key, value) : localStorage.removeItem(key);} catch {}}};
+  function decodePreviewText(buffer) {
+    const bytes = new Uint8Array(buffer);
+    const view = new DataView(buffer);
+    const bom = view.byteLength >= 4 ? view.getUint32(0) : 0;
+    if (bom === 0xfffe0000 || bom === 0x0000feff) {
+      // TextDecoder does not support UTF-32, and the LE BOM starts with the UTF-16 BOM.
+      const chunks = [], points = [];
+      const littleEndian = bom === 0xfffe0000;
+      if (view.byteLength % 4) throw new Error('文本编码无法识别，请另存为 UTF-8');
+      for (let offset = 4; offset < view.byteLength; offset += 4) {
+        const point = view.getUint32(offset, littleEndian);
+        if (point > 0x10ffff || (point >= 0xd800 && point <= 0xdfff)) throw new Error('文本编码无法识别，请另存为 UTF-8');
+        points.push(point);
+        if (points.length === 4096) {
+          chunks.push(String.fromCodePoint(...points));
+          points.length = 0;
+        }
+      }
+      return chunks.join('') + String.fromCodePoint(...points);
+    }
+    if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder('utf-16le').decode(bytes);
+    if (bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder('utf-16be').decode(bytes);
+    try {return new TextDecoder('utf-8', {fatal:true}).decode(bytes);}
+    catch {return new TextDecoder('gb18030').decode(bytes);}
+  }
   const newSessionId = () => 'session_' + crypto.randomUUID();
   function highlightParts(text, query) {
     if (!query) return [{text, match:false}];
@@ -116,7 +141,7 @@
       const messages = ref([]), chatInput = ref(''), chatLoading = ref(false), chatLog = ref(null), isComposing = ref(false);
       const chatSourcesOpen = ref(false), chatSourceView = shallowRef(null), chatSourcesHeading = ref(null);
       const chatSourcePreview = ref(null), chatPreviewPage = ref(null), chatPreviewPageCount = ref(0);
-      const chatPreviewUrl = ref(''), chatPreviewLoading = ref(false), chatPreviewError = ref('');
+      const chatPreviewText = ref(null), chatPreviewUrl = ref(''), chatPreviewLoading = ref(false), chatPreviewError = ref('');
       const chatOriginalLoading = ref(false);
       let chatSourceTrigger = null, chatPreviewController = null, chatOriginalController = null, chatPreviewScroll = 0;
       const chatSourcesByMessage = computed(() => new Map(messages.value
@@ -126,6 +151,7 @@
       const hasChatOriginal = computed(() => Boolean(chatSource.value?.knowledgeId && chatSource.value?.documentId));
       const hasChatPdfPage = computed(() => hasChatOriginal.value && chatSource.value.pageNumber !== null
         && chatSource.value.filename.toLowerCase().endsWith('.pdf'));
+      const hasChatMarkdown = computed(() => hasChatOriginal.value && /\.md$/i.test(chatSource.value.filename));
       const sessions = ref([]), sessionsOpen = ref(false), sessionsLoading = ref(false), sessionsError = ref('');
       let sessionId = newSessionId(), streamController = null;
       const keys = ref([]), keyName = ref(''), newKey = ref(''), keysLoading = ref(false), keyBusy = ref(false), keyError = ref('');
@@ -342,6 +368,10 @@
       function sourcePath(source) {
         return `/knowledges/${encodeURIComponent(source.knowledgeId)}/documents/${encodeURIComponent(source.documentId)}`;
       }
+      async function fetchPreviewText(source, signal) {
+        const response = await request(`${sourcePath(source)}/content`, {signal});
+        return decodePreviewText(await response.arrayBuffer());
+      }
       async function fetchPdfPage(source, pageNumber, signal) {
         const response = await request(`${sourcePath(source)}/preview/${pageNumber}`, {
           ...jsonBody('POST', {query:source.query || ''}), signal
@@ -350,24 +380,21 @@
       }
       async function loadPreview(pageNumber = previewPage.value) {
         const source = activeSource.value, format = previewType.value;
-        if (!source || !['pdf', 'txt'].includes(format)) return;
+        if (!source || !['pdf', 'txt', 'md'].includes(format)) return;
         releasePreview();
         const controller = new AbortController(); previewController = controller;
         previewPage.value = pageNumber; previewLoading.value = true;
         previewCanvas.value?.scrollTo(0, 0);
         try {
-          const path = sourcePath(source);
           if (format === 'pdf') {
             const {blob,pageCount} = await fetchPdfPage(source, pageNumber, controller.signal);
             if (controller.signal.aborted) return;
             previewPageCount.value = pageCount;
             previewUrl.value = URL.createObjectURL(blob);
           } else {
-            const response = await request(`${path}/content`, {signal:controller.signal});
-            const bytes = await response.arrayBuffer();
+            const text = await fetchPreviewText(source, controller.signal);
             if (controller.signal.aborted) return;
-            try {previewText.value = new TextDecoder('utf-8', {fatal:true}).decode(bytes);}
-            catch {previewText.value = new TextDecoder('gb18030').decode(bytes);}
+            previewText.value = text;
           }
         } catch (error) {
           if (!controller.signal.aborted && error.name !== 'AbortError') previewError.value = error.message;
@@ -502,7 +529,18 @@
         catch (error) {if (epoch === identityEpoch && call === resultEpoch && error.name !== 'AbortError') toolError.value = error.message;}
         finally {if (epoch === identityEpoch && call === resultEpoch) toolLoading.value = false;}
       }
-      function parseMarkdown(text) {return DOMPurify.sanitize(marked.parse(text || '',{breaks:true,gfm:true}),{USE_PROFILES:{html:true},FORBID_TAGS:['style','iframe'],FORBID_ATTR:['style']});}
+      function parseMarkdown(text, documentPreview = false) {
+        const options = {breaks:true,gfm:true};
+        if (documentPreview) {
+          // Previewing an uploaded document must not load resources it references.
+          options.renderer = new marked.Renderer();
+          options.renderer.html = () => '';
+          options.renderer.image = (_href, _title, alt) => alt;
+        }
+        return DOMPurify.sanitize(marked.parse(text || '',options), {
+          USE_PROFILES:{html:true},FORBID_TAGS:['style','iframe'],FORBID_ATTR:['style']
+        });
+      }
       function traceFacts(trace) {
         if (!trace) return [];
         const fields = {
@@ -563,7 +601,7 @@
       function clearChatPreview() {
         chatPreviewController?.abort(); chatPreviewController = null;
         if (chatPreviewUrl.value) URL.revokeObjectURL(chatPreviewUrl.value);
-        chatPreviewUrl.value = ''; chatPreviewLoading.value = false; chatPreviewError.value = '';
+        chatPreviewUrl.value = ''; chatPreviewText.value = null; chatPreviewLoading.value = false; chatPreviewError.value = '';
       }
       function clearChatSourceContent() {
         clearChatPreview();
@@ -571,13 +609,18 @@
         chatOriginalLoading.value = false;
       }
       async function loadChatPreview(pageNumber = chatPreviewPage.value, scroll = 0) {
-        if (!chatSourcesOpen.value || !hasChatPdfPage.value || !pageNumber) return;
+        if (!chatSourcesOpen.value || (!hasChatMarkdown.value && (!hasChatPdfPage.value || !pageNumber))) return;
         clearChatPreview();
         const controller = new AbortController();
         chatPreviewController = controller;
         chatPreviewPage.value = pageNumber; chatPreviewLoading.value = true; chatPreviewScroll = scroll;
         chatSourcePreview.value?.scrollTo(0, 0);
         try {
+          if (hasChatMarkdown.value) {
+            const text = await fetchPreviewText(chatSource.value, controller.signal);
+            if (!controller.signal.aborted) chatPreviewText.value = text;
+            return;
+          }
           const {blob,pageCount} = await fetchPdfPage(chatSource.value, pageNumber, controller.signal);
           if (controller.signal.aborted) return;
           chatPreviewPageCount.value = pageCount;
@@ -585,7 +628,13 @@
         } catch (error) {
           if (!controller.signal.aborted) chatPreviewError.value = error.message;
         } finally {
-          if (!controller.signal.aborted) chatPreviewLoading.value = false;
+          if (!controller.signal.aborted) {
+            chatPreviewLoading.value = false;
+            if (chatPreviewText.value !== null) {
+              await nextTick();
+              if (!controller.signal.aborted) chatSourcePreview.value?.scrollTo(0, scroll);
+            }
+          }
         }
       }
       function restoreChatPreviewScroll(event) {
@@ -749,7 +798,7 @@
         scopeNames,toolName,toolQuery,topK,knowledgeSettings,toolLoading,toolResult,toolError,runTool,messages,chatInput,chatLoading,chatLog,isComposing,sendChat,stopChat,handleChatKey,parseMarkdown,traceFacts,traceGroups,newChat,sessions,sessionsOpen,sessionsLoading,sessionsError,loadSessions,loadSession,deleteSession,
         chatSourcesOpen,chatSourceView,chatSourcesHeading,chatSourcesByMessage,chatSources,chatSource,toggleChatSources,selectChatSource,closeChatSources,
         chatPageNumber,chatSourcePreview,chatPreviewPage,chatPreviewPageCount,chatPreviewUrl,chatPreviewLoading,chatPreviewError,
-        hasChatOriginal,hasChatPdfPage,chatOriginalLoading,loadChatPreview,restoreChatPreviewScroll,downloadChatOriginal,
+        hasChatOriginal,hasChatPdfPage,chatPreviewText,chatOriginalLoading,loadChatPreview,restoreChatPreviewScroll,downloadChatOriginal,
         keys,keyName,newKey,keysLoading,keyBusy,keyError,loadKeys,createKey,revokeKey,invites,newInvite,invitesLoading,inviteBusy,inviteError,invitationForm,loadInvites,createInvite,revokeInvite,invitationStatus,formatDate,operations,operationsLoading,operationsError,loadOperations,copyText
       };
     }

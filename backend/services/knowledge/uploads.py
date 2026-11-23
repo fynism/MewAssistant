@@ -15,18 +15,19 @@ from backend.infrastructure import storage
 from backend.infrastructure.database.models import KnowledgeBase, KnowledgeDocument, User
 from .access import get_owned_knowledge
 
-ALLOWED_EXTENSIONS = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".txt"}
+ALLOWED_EXTENSIONS = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".txt", ".md"}
 
 
 def _verify_file(data: bytes, suffix: str) -> None:
     if not data or len(data) > settings.max_upload_bytes:
         raise HTTPException(status_code=413, detail="文件为空或超过上传大小限制")
-    if suffix == ".txt":
+    if suffix in {".txt", ".md"}:
+        format_name = "TXT" if suffix == ".txt" else "Markdown"
         try:
             if not clean_text(decode_text(data)).strip():
                 raise ProcessingError("TXT 文件没有可检索文本")
         except ProcessingError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=str(exc).replace("TXT", format_name, 1)) from exc
     if suffix == ".pdf" and not data.startswith(b"%PDF-"):
         raise HTTPException(status_code=400, detail="PDF 文件格式无效")
     if suffix in {".docx", ".xlsx"} and not data.startswith(b"PK\x03\x04"):
@@ -99,7 +100,7 @@ async def _read_upload(file: UploadFile) -> tuple[str, str, bytes]:
     filename = ntpath.basename(file.filename or "").strip()
     suffix = Path(filename).suffix.lower()
     if not filename or filename in {".", ".."} or suffix not in ALLOWED_EXTENSIONS or "\x00" in filename:
-        raise HTTPException(status_code=400, detail="仅支持 PDF、Word、Excel、TXT 文档")
+        raise HTTPException(status_code=400, detail="仅支持 PDF、Word、Excel、TXT 和 Markdown 文档")
     data = await file.read(settings.max_upload_bytes + 1)
     _verify_file(data, suffix)
     return filename[:255], suffix, data
