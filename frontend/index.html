@@ -11,7 +11,7 @@
     try { const t = localStorage.getItem('mcp-theme'); document.documentElement.classList.toggle('dark', t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches); }
     catch { document.documentElement.classList.toggle('dark', matchMedia('(prefers-color-scheme: dark)').matches); }
   </script>
-  <link rel="stylesheet" href="/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/vendor/element-plus/components.css">
   <link rel="stylesheet" href="/vendor/element-plus/dark.css">
   <link rel="stylesheet" href="/theme.css">
   <link rel="stylesheet" href="/styles.css">
@@ -357,9 +357,7 @@
     </section>
   </template>
   <script src="/vendor/vue/vue.global.prod.js"></script>
-  <script src="/vendor/element-plus/index.full.min.js"></script>
-  <script src="/vendor/element-plus/zh-cn.min.js"></script>
-  <script src="/vendor/icons-vue/index.iife.min.js"></script>
+  <script src="/vendor/element-plus/components.js"></script>
   <script src="/vendor/marked/marked.umd.js"></script>
   <script src="/vendor/dompurify/purify.min.js"></script>
   <script src="/app.js"></script>

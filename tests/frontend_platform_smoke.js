@@ -15,8 +15,7 @@ vm.runInContext(fs.readFileSync(path.join(root,'frontend/vendor/vue/vue.global.p
 const vue = context.Vue;
 Object.assign(context, {
   Vue:{...vue,onMounted(fn) {mounted = fn;},onBeforeUnmount(fn) {unmount = fn;},createApp(definition) {return {use() {},component() {},mount() {app = vue.proxyRefs(definition.setup());}};}},
-  ElementPlus:{ElMessage:{success:message=>notices.push(message),warning:message=>notices.push(message),error:message=>notices.push(message)},ElMessageBox:{confirm:async()=>{if(!confirmAllowed) throw new Error('cancel');}}},
-  ElementPlusLocaleZhCn:{},
+  ElementPlus:{ElMessage:{success:message=>notices.push(message),warning:message=>notices.push(message),error:message=>notices.push(message)},ElMessageBox:{confirm:async()=>{if(!confirmAllowed) throw new Error('cancel');}},locale:{}},
   location,history:{pushState(_,__,url) {const next = new URL(url,location.origin); location.pathname = next.pathname; location.search = next.search;}},
   window:{addEventListener() {},removeEventListener() {},scrollTo() {}},
   document:{documentElement:{classList:{contains:name=>classes.has(name),toggle:(name,on)=>on?classes.add(name):classes.delete(name)}},getElementById:()=>null},

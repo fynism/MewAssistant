@@ -2,7 +2,7 @@
 (() => {
   'use strict';
   const {createApp, ref, shallowRef, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick} = Vue;
-  const {ElMessage, ElMessageBox} = ElementPlus;
+  const {ElIcon, ElMessage, ElMessageBox, icons, locale} = ElementPlus;
   const routes = ['/', '/services/knowledge', '/workspace/knowledges', '/try', '/account', '/admin'];
   const titles = {'/':'个人知识库', '/services/knowledge':'客户端接入', '/workspace/knowledges':'个人知识库', '/try':'问资料', '/account':'个人管理', '/admin':'管理页面'};
   const routePath = () => routes.includes(location.pathname.replace(/\/$/, '') || '/') ? location.pathname.replace(/\/$/, '') || '/' : '/';
@@ -738,7 +738,7 @@
       });
       onBeforeUnmount(() => {identityEpoch++; stopChat(); stopDocumentPolling(); clearSearch(); resetChatSources(); window.removeEventListener('popstate',onPopState); systemTheme.removeEventListener('change',onSystemTheme); readerMedia.removeEventListener('change',onReaderWidth);});
       return {
-        locale:ElementPlusLocaleZhCn,page,mobileNav,currentUser,authChecking,isAuthenticated,isAdmin,displayName,pageTitle,isLibrary,isDark,toggleTheme,go,accountCommand,
+        locale,page,mobileNav,currentUser,authChecking,isAuthenticated,isAdmin,displayName,pageTitle,isLibrary,isDark,toggleTheme,go,accountCommand,
         connectionClient,servicePanels,connectionEndpoint,connectionExamples,helpTopic,helpTitle,qualityReview,
         authOpen,authMode,authView,authTitle,authLoading,authError,authForm,authFormRef,authRules,usernameInput,githubLoginButton,resetAuth,openAuth,switchAuth,focusAuth,choosePasswordLogin,showAuthMethods,submitAuth,logout,githubEnabled,githubLoading,startGitHubLogin,
         knowledges,selectedKnowledgeId,selectedKnowledgeIds,selectedKnowledge,knowledgeLoading,knowledgeError,loadKnowledges,selectKnowledge,createOpen,editOpen,knowledgeName,knowledgeDescription,knowledgeEdit,createKnowledge,openKnowledgeEdit,updateKnowledge,deleteKnowledge,
@@ -760,6 +760,6 @@
     emits:['update:modelValue','copy','help'],
     template:'#connection-example-template'
   });
-  app.component('mcp-icon',{props:{name:{type:String,required:true},size:{type:Number,default:20}},setup(props) {return () => Vue.h(ElementPlus.ElIcon,{size:props.size,'aria-hidden':'true'},() => Vue.h(ElementPlusIconsVue[props.name] || ElementPlusIconsVue.Document));}});
+  app.component('mcp-icon',{props:{name:{type:String,required:true},size:{type:Number,default:20}},setup(props) {return () => Vue.h(ElIcon,{size:props.size,'aria-hidden':'true'},() => Vue.h(icons[props.name] || icons.Document));}});
   app.mount('#app');
 })();

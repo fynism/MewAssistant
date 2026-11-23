@@ -1,6 +1,6 @@
 # MeowConnectPlatform 前端
 
-Vue 3 浏览器版 + Element Plus，HTML / CSS / JavaScript，无构建步骤。由现有 FastAPI 静态路由提供，通过同源接口连接业务服务。
+Vue 3 浏览器版 + Element Plus，HTML / CSS / JavaScript，启动时无需构建。由现有 FastAPI 静态路由提供，通过同源接口连接业务服务。
 
 ## 文件组织
 
@@ -9,7 +9,7 @@ Vue 3 浏览器版 + Element Plus，HTML / CSS / JavaScript，无构建步骤。
 - `theme.css`：日间 / 夜间色值、字体、代码配色、Element Plus 主题。
 - `styles.css`：布局、页面排版、品牌动画与响应式规则。
 - `assets/fonts`：Anthropic Sans / Serif 本地字体；来源及使用说明见目录中的 README。
-- `vendor`：固定版本的浏览器发行文件及许可，无运行时 CDN 请求。
+- `vendor`：固定版本的浏览器依赖及许可，无运行时 CDN 请求。修改 Element Plus 组件或图标时，按[浏览器依赖说明](vendor/README.md)更新按需构建产物。
 
 前端无需 `npm install`。按根目录 README 启动现有后端后，打开服务根地址。修改后刷新网页。
 
