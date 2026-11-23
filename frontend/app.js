@@ -111,7 +111,6 @@
       const selectedKnowledge = computed(() => knowledges.value.find(kb => kb.id === selectedKnowledgeId.value));
       const acceptedExtensions = computed(() => knowledgeSettings.value.allowed_extensions.join(','));
       const uploadLimitLabel = computed(() => knowledgeSettings.value.max_upload_bytes ? `${Math.round(knowledgeSettings.value.max_upload_bytes / 1048576)} MB` : '以服务端限制为准');
-      const scopeLabel = computed(() => selectedKnowledgeIds.value.length ? scopeNames(selectedKnowledgeIds.value) : '未选择知识库');
       let documentTimer = null, scopeInitialized = false;
       const toolName = ref('retrieve'), toolQuery = ref(''), topK = ref(5), toolLoading = ref(false), toolResult = ref(null), toolError = ref('');
       const messages = ref([]), chatInput = ref(''), chatLoading = ref(false), chatLog = ref(null), isComposing = ref(false);
@@ -747,7 +746,7 @@
         searchQuery,submittedQuery,searchResult,searchLoading,searchError,readingRows,searchInput,readingList,runSearch,clearSearchInput,guardSearchComposition,
         compactReader,sidebarPane,sidebarHidden,browseKnowledge,toggleReadingSidebar,
         activeSource,activeDocument,previewType,previewOpen,previewLoading,previewError,previewUrl,previewText,previewTextParts,previewTitle,previewCanvas,previewPage,previewPageCount,previewZoom,openPreview,loadPreview,downloadSource,downloadLoading,
-        scopeLabel,scopeNames,toolName,toolQuery,topK,knowledgeSettings,toolLoading,toolResult,toolError,runTool,messages,chatInput,chatLoading,chatLog,isComposing,sendChat,stopChat,handleChatKey,parseMarkdown,traceFacts,traceGroups,newChat,sessions,sessionsOpen,sessionsLoading,sessionsError,loadSessions,loadSession,deleteSession,
+        scopeNames,toolName,toolQuery,topK,knowledgeSettings,toolLoading,toolResult,toolError,runTool,messages,chatInput,chatLoading,chatLog,isComposing,sendChat,stopChat,handleChatKey,parseMarkdown,traceFacts,traceGroups,newChat,sessions,sessionsOpen,sessionsLoading,sessionsError,loadSessions,loadSession,deleteSession,
         chatSourcesOpen,chatSourceView,chatSourcesHeading,chatSourcesByMessage,chatSources,chatSource,toggleChatSources,selectChatSource,closeChatSources,
         chatPageNumber,chatSourcePreview,chatPreviewPage,chatPreviewPageCount,chatPreviewUrl,chatPreviewLoading,chatPreviewError,
         hasChatOriginal,hasChatPdfPage,chatOriginalLoading,loadChatPreview,restoreChatPreviewScroll,downloadChatOriginal,
