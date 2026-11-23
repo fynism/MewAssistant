@@ -483,7 +483,7 @@ html.dark :is(.reading-workspace, .ask-workspace) {
   scrollbar-color: var(--reading-scroll-thumb) transparent;
   scrollbar-width: thin;
 }
-.reading-page-image, .reading-text-page {
+.reading-page-image, .reading-text-page, .reading-markdown-page {
   display: block;
   width: calc(min(100%, var(--reading-paper-width)) * var(--reading-zoom, 1));
   margin: 0 auto;
@@ -491,6 +491,7 @@ html.dark :is(.reading-workspace, .ask-workspace) {
   background: #fff;
   color: #24272b;
 }
+.reading-markdown-page { padding: clamp(18px, 4vw, 60px); line-height: 1.8; }
 .reading-text-page { min-height: min(85vh, 920px); padding: clamp(18px, 4vw, 60px); white-space: pre-wrap; overflow-wrap: anywhere; font: 14px/1.8 var(--mcp-font-code); }
 .reading-snippet mark, .reading-text-page mark { padding: 0 .09em; border-radius: 2px; color: #211d0e; background: var(--reading-mark); }
 .reading-preview-empty { display: grid; justify-items: center; align-content: center; gap: 12px; min-height: 100%; color: var(--reading-muted); text-align: center; }

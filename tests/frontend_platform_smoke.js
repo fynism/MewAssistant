@@ -23,14 +23,14 @@ Object.assign(context, {
   matchMedia:()=>({matches:false,addEventListener() {},removeEventListener() {}}),
   localStorage:{getItem:key=>stored.get(key),setItem:(key,value)=>stored.set(key,value),removeItem:key=>stored.delete(key)},
   sessionStorage:{getItem:()=>null,setItem() {}},navigator:{clipboard:{writeText:async()=>{}}},
-  marked:{parse:text=>text},DOMPurify:{sanitize:text=>text},
+  marked:require(path.join(root,'frontend/vendor/marked/marked.umd.js')),DOMPurify:{sanitize:text=>text},
   fetch:async(url,options={})=>{requests.push({url,method:options.method || 'GET',body:options.body,headers:options.headers});return responder(url,options);}
 });
 const json = (data,status=200) => ({ok:status>=200&&status<300,status,headers:new Headers(),json:async()=>data});
 responder = async (url,options={}) => {
   if(url === '/platform/services/knowledge') return json({externalAvailable:true,endpoint:'https://mcp.example/mcp/knowledge'});
   if(url === '/auth/login' || url === '/auth/register') return json({access_token:'fixture-token',username:'alice',role:userRole});
-  if(url === '/knowledge-settings') return json({allowed_extensions:['.pdf','.txt'],max_upload_bytes:1000000,max_retrieval_results:20});
+  if(url === '/knowledge-settings') return json({allowed_extensions:['.pdf','.txt','.md'],max_upload_bytes:1000000,max_retrieval_results:20});
   if(url === '/knowledges') return json(options.method === 'POST' ? {id:knowledgeId,name:'Private',has_ready_documents:true} : {knowledges:[{id:knowledgeId,name:'Private',has_ready_documents:true}]});
   if(url === '/documents/search') return json({status:'ok',results:[{
     sourceId:'hit',documentId:'doc',knowledgeId,knowledgeName:'Private',filename:'same.pdf',pageNumber:7,
@@ -38,6 +38,9 @@ responder = async (url,options={}) => {
   }]});
   if(url.endsWith('/documents') && options.method !== 'POST') return json({documents:[{id:'doc',knowledge_id:knowledgeId,filename:'same.pdf',status:'ready'}]});
   if(url.includes('/preview/')) return {ok:true,headers:new Headers({'X-PDF-Page-Count':'12'}),blob:async()=>new Blob(['fixture page'])};
+  if(url.endsWith('/markdown/content')) return {ok:true, arrayBuffer:async()=>new Blob([
+    '# 中文标题\n\n![远程图片](https://example.test/test.png)\n\n<img src="https://example.test/raw.png">'
+  ]).arrayBuffer()};
   if(url.includes('/documents')) return json({id:'doc',status:'pending'});
   if(url === '/tools/debug/retrieve') return json({status:'no_match',results:[]});
   if(url === '/tools/debug/listKnowledges') return json({items:[],nextCursor:null});
@@ -52,7 +55,8 @@ responder = async (url,options={}) => {
     const source = {filename:'same.pdf',knowledge_id:knowledgeId,document_id:'doc',page_number:'7'};
     const trace = {type:'trace',rag_trace:{retrieved_chunks:[
       {...source,text:'来源'}, {...source,text:'同一页的另一段'},
-      {filename:'legacy.pdf',page_number:'未知',text:'旧会话片段'}
+      {filename:'legacy.pdf',page_number:'未知',text:'旧会话片段'},
+      {filename:'new.MD',knowledge_id:knowledgeId,document_id:'markdown',text:'Markdown 片段'}
     ]}};
     const bytes = new TextEncoder().encode('data: {"type":"rag_step","step":{"label":"检索"}}\r\n\r\ndata: {"type":"content","content":"真实协议"}\r\n\r\ndata: ' + JSON.stringify(trace) + '\r\n\r\ndata: [DONE]\r\n\r\n');
     let cursor = 0;
@@ -92,10 +96,18 @@ vm.runInContext(fs.readFileSync(path.join(root,'frontend/app.js'),'utf8'),contex
   await app.documentAction(app.documents[0],'retry');
   await app.documentAction(app.documents[0],'delete');
   assert.ok(requests.some(item=>item.url.endsWith('/doc/retry')&&item.method==='POST'));
-  const textFile = new Blob(['2025 v2.0']); textFile.name = 'new.txt';
+  const textFile = new Blob(['2025 v2.0']); textFile.name = 'new.MD';
   const uploadCount = requests.filter(item=>item.method==='POST'&&item.url.endsWith('/documents')).length;
   await app.uploadDocument({target:{files:[textFile],value:'selected'}});
   assert.equal(requests.filter(item=>item.method==='POST'&&item.url.endsWith('/documents')).length,uploadCount+1);
+  assert.ok(app.acceptedExtensions.includes('.md'));
+  await app.openPreview({key:'markdown',knowledgeId,documentId:'markdown',filename:'new.MD'}, {detail:1});
+  await tick();
+  assert.equal(app.previewType,'md');
+  const markdown = app.parseMarkdown(app.previewText, true);
+  assert.match(markdown, /<h1>中文标题<\/h1>/);
+  assert.doesNotMatch(markdown, /<img|example\.test/);
+  assert.equal(requests.find(item=>item.url.endsWith('/markdown/content')).headers.get('Authorization'),'Bearer fixture-token');
   await app.documentAction(app.documents[0],'reprocess');
   assert.ok(requests.some(item=>item.url.endsWith('/doc/reprocess')&&item.method==='POST'));
   await app.viewDocumentPage(app.documents[0],2);
@@ -114,7 +126,7 @@ vm.runInContext(fs.readFileSync(path.join(root,'frontend/app.js'),'utf8'),contex
   assert.equal(previewPaths().length,0);
   app.chatInput = '草稿';
   await app.toggleChatSources(messageId); await tick();
-  assert.equal(app.chatSources.length,2);
+  assert.equal(app.chatSources.length,3);
   assert.equal(app.chatSource.passages.join('|'),'来源|同一页的另一段');
   assert.equal(app.chatPreviewPage,8);
   assert.equal(app.chatPreviewPageCount,12);
@@ -131,6 +143,12 @@ vm.runInContext(fs.readFileSync(path.join(root,'frontend/app.js'),'utf8'),contex
   assert.equal(app.chatSource.pageNumber,null);
   assert.equal(app.chatSource.passages[0],'旧会话片段');
   assert.equal(app.hasChatOriginal,false);
+  app.selectChatSource(app.chatSources[2]); await tick();
+  assert.equal(app.hasChatOriginal,true);
+  assert.equal(app.hasChatPdfPage,false);
+  assert.match(app.parseMarkdown(app.chatPreviewText, true), /<h1>中文标题<\/h1>/);
+  await app.closeChatSources();
+  assert.equal(app.chatPreviewText,null);
   assert.equal(previewPaths().length,3);
   const chatPageRequests = requests.length;
   await app.runTool(); assert.equal(requests.length,chatPageRequests);
