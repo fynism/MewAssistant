@@ -11,7 +11,8 @@
   const fileExtension = filename => /\.([^.]+)$/.exec(filename || '')?.[1].toLowerCase();
   function previewFormat(filename) {
     const extension = fileExtension(filename);
-    return ['pdf','txt','md'].includes(extension) ? extension : null;
+    if (['pdf','doc','docx'].includes(extension)) return 'pdf';
+    return ['txt','md'].includes(extension) ? extension : null;
   }
   function decodePreviewText(buffer) {
     const bytes = new Uint8Array(buffer);
@@ -165,8 +166,9 @@
       const hasChatOriginal = computed(() => Boolean(chatSource.value?.knowledgeId && chatSource.value?.documentId));
       const chatPreviewFormat = computed(() => {
         if (!hasChatOriginal.value) return null;
-        const format = previewFormat(chatSource.value.filename);
-        return format === 'pdf' && chatSource.value.pageNumber === null ? null : format;
+        const {filename,pageNumber} = chatSource.value;
+        if (fileExtension(filename) === 'pdf' && pageNumber === null) return null;
+        return previewFormat(filename);
       });
       const sessions = ref([]), sessionsOpen = ref(false), sessionsLoading = ref(false), sessionsError = ref('');
       let sessionId = newSessionId(), streamController = null;
@@ -791,7 +793,7 @@
         documents,documentsLoading,documentsError,documentBusyId,loadDocuments,fileInput,replaceInput,isUploading,acceptedExtensions,uploadLimitLabel,uploadDocument,chooseReplacement,replaceDocument,documentAction,statusLabel,documentPending,openTryWithKnowledge,pageReview,pageReviewLoading,viewDocumentPage,
         searchQuery,submittedQuery,searchResult,searchLoading,searchError,readingRows,searchInput,readingList,runSearch,clearSearchInput,guardSearchComposition,
         compactReader,sidebarPane,sidebarHidden,browseKnowledge,toggleReadingSidebar,
-        activeSource,activeDocument,previewOpen,preview,previewTitle,previewCanvas,previewZoom,openPreview,loadPreview,downloadSource,downloadLoading,
+        activeSource,activeDocument,previewOpen,preview,previewFormat,previewTitle,previewCanvas,previewZoom,openPreview,loadPreview,downloadSource,downloadLoading,
         scopeNames,toolName,toolQuery,topK,knowledgeSettings,toolLoading,toolResult,toolError,runTool,messages,chatInput,chatLoading,chatLog,isComposing,sendChat,stopChat,handleChatKey,parseMarkdown,traceFacts,traceGroups,newChat,sessions,sessionsOpen,sessionsLoading,sessionsError,loadSessions,loadSession,deleteSession,
         chatSourcesOpen,chatSourceView,chatSourcesHeading,chatSourcesByMessage,chatSources,chatSource,toggleChatSources,selectChatSource,closeChatSources,
         chatPageNumber,chatSourcePreview,chatPreview,

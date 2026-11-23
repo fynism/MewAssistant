@@ -130,7 +130,7 @@
                         <mcp-icon name="Document" class="reading-file-icon" :class="{'is-pdf':row.filename.toLowerCase().endsWith('.pdf')}" :size="22"></mcp-icon>
                         <span class="reading-row-copy">
                           <strong :title="row.filename">{{ row.filename }}</strong>
-                          <span class="reading-row-meta">{{ row.knowledgeName }}<template v-if="row.pageNumber != null && row.filename.toLowerCase().endsWith('.pdf')"> · 第 {{ row.pageNumber + 1 }} 页</template><template v-if="row.doc && row.doc.status !== 'ready'"> · <span :class="'status-' + row.doc.status">{{ statusLabel(row.doc.status) }}</span></template></span>
+                          <span class="reading-row-meta">{{ row.knowledgeName }}<template v-if="chatPageNumber(row.pageNumber) && previewFormat(row.filename) === 'pdf'"> · 第 {{ chatPageNumber(row.pageNumber) }} 页</template><template v-if="row.doc && row.doc.status !== 'ready'"> · <span :class="'status-' + row.doc.status">{{ statusLabel(row.doc.status) }}</span></template></span>
                           <span v-if="row.snippet?.length" class="reading-snippet"><template v-for="(part, index) in row.snippet" :key="index"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
                         </span>
                       </button>

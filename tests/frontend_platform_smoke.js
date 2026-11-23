@@ -30,7 +30,7 @@ const json = (data,status=200) => ({ok:status>=200&&status<300,status,headers:ne
 responder = async (url,options={}) => {
   if(url === '/platform/services/knowledge') return json({externalAvailable:true,endpoint:'https://mcp.example/mcp/knowledge'});
   if(url === '/auth/login' || url === '/auth/register') return json({access_token:'fixture-token',username:'alice',role:userRole});
-  if(url === '/knowledge-settings') return json({allowed_extensions:['.pdf','.txt','.md'],max_upload_bytes:1000000,max_retrieval_results:20});
+  if(url === '/knowledge-settings') return json({allowed_extensions:['.pdf','.txt','.md','.doc','.docx'],max_upload_bytes:1000000,max_retrieval_results:20});
   if(url === '/knowledges') return json(options.method === 'POST' ? {id:knowledgeId,name:'Private',has_ready_documents:true} : {knowledges:[{id:knowledgeId,name:'Private',has_ready_documents:true}]});
   if(url === '/documents/search') return json({status:'ok',results:[{
     sourceId:'hit',documentId:'doc',knowledgeId,knowledgeName:'Private',filename:'same.pdf',pageNumber:7,
@@ -59,7 +59,10 @@ responder = async (url,options={}) => {
       {...source,text:'来源'}, {...source,text:'同一页的另一段'},
       {filename:'legacy.pdf',page_number:'未知',text:'旧会话片段'},
       {filename:'note.TXT',knowledge_id:knowledgeId,document_id:'text',text:'中文'},
-      {filename:'guide.MD',knowledge_id:knowledgeId,document_id:'markdown',text:'文档'}
+      {filename:'guide.MD',knowledge_id:knowledgeId,document_id:'markdown',text:'文档'},
+      {filename:'old.DOC',knowledge_id:knowledgeId,document_id:'old-word',text:'旧 Word 来源'},
+      {filename:'new.docx',knowledge_id:knowledgeId,document_id:'new-word',page_number:3,text:'Word 新引用'},
+      {filename:'old-reference.pdf',knowledge_id:knowledgeId,document_id:'old-pdf',text:'旧 PDF 来源'}
     ]}};
     const bytes = new TextEncoder().encode('data: {"type":"rag_step","step":{"label":"检索"}}\r\n\r\ndata: {"type":"content","content":"真实协议"}\r\n\r\ndata: ' + JSON.stringify(trace) + '\r\n\r\ndata: [DONE]\r\n\r\n');
     let cursor = 0;
@@ -134,7 +137,7 @@ vm.runInContext(fs.readFileSync(path.join(root,'frontend/app.js'),'utf8'),contex
   assert.equal(previewPaths().length,0);
   app.chatInput = '草稿';
   await app.toggleChatSources(messageId); await tick();
-  assert.equal(app.chatSources.length,4);
+  assert.equal(app.chatSources.length,7);
   assert.equal(app.chatSource.passages.join('|'),'来源|同一页的另一段');
   assert.equal(app.chatPreview.page,8);
   assert.equal(app.chatPreview.pageCount,12);
@@ -157,6 +160,16 @@ vm.runInContext(fs.readFileSync(path.join(root,'frontend/app.js'),'utf8'),contex
   app.selectChatSource(app.chatSources[3]); await tick();
   assert.equal(app.chatPreview.text,'# 文档');
   assert.equal(app.chatPreview.hasContent,true);
+  app.selectChatSource(app.chatSources[4]); await tick();
+  assert.equal(app.chatPreview.page,1);
+  assert.equal(previewPaths().at(-1).url, `/knowledges/${knowledgeId}/documents/old-word/preview/1`);
+  app.selectChatSource(app.chatSources[5]); await tick();
+  assert.equal(app.chatPreview.page,4);
+  assert.equal(previewPaths().at(-1).url, `/knowledges/${knowledgeId}/documents/new-word/preview/4`);
+  app.selectChatSource(app.chatSources[6]); await tick();
+  assert.equal(app.hasChatOriginal,true);
+  assert.equal(app.chatPreview.hasContent,false);
+  assert.equal(previewPaths().length,5);
   await app.closeChatSources();
   assert.equal(app.chatPreview.hasContent,false);
   const chatPageRequests = requests.length;
@@ -191,6 +204,14 @@ vm.runInContext(fs.readFileSync(path.join(root,'frontend/app.js'),'utf8'),contex
   app.keyName = 'Slow'; const pending = app.createKey(); await tick(); app.go('/'); await tick(); finish(json({key:'late-secret'})); await pending; assert.equal(app.newKey,'');
   responder = normalResponder;
   app.go('/workspace/knowledges'); await tick();
+  const wordSource = {key:'new-word',documentId:'new-word',knowledgeId,filename:'new.docx',pageNumber:3,query:'查询'};
+  await app.openPreview(wordSource,{detail:1}); await tick();
+  assert.equal(app.preview.page,4);
+  assert.equal(app.preview.pageCount,12);
+  assert.equal(previewPaths().at(-1).url, `/knowledges/${knowledgeId}/documents/new-word/preview/4`);
+  assert.deepEqual(JSON.parse(previewPaths().at(-1).body),{query:'查询'});
+  await app.loadPreview(5);
+  assert.equal(app.preview.page,5);
   responder = async()=>json({detail:'expired'},401); await app.loadKnowledges();
   assert.equal(app.isAuthenticated,false); assert.equal(app.knowledges.length,0); assert.equal(app.authOpen,true);
   unmount();
