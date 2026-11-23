@@ -156,10 +156,10 @@
                   <button type="button" class="reading-sidebar-toggle" aria-controls="reading-sidebar" :aria-expanded="!sidebarHidden && !compactReader" :title="compactReader ? '返回列表' : sidebarHidden ? '展开侧栏' : '收起侧栏'" @click="toggleReadingSidebar"><mcp-icon :name="compactReader ? 'ArrowLeft' : 'Fold'" :size="20"></mcp-icon>结果</button>
                   <h2 ref="previewTitle" class="reading-preview-title" tabindex="-1" :title="activeSource?.filename">{{ activeSource?.filename || '原文预览' }}</h2>
                   <div v-if="activeSource" class="reading-preview-controls">
-                    <div v-if="previewType === 'pdf' && previewPageCount" class="reading-page-controls">
-                      <button type="button" class="reading-icon-button" aria-label="上一页" title="上一页" :disabled="previewPage <= 1" @click="loadPreview(previewPage - 1)"><mcp-icon name="ArrowLeft" :size="16"></mcp-icon></button>
-                      <span aria-live="polite">{{ previewPage }} / {{ previewPageCount }}</span>
-                      <button type="button" class="reading-icon-button" aria-label="下一页" title="下一页" :disabled="previewPage >= previewPageCount" @click="loadPreview(previewPage + 1)"><mcp-icon name="ArrowRight" :size="16"></mcp-icon></button>
+                    <div v-if="preview.pageCount" class="reading-page-controls">
+                      <button type="button" class="reading-icon-button" aria-label="上一页" title="上一页" :disabled="preview.page <= 1" @click="loadPreview(preview.page - 1)"><mcp-icon name="ArrowLeft" :size="16"></mcp-icon></button>
+                      <span aria-live="polite">{{ preview.page }} / {{ preview.pageCount }}</span>
+                      <button type="button" class="reading-icon-button" aria-label="下一页" title="下一页" :disabled="preview.page >= preview.pageCount" @click="loadPreview(preview.page + 1)"><mcp-icon name="ArrowRight" :size="16"></mcp-icon></button>
                       <select v-model.number="previewZoom" aria-label="预览缩放" title="预览缩放"><option :value="75">75%</option><option :value="100">100%</option><option :value="125">125%</option><option :value="150">150%</option><option :value="200">200%</option></select>
                     </div>
                     <button type="button" class="reading-download" title="下载原文件" aria-label="下载原文件" :disabled="downloadLoading" @click="downloadSource"><mcp-icon :name="downloadLoading ? 'Loading' : 'Download'" :class="{'processing-icon':downloadLoading}" :size="19"></mcp-icon><span>下载</span></button>
@@ -176,15 +176,14 @@
                   </div>
                 </header>
                 <p v-if="activeDocument?.error_summary" class="reading-preview-warning" role="status">{{ activeDocument.error_summary }}</p>
-                <div ref="previewCanvas" class="reading-canvas" :aria-busy="previewLoading">
+                <div ref="previewCanvas" class="reading-canvas" :aria-busy="preview.loading">
                   <div v-if="!activeSource" class="reading-preview-empty with-illustration">
                     <span class="empty-state-art reading-preview-illustration" aria-hidden="true"></span>
                     <p>选择文档查看原文</p>
                   </div>
-                  <div v-else-if="previewLoading" class="reading-preview-empty" role="status"><mcp-icon name="Loading" class="processing-icon" :size="24"></mcp-icon><p>正在加载原文…</p></div>
-                  <div v-else-if="previewError" class="reading-preview-empty" role="alert"><p>{{ previewError }}</p><el-button link type="primary" @click="loadPreview()">重试</el-button></div>
-                  <img v-else-if="previewUrl" :src="previewUrl" :alt="activeSource.filename + ' · 第 ' + previewPage + ' 页'" class="reading-page-image" :style="{'--reading-zoom':previewZoom / 100}">
-                  <pre v-else-if="previewText !== null" class="reading-text-page" tabindex="0"><template v-for="(part, index) in previewTextParts" :key="index"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></pre>
+                  <div v-else-if="preview.loading" class="reading-preview-empty" role="status"><mcp-icon name="Loading" class="processing-icon" :size="24"></mcp-icon><p>正在加载原文…</p></div>
+                  <div v-else-if="preview.error" class="reading-preview-empty" role="alert"><p>{{ preview.error }}</p><el-button link type="primary" @click="loadPreview()">重试</el-button></div>
+                  <mcp-document-preview v-else-if="preview.hasContent" :preview="preview" :filename="activeSource.filename" :query="activeSource.query" :zoom="previewZoom"></mcp-document-preview>
                   <div v-else class="reading-preview-empty"><mcp-icon name="Document" :size="31"></mcp-icon><p>此文件格式可下载后打开</p><el-button link type="primary" :loading="downloadLoading" @click="downloadSource">下载原文件</el-button></div>
                 </div>
               </section>
@@ -263,22 +262,22 @@
                 </div>
                 <template v-if="chatSource">
                   <div v-if="hasChatOriginal" class="chat-source-controls">
-                    <div v-if="hasChatPdfPage" class="chat-source-pagination">
-                      <button type="button" class="reading-icon-button" aria-label="上一页" :disabled="chatPreviewLoading || chatPreviewPage <= 1" @click="loadChatPreview(chatPreviewPage - 1)"><mcp-icon name="ArrowLeft" :size="16"></mcp-icon></button>
-                      <span aria-live="polite">第 {{ chatPreviewPage }} 页</span>
-                      <button type="button" class="reading-icon-button" aria-label="下一页" :disabled="chatPreviewLoading || chatPreviewPage >= chatPreviewPageCount" @click="loadChatPreview(chatPreviewPage + 1)"><mcp-icon name="ArrowRight" :size="16"></mcp-icon></button>
+                    <div v-if="chatPreviewFormat === 'pdf'" class="chat-source-pagination">
+                      <button type="button" class="reading-icon-button" aria-label="上一页" :disabled="chatPreview.loading || chatPreview.page <= 1" @click="loadChatPreview(chatPreview.page - 1)"><mcp-icon name="ArrowLeft" :size="16"></mcp-icon></button>
+                      <span aria-live="polite">第 {{ chatPreview.page }} 页</span>
+                      <button type="button" class="reading-icon-button" aria-label="下一页" :disabled="chatPreview.loading || chatPreview.page >= chatPreview.pageCount" @click="loadChatPreview(chatPreview.page + 1)"><mcp-icon name="ArrowRight" :size="16"></mcp-icon></button>
                     </div>
                     <el-button link type="primary" class="chat-source-original" :loading="chatOriginalLoading" @click="downloadChatOriginal"><mcp-icon name="Download" :size="17"></mcp-icon>下载原文</el-button>
                   </div>
-                  <div ref="chatSourcePreview" class="chat-source-preview" :aria-busy="chatPreviewLoading">
-                    <div v-if="chatPreviewLoading" class="chat-source-status" role="status"><mcp-icon name="Loading" class="processing-icon" :size="16"></mcp-icon>正在加载原文…</div>
-                    <div v-else-if="chatPreviewError" class="chat-source-status" role="alert"><p>{{ chatPreviewError }}</p><el-button link type="primary" @click="loadChatPreview()">重试</el-button></div>
-                    <img v-else-if="chatPreviewUrl" class="chat-source-page" :src="chatPreviewUrl" :alt="chatSource.filename + ' · 第 ' + chatPreviewPage + ' 页'" @load="restoreChatPreviewScroll">
-                    <component :is="chatPreviewUrl ? 'details' : 'div'" v-if="chatSource.passages.length" class="chat-source-passages">
-                      <summary v-if="chatPreviewUrl">检索片段</summary>
+                  <div ref="chatSourcePreview" class="chat-source-preview" :aria-busy="chatPreview.loading">
+                    <div v-if="chatPreview.loading" class="chat-source-status" role="status"><mcp-icon name="Loading" class="processing-icon" :size="16"></mcp-icon>正在加载原文…</div>
+                    <div v-else-if="chatPreview.error" class="chat-source-status" role="alert"><p>{{ chatPreview.error }}</p><el-button link type="primary" @click="loadChatPreview()">重试</el-button></div>
+                    <mcp-document-preview v-else-if="chatPreview.hasContent" :preview="chatPreview" :filename="chatSource.filename" compact></mcp-document-preview>
+                    <component :is="chatPreview.hasContent ? 'details' : 'div'" v-if="chatSource.passages.length" class="chat-source-passages">
+                      <summary v-if="chatPreview.hasContent">检索片段</summary>
                       <p v-for="passage in chatSource.passages" :key="passage">{{ passage }}</p>
                     </component>
-                    <p v-else-if="!chatPreviewUrl && !chatPreviewLoading && !chatPreviewError" class="chat-source-status">此来源没有可显示的片段</p>
+                    <p v-else-if="!chatPreview.hasContent && !chatPreview.loading && !chatPreview.error" class="chat-source-status">此来源没有可显示的片段</p>
                   </div>
                 </template>
               </aside>
@@ -352,6 +351,11 @@
       <el-drawer v-model="sessionsOpen" title="历史会话" size="min(460px,95vw)"><el-alert v-if="sessionsError" :title="sessionsError" type="error" :closable="false" class="feedback"><template #default><el-button link @click="loadSessions">重试</el-button></template></el-alert><div v-loading="sessionsLoading"><p v-if="!sessions.length && !sessionsLoading && !sessionsError" class="muted">还没有历史会话。</p><article v-for="session in sessions" :key="session.session_id" class="session-row"><el-button text :disabled="sessionsLoading" @click="loadSession(session)">{{ session.title || '未命名会话' }}</el-button><p class="small muted">{{ formatDate(session.updated_at) }}</p><p class="small muted">{{ scopeNames(session.last_knowledge_ids) }}</p><el-button link type="danger" @click="deleteSession(session)">删除</el-button></article></div></el-drawer>
     </el-config-provider>
   </div>
+  <template id="document-preview-template">
+    <img v-if="preview.url" :src="preview.url" :alt="filename + ' · 第 ' + preview.page + ' 页'" :class="compact ? 'chat-source-page' : 'reading-page-image'" :style="{'--reading-zoom':zoom / 100}" @load="preview.restoreImageScroll">
+    <article v-else-if="isMarkdown" class="reading-markdown-page markdown-body" :class="{'chat-source-page':compact}" tabindex="0" v-html="markdown"></article>
+    <pre v-else class="reading-text-page" :class="{'chat-source-page':compact}" tabindex="0"><template v-for="(part, index) in textParts" :key="index"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></pre>
+  </template>
   <template id="connection-example-template">
     <section class="connection-example" aria-label="MCP 客户端配置示例">
       <el-tabs :model-value="modelValue" @update:model-value="$emit('update:modelValue', $event)" class="connection-tabs">

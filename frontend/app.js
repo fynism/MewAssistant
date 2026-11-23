@@ -8,6 +8,48 @@
   const routePath = () => routes.includes(location.pathname.replace(/\/$/, '') || '/') ? location.pathname.replace(/\/$/, '') || '/' : '/';
   const storage = {get(key) {try {return localStorage.getItem(key);} catch {return null;}}, set(key, value) {try {value ? localStorage.setItem(key, value) : localStorage.removeItem(key);} catch {}}};
   const newSessionId = () => 'session_' + crypto.randomUUID();
+  const fileExtension = filename => /\.([^.]+)$/.exec(filename || '')?.[1].toLowerCase();
+  function previewFormat(filename) {
+    const extension = fileExtension(filename);
+    return ['pdf','txt','md'].includes(extension) ? extension : null;
+  }
+  function decodePreviewText(buffer) {
+    const bytes = new Uint8Array(buffer);
+    const view = new DataView(buffer);
+    const bom = view.byteLength >= 4 ? view.getUint32(0) : 0;
+    if (bom === 0xfffe0000 || bom === 0x0000feff) {
+      // TextDecoder does not support UTF-32, and the LE BOM starts with the UTF-16 BOM.
+      const chunks = [], points = [];
+      const littleEndian = bom === 0xfffe0000;
+      if (view.byteLength % 4) throw new Error('文本编码无法识别，请另存为 UTF-8');
+      for (let offset = 4; offset < view.byteLength; offset += 4) {
+        const point = view.getUint32(offset, littleEndian);
+        if (point > 0x10ffff || (point >= 0xd800 && point <= 0xdfff)) throw new Error('文本编码无法识别，请另存为 UTF-8');
+        points.push(point);
+        if (points.length === 4096) {
+          chunks.push(String.fromCodePoint(...points));
+          points.length = 0;
+        }
+      }
+      return chunks.join('') + String.fromCodePoint(...points);
+    }
+    if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder('utf-16le').decode(bytes);
+    if (bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder('utf-16be').decode(bytes);
+    try {return new TextDecoder('utf-8', {fatal:true}).decode(bytes);}
+    catch {return new TextDecoder('gb18030').decode(bytes);}
+  }
+  function parseMarkdown(text, preview = false) {
+    const tags = ['style','iframe'];
+    const attrs = ['style'];
+    // Opening a document must not request resources referenced in its Markdown.
+    if (preview) {
+      tags.push('img','picture','audio','video','source','track','object','embed','input','form','link','meta');
+      attrs.push('src','srcset','poster','background');
+    }
+    return DOMPurify.sanitize(marked.parse(text || '', {breaks:true,gfm:true}), {
+      USE_PROFILES:{html:true},FORBID_TAGS:tags,FORBID_ATTR:attrs
+    });
+  }
   function highlightParts(text, query) {
     if (!query) return [{text, match:false}];
     const literal = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -93,13 +135,11 @@
       const documents = ref([]), documentsLoading = ref(false), documentsError = ref(''), documentBusyId = ref('');
       const searchQuery = ref(''), submittedQuery = ref(''), searchResult = shallowRef(null), searchLoading = ref(false), searchError = ref('');
       const sidebarPane = ref('results'), sidebarHidden = ref(false);
-      const activeSource = shallowRef(null), previewOpen = ref(false), previewLoading = ref(false), previewError = ref('');
-      const previewUrl = ref(''), previewText = ref(null), previewPage = ref(1), previewPageCount = ref(0), previewZoom = ref(100);
+      const activeSource = shallowRef(null), previewOpen = ref(false), previewZoom = ref(100);
       const downloadLoading = ref(false), searchInput = ref(null), previewTitle = ref(null), readingList = ref(null), previewCanvas = ref(null);
-      let searchController, previewController;
-      const previewType = computed(() => activeSource.value?.filename.split('.').at(-1).toLowerCase());
+      const preview = useDocumentPreview(previewCanvas);
+      let searchController;
       const activeDocument = computed(() => documents.value.find(doc => doc.id === activeSource.value?.documentId));
-      const previewTextParts = computed(() => highlightParts(previewText.value || '', activeSource.value?.query));
       const readingRows = computed(() => submittedQuery.value
         ? (searchResult.value?.results || []).map(source => ({...source, key:source.sourceId, query:submittedQuery.value, snippet:searchSnippet(source.text, submittedQuery.value)}))
         : documents.value.map(doc => ({key:doc.id, documentId:doc.id, knowledgeId:doc.knowledge_id,
@@ -115,17 +155,19 @@
       const toolName = ref('retrieve'), toolQuery = ref(''), topK = ref(5), toolLoading = ref(false), toolResult = ref(null), toolError = ref('');
       const messages = ref([]), chatInput = ref(''), chatLoading = ref(false), chatLog = ref(null), isComposing = ref(false);
       const chatSourcesOpen = ref(false), chatSourceView = shallowRef(null), chatSourcesHeading = ref(null);
-      const chatSourcePreview = ref(null), chatPreviewPage = ref(null), chatPreviewPageCount = ref(0);
-      const chatPreviewUrl = ref(''), chatPreviewLoading = ref(false), chatPreviewError = ref('');
+      const chatSourcePreview = ref(null), chatPreview = useDocumentPreview(chatSourcePreview);
       const chatOriginalLoading = ref(false);
-      let chatSourceTrigger = null, chatPreviewController = null, chatOriginalController = null, chatPreviewScroll = 0;
+      let chatSourceTrigger = null, chatOriginalController = null, chatPreviewScroll = 0;
       const chatSourcesByMessage = computed(() => new Map(messages.value
         .map(message => [message.id,collectChatSources(message.trace?.retrieved_chunks || [])])));
       const chatSources = computed(() => chatSourcesByMessage.value.get(chatSourceView.value?.messageId) || []);
       const chatSource = computed(() => chatSources.value.find(source => source.key === chatSourceView.value?.sourceKey) || chatSources.value[0]);
       const hasChatOriginal = computed(() => Boolean(chatSource.value?.knowledgeId && chatSource.value?.documentId));
-      const hasChatPdfPage = computed(() => hasChatOriginal.value && chatSource.value.pageNumber !== null
-        && chatSource.value.filename.toLowerCase().endsWith('.pdf'));
+      const chatPreviewFormat = computed(() => {
+        if (!hasChatOriginal.value) return null;
+        const format = previewFormat(chatSource.value.filename);
+        return format === 'pdf' && chatSource.value.pageNumber === null ? null : format;
+      });
       const sessions = ref([]), sessionsOpen = ref(false), sessionsLoading = ref(false), sessionsError = ref('');
       let sessionId = newSessionId(), streamController = null;
       const keys = ref([]), keyName = ref(''), newKey = ref(''), keysLoading = ref(false), keyBusy = ref(false), keyError = ref('');
@@ -330,57 +372,82 @@
           if (!controller.signal.aborted) searchLoading.value = false;
         }
       }
-      function releasePreview() {
-        previewController?.abort();
-        if (previewUrl.value) URL.revokeObjectURL(previewUrl.value);
-        previewUrl.value = ''; previewText.value = null; previewError.value = ''; previewLoading.value = false;
-      }
       function resetPreview() {
-        releasePreview();
-        activeSource.value = null; previewOpen.value = false; previewPageCount.value = 0; previewZoom.value = 100;
+        preview.reset();
+        activeSource.value = null; previewOpen.value = false; previewZoom.value = 100;
       }
       function sourcePath(source) {
         return `/knowledges/${encodeURIComponent(source.knowledgeId)}/documents/${encodeURIComponent(source.documentId)}`;
       }
-      async function fetchPdfPage(source, pageNumber, signal) {
-        const response = await request(`${sourcePath(source)}/preview/${pageNumber}`, {
-          ...jsonBody('POST', {query:source.query || ''}), signal
+      function useDocumentPreview(canvas) {
+        let controller, scrollPosition = 0;
+        const state = reactive({
+          url:'', text:null, page:null, pageCount:0, loading:false, error:'',
+          get hasContent() {return Boolean(this.url) || this.text !== null;},
+          clear, reset, load, restoreImageScroll
         });
-        return {blob:await response.blob(), pageCount:Number(response.headers.get('X-PDF-Page-Count')) || 0};
-      }
-      async function loadPreview(pageNumber = previewPage.value) {
-        const source = activeSource.value, format = previewType.value;
-        if (!source || !['pdf', 'txt'].includes(format)) return;
-        releasePreview();
-        const controller = new AbortController(); previewController = controller;
-        previewPage.value = pageNumber; previewLoading.value = true;
-        previewCanvas.value?.scrollTo(0, 0);
-        try {
-          const path = sourcePath(source);
-          if (format === 'pdf') {
-            const {blob,pageCount} = await fetchPdfPage(source, pageNumber, controller.signal);
-            if (controller.signal.aborted) return;
-            previewPageCount.value = pageCount;
-            previewUrl.value = URL.createObjectURL(blob);
-          } else {
-            const response = await request(`${path}/content`, {signal:controller.signal});
-            const bytes = await response.arrayBuffer();
-            if (controller.signal.aborted) return;
-            try {previewText.value = new TextDecoder('utf-8', {fatal:true}).decode(bytes);}
-            catch {previewText.value = new TextDecoder('gb18030').decode(bytes);}
-          }
-        } catch (error) {
-          if (!controller.signal.aborted && error.name !== 'AbortError') previewError.value = error.message;
-        } finally {
-          if (!controller.signal.aborted) previewLoading.value = false;
+        return state;
+
+        function clear() {
+          controller?.abort();
+          controller = null;
+          if (state.url) URL.revokeObjectURL(state.url);
+          Object.assign(state, {url:'',text:null,error:'',loading:false});
         }
+        function reset() {
+          clear();
+          state.page = null;
+          state.pageCount = 0;
+        }
+        function restoreImageScroll(event) {
+          if (event.target.src === state.url) canvas.value?.scrollTo(0, scrollPosition);
+        }
+        async function load(source, pageNumber, scroll = 0) {
+          const format = previewFormat(source?.filename);
+          if (!format) return;
+          clear();
+          const requestController = new AbortController();
+          controller = requestController;
+          const {signal} = requestController;
+          state.page = pageNumber;
+          state.loading = true;
+          scrollPosition = scroll;
+          canvas.value?.scrollTo(0, 0);
+          const path = sourcePath(source);
+          try {
+            if (format === 'pdf') {
+              const response = await request(`${path}/preview/${pageNumber}`, {
+                ...jsonBody('POST', {query:source.query || ''}), signal
+              });
+              const blob = await response.blob();
+              if (signal.aborted) return;
+              state.pageCount = Number(response.headers.get('X-PDF-Page-Count')) || 0;
+              state.url = URL.createObjectURL(blob);
+            } else {
+              const response = await request(`${path}/content`, {signal});
+              const bytes = await response.arrayBuffer();
+              if (signal.aborted) return;
+              state.text = decodePreviewText(bytes);
+            }
+          } catch (error) {
+            if (!signal.aborted && error.name !== 'AbortError') state.error = error.message;
+          } finally {
+            if (!signal.aborted) state.loading = false;
+          }
+          if (!signal.aborted && scroll && state.text !== null) {
+            await nextTick();
+            if (!signal.aborted) canvas.value?.scrollTo(0, scroll);
+          }
+        }
+      }
+      function loadPreview(pageNumber = preview.page ?? 1) {
+        return preview.load(activeSource.value, pageNumber);
       }
       async function openPreview(source, event) {
         if (activeSource.value?.key !== source.key) {
           resetPreview();
           activeSource.value = source;
-          previewPage.value = (source.pageNumber ?? 0) + 1;
-          loadPreview();
+          loadPreview(chatPageNumber(source.pageNumber) ?? 1);
         }
         previewOpen.value = true;
         if (event.detail === 0 || compactReader.value) {
@@ -502,7 +569,6 @@
         catch (error) {if (epoch === identityEpoch && call === resultEpoch && error.name !== 'AbortError') toolError.value = error.message;}
         finally {if (epoch === identityEpoch && call === resultEpoch) toolLoading.value = false;}
       }
-      function parseMarkdown(text) {return DOMPurify.sanitize(marked.parse(text || '',{breaks:true,gfm:true}),{USE_PROFILES:{html:true},FORBID_TAGS:['style','iframe'],FORBID_ATTR:['style']});}
       function traceFacts(trace) {
         if (!trace) return [];
         const fields = {
@@ -535,16 +601,16 @@
         }
         chatSourceTrigger = event?.currentTarget || null;
         chatSourcesOpen.value = true;
-        loadChatPreview(chatPreviewPage.value ?? chatSource.value?.pageNumber, chatPreviewScroll);
+        loadChatPreview(chatPreview.page ?? chatSource.value?.pageNumber ?? 1, chatPreviewScroll);
         await nextTick();
         chatSourcesHeading.value?.focus({preventScroll:true});
       }
       function selectChatSource(source) {
         if (source.key === chatSource.value?.key) return;
-        clearChatSourceContent();
+        clearChatSourceContent(true);
         chatSourceView.value = {...chatSourceView.value,sourceKey:source.key};
-        chatPreviewPageCount.value = 0; chatPreviewPage.value = null; chatPreviewScroll = 0;
-        loadChatPreview(source.pageNumber);
+        chatPreviewScroll = 0;
+        loadChatPreview(source.pageNumber ?? 1);
       }
       async function closeChatSources() {
         chatPreviewScroll = chatSourcePreview.value?.scrollTop || 0;
@@ -556,40 +622,20 @@
         if (!chatSourcesOpen.value) trigger?.focus({preventScroll:true});
       }
       function resetChatSources() {
-        clearChatSourceContent();
+        clearChatSourceContent(true);
         chatSourcesOpen.value = false; chatSourceView.value = null; chatSourceTrigger = null;
-        chatPreviewPageCount.value = 0; chatPreviewPage.value = null; chatPreviewScroll = 0;
+        chatPreviewScroll = 0;
       }
-      function clearChatPreview() {
-        chatPreviewController?.abort(); chatPreviewController = null;
-        if (chatPreviewUrl.value) URL.revokeObjectURL(chatPreviewUrl.value);
-        chatPreviewUrl.value = ''; chatPreviewLoading.value = false; chatPreviewError.value = '';
-      }
-      function clearChatSourceContent() {
-        clearChatPreview();
+      function clearChatSourceContent(resetPosition = false) {
+        if (resetPosition) chatPreview.reset();
+        else chatPreview.clear();
         chatOriginalController?.abort(); chatOriginalController = null;
         chatOriginalLoading.value = false;
       }
-      async function loadChatPreview(pageNumber = chatPreviewPage.value, scroll = 0) {
-        if (!chatSourcesOpen.value || !hasChatPdfPage.value || !pageNumber) return;
-        clearChatPreview();
-        const controller = new AbortController();
-        chatPreviewController = controller;
-        chatPreviewPage.value = pageNumber; chatPreviewLoading.value = true; chatPreviewScroll = scroll;
-        chatSourcePreview.value?.scrollTo(0, 0);
-        try {
-          const {blob,pageCount} = await fetchPdfPage(chatSource.value, pageNumber, controller.signal);
-          if (controller.signal.aborted) return;
-          chatPreviewPageCount.value = pageCount;
-          chatPreviewUrl.value = URL.createObjectURL(blob);
-        } catch (error) {
-          if (!controller.signal.aborted) chatPreviewError.value = error.message;
-        } finally {
-          if (!controller.signal.aborted) chatPreviewLoading.value = false;
-        }
-      }
-      function restoreChatPreviewScroll(event) {
-        if (event.target.src === chatPreviewUrl.value) chatSourcePreview.value?.scrollTo(0, chatPreviewScroll);
+      function loadChatPreview(pageNumber = chatPreview.page ?? 1, scroll = 0) {
+        if (!chatSourcesOpen.value || !chatPreviewFormat.value) return;
+        chatPreviewScroll = scroll;
+        return chatPreview.load(chatSource.value, pageNumber, scroll);
       }
       async function downloadChatOriginal() {
         if (!hasChatOriginal.value || chatOriginalLoading.value) return;
@@ -745,11 +791,11 @@
         documents,documentsLoading,documentsError,documentBusyId,loadDocuments,fileInput,replaceInput,isUploading,acceptedExtensions,uploadLimitLabel,uploadDocument,chooseReplacement,replaceDocument,documentAction,statusLabel,documentPending,openTryWithKnowledge,pageReview,pageReviewLoading,viewDocumentPage,
         searchQuery,submittedQuery,searchResult,searchLoading,searchError,readingRows,searchInput,readingList,runSearch,clearSearchInput,guardSearchComposition,
         compactReader,sidebarPane,sidebarHidden,browseKnowledge,toggleReadingSidebar,
-        activeSource,activeDocument,previewType,previewOpen,previewLoading,previewError,previewUrl,previewText,previewTextParts,previewTitle,previewCanvas,previewPage,previewPageCount,previewZoom,openPreview,loadPreview,downloadSource,downloadLoading,
+        activeSource,activeDocument,previewOpen,preview,previewTitle,previewCanvas,previewZoom,openPreview,loadPreview,downloadSource,downloadLoading,
         scopeNames,toolName,toolQuery,topK,knowledgeSettings,toolLoading,toolResult,toolError,runTool,messages,chatInput,chatLoading,chatLog,isComposing,sendChat,stopChat,handleChatKey,parseMarkdown,traceFacts,traceGroups,newChat,sessions,sessionsOpen,sessionsLoading,sessionsError,loadSessions,loadSession,deleteSession,
         chatSourcesOpen,chatSourceView,chatSourcesHeading,chatSourcesByMessage,chatSources,chatSource,toggleChatSources,selectChatSource,closeChatSources,
-        chatPageNumber,chatSourcePreview,chatPreviewPage,chatPreviewPageCount,chatPreviewUrl,chatPreviewLoading,chatPreviewError,
-        hasChatOriginal,hasChatPdfPage,chatOriginalLoading,loadChatPreview,restoreChatPreviewScroll,downloadChatOriginal,
+        chatPageNumber,chatSourcePreview,chatPreview,
+        hasChatOriginal,chatPreviewFormat,chatOriginalLoading,loadChatPreview,downloadChatOriginal,
         keys,keyName,newKey,keysLoading,keyBusy,keyError,loadKeys,createKey,revokeKey,invites,newInvite,invitesLoading,inviteBusy,inviteError,invitationForm,loadInvites,createInvite,revokeInvite,invitationStatus,formatDate,operations,operationsLoading,operationsError,loadOperations,copyText
       };
     }
@@ -759,6 +805,16 @@
     props:{modelValue:String,examples:Array},
     emits:['update:modelValue','copy','help'],
     template:'#connection-example-template'
+  });
+  app.component('mcp-document-preview',{
+    props:{preview:Object,filename:String,query:String,zoom:{type:Number,default:100},compact:Boolean},
+    setup(props) {
+      const isMarkdown = computed(() => previewFormat(props.filename) === 'md');
+      const markdown = computed(() => parseMarkdown(props.preview.text, true));
+      const textParts = computed(() => highlightParts(props.preview.text || '', props.query));
+      return {isMarkdown,markdown,textParts};
+    },
+    template:'#document-preview-template'
   });
   app.component('mcp-icon',{props:{name:{type:String,required:true},size:{type:Number,default:20}},setup(props) {return () => Vue.h(ElementPlus.ElIcon,{size:props.size,'aria-hidden':'true'},() => Vue.h(ElementPlusIconsVue[props.name] || ElementPlusIconsVue.Document));}});
   app.mount('#app');
