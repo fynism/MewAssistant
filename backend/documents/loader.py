@@ -2,11 +2,12 @@
 from typing import Dict, List
 from pathlib import Path
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import Docx2txtLoader, UnstructuredExcelLoader
+from langchain_community.document_loaders import UnstructuredExcelLoader
 
 from backend.core.config import settings
 from backend.documents.cleaning import ExtractedPage, LoadedChunks, ProcessingError, clean_pages, decode_text
 from backend.documents.pdf import extract_pdf
+from backend.documents.word import WORD_SUFFIXES, word_pdf
 
 
 class DocumentLoader:
@@ -128,31 +129,30 @@ class DocumentLoader:
         :param filename: 文件名
         :return: 分片后的文档列表
         """
-        file_lower = filename.lower()
+        suffix = Path(file_path).suffix.lower()
 
-        if file_lower.endswith(".pdf"):
+        if suffix == ".pdf":
             doc_type = "PDF"
-            loader = None
-        elif file_lower.endswith((".txt", ".md")):
-            doc_type = "TXT" if file_lower.endswith(".txt") else "Markdown"
-            loader = None
-        elif file_lower.endswith((".docx", ".doc")):
+        elif suffix in {".txt", ".md"}:
+            doc_type = "TXT" if suffix == ".txt" else "Markdown"
+        elif suffix in WORD_SUFFIXES:
             doc_type = "Word"
-            loader = Docx2txtLoader(file_path)
-        elif file_lower.endswith((".xlsx", ".xls")):
+        elif suffix in {".xlsx", ".xls"}:
             doc_type = "Excel"
-            loader = UnstructuredExcelLoader(file_path)
         else:
             raise ValueError(f"不支持的文件类型: {filename}")
 
         try:
             if doc_type == "PDF":
                 pages = extract_pdf(file_path)
+            elif doc_type == "Word":
+                pages = extract_pdf(str(word_pdf(Path(file_path))))
             elif doc_type in {"TXT", "Markdown"}:
                 pages = [ExtractedPage(0, decode_text(Path(file_path).read_bytes()))]
             else:
+                loader = UnstructuredExcelLoader(file_path)
                 pages = [ExtractedPage(index, doc.page_content or "") for index, doc in enumerate(loader.load())]
-            clean_pages(pages, remove_margins=doc_type == "PDF" and settings.pdf_remove_repeated_margins)
+            clean_pages(pages, remove_margins=doc_type in {"PDF", "Word"} and settings.pdf_remove_repeated_margins)
             documents = []
             page_global_chunk_idx = 0
             for page in pages:

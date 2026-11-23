@@ -155,17 +155,26 @@ def preview_document_page(knowledge_id: str, document_id: str, page_number: int,
     from pypdfium2 import PdfiumError
     from backend.documents.cleaning import ProcessingError
     from backend.documents.pdf import render_preview
+    from backend.documents.word import WORD_SUFFIXES, WordConversionBusy, word_pdf
 
     item = get_owned_document(db, user.id, knowledge_id, document_id)
     path = original_path(item)
-    if path.suffix.lower() != ".pdf":
+    suffix = path.suffix.lower()
+    if suffix != ".pdf" and suffix not in WORD_SUFFIXES:
         raise HTTPException(status_code=415, detail="此格式不支持页面预览")
     try:
+        if suffix in WORD_SUFFIXES:
+            path = word_pdf(path, wait=False)
         image, count = render_preview(str(path), page_number, data.query.replace("\x00", "").strip())
+    except WordConversionBusy as exc:
+        raise HTTPException(status_code=503, detail=str(exc), headers={"Retry-After": "1"}) from exc
     except IndexError as exc:
         raise HTTPException(status_code=404, detail="页面不存在") from exc
     except (PdfiumError, ProcessingError, OSError) as exc:
-        raise HTTPException(status_code=422, detail="无法预览此 PDF") from exc
+        detail = "无法预览此 PDF" if suffix == ".pdf" else "无法预览此 Word 文件"
+        if suffix in WORD_SUFFIXES and isinstance(exc, ProcessingError):
+            detail = str(exc)
+        raise HTTPException(status_code=422, detail=detail) from exc
     return Response(image, media_type="image/png",
                     headers={"X-PDF-Page-Count": str(count), "Cache-Control": "private, no-store"})
 

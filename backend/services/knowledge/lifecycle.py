@@ -40,10 +40,10 @@ def delete_document(db: Session, item: KnowledgeDocument) -> None:
     item.status = "deleting"
     db.commit()
     cleanup_document_index(db, item)
-    (storage.KNOWLEDGE_DOCUMENTS_DIR / item.storage_key).unlink(missing_ok=True)
+    storage.remove_knowledge_file(item.storage_key)
     db.query(KnowledgeDocumentPage).filter(KnowledgeDocumentPage.document_id == item.id).delete()
     if item.replacement_storage_key:
-        (storage.KNOWLEDGE_DOCUMENTS_DIR / item.replacement_storage_key).unlink(missing_ok=True)
+        storage.remove_knowledge_file(item.replacement_storage_key)
     db.delete(item)
     db.commit()
 

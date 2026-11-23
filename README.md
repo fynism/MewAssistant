@@ -46,6 +46,8 @@ Copy-Item .env.example .env
 
 Bash 下将复制命令改为 `cp .env.example .env`。已有 `.env` 时直接编辑，保留现有配置。
 
+直接运行 Python 应用时，Word 导入和预览需要安装 LibreOffice Writer。Windows 可使用默认安装路径，或将 LibreOffice 的 `program` 目录加入 `PATH`。Linux 需要 `soffice` 命令和文档所用字体，例如 `libreoffice-writer`、`fonts-liberation` 和 `fonts-noto-cjk`。Docker 镜像已包含这些依赖。Word 入库与预览共用转换后的 PDF。已有 Word 可以直接预览，重新处理后旧索引才会更新为逐页引用。
+
 `.env.example` 中部分值为空，需要填写后才能启动；空值不会触发代码中的默认值。最小配置如下，替换模型凭证与 JWT 密钥：
 
 ```dotenv

@@ -3,7 +3,8 @@ FROM python:3.12-slim-bookworm
 COPY --from=ghcr.io/astral-sh/uv:0.11.8 /uv /uvx /bin/
 
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgomp1 libreoffice-writer fonts-liberation fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 ENV UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \

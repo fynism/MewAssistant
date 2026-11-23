@@ -40,7 +40,7 @@ def _normalized_bbox(bounds, page) -> tuple[float, float, float, float]:
             max(p[0] for p in points), max(p[1] for p in points))
 
 
-def _pdf_info(path: str) -> int:
+def pdf_page_count(path: str) -> int:
     import pypdfium2 as pdfium
     try:
         with _pdf_lock, pdfium.PdfDocument(path) as pdf:
@@ -173,7 +173,7 @@ def extract_pdf(path: str) -> list[ExtractedPage]:
     if settings.pdf_ocr_mode not in {"auto", "always", "off"}:
         raise ProcessingError("PDF_OCR_MODE 必须为 auto、always 或 off")
     pages = []
-    for number in range(_pdf_info(path)):
+    for number in range(pdf_page_count(path)):
         try:
             try:
                 native, native_blocks, image_area = _inspect_page(path, number)

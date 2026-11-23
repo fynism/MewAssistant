@@ -52,7 +52,7 @@ def process_document(document_id: str) -> None:
                 item.replacement_size_bytes = None
                 item.replacement_old_ready = False
                 db.commit()
-                (storage.KNOWLEDGE_DOCUMENTS_DIR / old_storage_key).unlink(missing_ok=True)
+                storage.remove_knowledge_file(old_storage_key)
             else:
                 cleanup_document_index(db, item, remove_bm25=True)
             path = storage.KNOWLEDGE_DOCUMENTS_DIR / item.storage_key

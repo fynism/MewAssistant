@@ -45,7 +45,7 @@ class PDFExtractionTests(unittest.TestCase):
         native = TextBlock(header, (.1, .02, .9, .06))
         recognized = [TextBlock(header, (.1, .02, .9, .06), .99, "ocr"),
                       TextBlock("Scanned body 2025 amount 123.45", (.1, .3, .9, .35), .98, "ocr")]
-        with (patch.object(pdf, "_pdf_info", return_value=1),
+        with (patch.object(pdf, "pdf_page_count", return_value=1),
               patch.object(pdf, "_inspect_page", return_value=(header, [native], .9)),
               patch.object(pdf, "_render_page", return_value=np.zeros((10, 10, 3))),
               patch.object(pdf, "_recognize", return_value=recognized) as ocr):
@@ -57,7 +57,7 @@ class PDFExtractionTests(unittest.TestCase):
         self.assertEqual(len(pages[0].blocks), 3)
 
     def test_failure_on_one_page_does_not_drop_other_pages(self):
-        with (patch.object(pdf, "_pdf_info", return_value=2),
+        with (patch.object(pdf, "pdf_page_count", return_value=2),
               patch.object(pdf, "_inspect_page", side_effect=[("Normal native content " * 5, [], 0), ("", [], 1)]),
               patch.object(pdf, "_render_page", side_effect=RuntimeError("internal private path"))):
             pages = pdf.extract_pdf("test")
@@ -70,7 +70,7 @@ class PDFExtractionTests(unittest.TestCase):
     def test_blank_page_is_distinguished_from_nonblank_unrecognized_page(self):
         for color, expected in [(255, "blank"), (0, "skipped")]:
             with (self.settings(pdf_ocr_retry_dpi=pdf.settings.pdf_ocr_dpi),
-                  patch.object(pdf, "_pdf_info", return_value=1),
+                  patch.object(pdf, "pdf_page_count", return_value=1),
                   patch.object(pdf, "_inspect_page", return_value=("", [], 0)),
                   patch.object(pdf, "_render_page", return_value=np.full((20, 20, 3), color)),
                   patch.object(pdf, "_recognize", return_value=[])):
@@ -79,7 +79,7 @@ class PDFExtractionTests(unittest.TestCase):
 
     def test_low_confidence_gets_one_retry_then_is_retained_for_review(self):
         block = TextBlock("incorrect 123", (.1, .1, .8, .2), .1, "ocr")
-        with (patch.object(pdf, "_pdf_info", return_value=1),
+        with (patch.object(pdf, "pdf_page_count", return_value=1),
               patch.object(pdf, "_inspect_page", return_value=("", [], 1)),
               patch.object(pdf, "_render_page", return_value=np.zeros((10, 10, 3))),
               patch.object(pdf, "_recognize", return_value=[block]) as ocr):
@@ -90,7 +90,7 @@ class PDFExtractionTests(unittest.TestCase):
         self.assertEqual(page.blocks[0].score, .1)
 
     def test_ocr_off_reports_unindexed_scan(self):
-        with (self.settings(pdf_ocr_mode="off"), patch.object(pdf, "_pdf_info", return_value=1),
+        with (self.settings(pdf_ocr_mode="off"), patch.object(pdf, "pdf_page_count", return_value=1),
               patch.object(pdf, "_inspect_page", return_value=("", [], 1)),
               patch.object(pdf, "_recognize") as ocr):
             page = pdf.extract_pdf("test")[0]
@@ -128,7 +128,7 @@ class PDFExtractionTests(unittest.TestCase):
         self.assertGreater(blocks[0].bbox[0], .8)
 
     def test_failed_native_extraction_falls_back_to_ocr(self):
-        with (patch.object(pdf, "_pdf_info", return_value=1),
+        with (patch.object(pdf, "pdf_page_count", return_value=1),
               patch.object(pdf, "_inspect_page", side_effect=RuntimeError("text parse failed")),
               patch.object(pdf, "_render_page", return_value=np.zeros((10, 10, 3))),
               patch.object(pdf, "_recognize", return_value=[TextBlock("Recovered 2025", (.1, .1, .9, .2), .98, "ocr")])):
