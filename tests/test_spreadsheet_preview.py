@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
+from xml.etree import ElementTree
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from openpyxl import Workbook
@@ -18,7 +19,7 @@ class SpreadsheetPreviewTests(unittest.TestCase):
     def setUp(self):
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
 
-    def rewrite_sheet(self, book, replacements):
+    def rewrite_sheet(self, book, edit):
         source = self.root / "original.xlsx"
         output = self.root / "rewritten.xlsx"
         book.save(source)
@@ -26,9 +27,9 @@ class SpreadsheetPreviewTests(unittest.TestCase):
             for name in original.namelist():
                 data = original.read(name)
                 if name == "xl/worksheets/sheet1.xml":
-                    for old, new in replacements:
-                        self.assertIn(old, data)
-                        data = data.replace(old, new)
+                    root = ElementTree.fromstring(data)
+                    edit(root)
+                    data = ElementTree.tostring(root)
                 updated.writestr(name, data)
         return output
 
@@ -36,11 +37,13 @@ class SpreadsheetPreviewTests(unittest.TestCase):
         book = Workbook()
         sheet = book.active
         sheet.append(["=1+1", "=1=3", "=42", "=1/0", date(2026, 11, 23), "x" * 1000])
-        path = self.rewrite_sheet(book, [
-            (b'<c r="A1"><f>1+1</f><v></v></c>', b'<c r="A1"><f>1+1</f><v>0</v></c>'),
-            (b'<c r="B1"><f>1=3</f><v></v></c>', b'<c r="B1" t="b"><f>1=3</f><v>0</v></c>'),
-            (b'<c r="D1"><f>1/0</f><v></v></c>', b'<c r="D1" t="e"><f>1/0</f><v>#DIV/0!</v></c>'),
-        ])
+        def set_cached_values(root):
+            for position, value_type, value in [("A1", "n", "0"), ("B1", "b", "0"), ("D1", "e", "#DIV/0!")]:
+                cell = root.find(f".//{{*}}c[@r='{position}']")
+                cell.set("t", value_type)
+                cell.find("{*}v").text = value
+
+        path = self.rewrite_sheet(book, set_cached_values)
         first = preview_spreadsheet(path, None, 1, 1)["rows"][0]
         self.assertEqual(first[:5], ["0", "FALSE", None, "#DIV/0!", "2026-11-23T00:00:00"])
         self.assertEqual(first[5], "x" * 255 + "…")
@@ -53,7 +56,7 @@ class SpreadsheetPreviewTests(unittest.TestCase):
         book = Workbook()
         book.active["A1"] = "start"
         book.active["XFD1048576"] = "end"
-        path = self.rewrite_sheet(book, [(b'A1:XFD1048576', b'A1')])
+        path = self.rewrite_sheet(book, lambda root: root.find("{*}dimension").set("ref", "A1"))
         first = preview_spreadsheet(path, None, 1, 1)
         self.assertEqual((first["total_rows"], first["total_columns"]), (1_048_576, 16_384))
         self.assertEqual((len(first["rows"]), len(first["columns"])), (40, 20))
