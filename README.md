@@ -48,6 +48,10 @@ Bash 下将复制命令改为 `cp .env.example .env`。已有 `.env` 时直接�
 
 直接运行 Python 应用时，Word 导入和预览需要安装 LibreOffice Writer。Windows 可使用默认安装路径，或将 LibreOffice 的 `program` 目录加入 `PATH`。Linux 需要 `soffice` 命令和文档所用字体，例如 `libreoffice-writer`、`fonts-liberation` 和 `fonts-noto-cjk`。Docker 镜像已包含这些依赖。Word 入库与预览共用转换后的 PDF。已有 Word 可以直接预览，重新处理后旧索引才会更新为逐页引用。
 
+本地处理旧版 `.xls` 时，安装 Node.js 22 或更高版本，并在仓库根目录运行 `npm ci --prefix backend/documents/sheetjs`。Docker 镜像已包含 Node.js 和 SheetJS。Excel 预览按工作表分行列显示，使用文件保存的公式缓存值。重新处理已有 Excel 后，检索引用可跳转到工作表和单元格范围。
+
+Excel 预览每次显示最多 40 行、20 列，超过 256 字符的单元格在预览中截断。单个工作簿最多索引 8 万个有值单元格及 200 万字符，展开后超过 64 MiB 的 `.xlsx` 无法读取。可下载原件查看完整内容。
+
 `.env.example` 中部分值为空，需要填写后才能启动；空值不会触发代码中的默认值。最小配置如下，替换模型凭证与 JWT 密钥：
 
 ```dotenv
@@ -213,7 +217,7 @@ node tests/frontend_knowledge_smoke.js
 node tests/frontend_github_smoke.js
 ```
 
-前端冒烟检查需要 Node.js，应用本身无需 Node.js。HTTP / MCP 集成验证使用临时数据库；加上 `--milvus` 可在独立测试集合验证上传检索，需要本地 Milvus 可用：
+前端冒烟检查需要 Node.js。HTTP / MCP 集成验证使用临时数据库；加上 `--milvus` 可在独立测试集合验证上传检索，需要本地 Milvus 可用：
 
 ```powershell
 uv run python tests/m3_local_integration.py

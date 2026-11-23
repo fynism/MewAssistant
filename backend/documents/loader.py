@@ -2,11 +2,11 @@
 from typing import Dict, List
 from pathlib import Path
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import UnstructuredExcelLoader
 
 from backend.core.config import settings
 from backend.documents.cleaning import ExtractedPage, LoadedChunks, ProcessingError, clean_pages, decode_text
 from backend.documents.pdf import extract_pdf
+from backend.documents.spreadsheet import SPREADSHEET_SUFFIXES, extract_spreadsheet
 from backend.documents.word import WORD_SUFFIXES, word_pdf
 
 
@@ -137,7 +137,7 @@ class DocumentLoader:
             doc_type = "TXT" if suffix == ".txt" else "Markdown"
         elif suffix in WORD_SUFFIXES:
             doc_type = "Word"
-        elif suffix in {".xlsx", ".xls"}:
+        elif suffix in SPREADSHEET_SUFFIXES:
             doc_type = "Excel"
         else:
             raise ValueError(f"不支持的文件类型: {filename}")
@@ -150,8 +150,7 @@ class DocumentLoader:
             elif doc_type in {"TXT", "Markdown"}:
                 pages = [ExtractedPage(0, decode_text(Path(file_path).read_bytes()))]
             else:
-                loader = UnstructuredExcelLoader(file_path)
-                pages = [ExtractedPage(index, doc.page_content or "") for index, doc in enumerate(loader.load())]
+                pages = extract_spreadsheet(Path(file_path))
             clean_pages(pages, remove_margins=doc_type in {"PDF", "Word"} and settings.pdf_remove_repeated_margins)
             documents = []
             page_global_chunk_idx = 0
