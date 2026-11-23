@@ -12,6 +12,7 @@
   function previewFormat(filename) {
     const extension = fileExtension(filename);
     if (['pdf','doc','docx'].includes(extension)) return 'pdf';
+    if (['xls','xlsx'].includes(extension)) return 'spreadsheet';
     return ['txt','md'].includes(extension) ? extension : null;
   }
   function decodePreviewText(buffer) {
@@ -382,32 +383,36 @@
         return `/knowledges/${encodeURIComponent(source.knowledgeId)}/documents/${encodeURIComponent(source.documentId)}`;
       }
       function useDocumentPreview(canvas) {
-        let controller, scrollPosition = 0;
+        let controller, scrollPosition = 0, lastSheetPosition = null;
         const state = reactive({
           url:'', text:null, page:null, pageCount:0, loading:false, error:'',
-          get hasContent() {return Boolean(this.url) || this.text !== null;},
+          workbook:shallowRef(null), citation:null,
+          get hasContent() {return Boolean(this.url || this.workbook) || this.text !== null;},
           clear, reset, load, restoreImageScroll
         });
         return state;
 
-        function clear() {
+        function clear(keepWorkbook = false) {
           controller?.abort();
           controller = null;
           if (state.url) URL.revokeObjectURL(state.url);
           Object.assign(state, {url:'',text:null,error:'',loading:false});
+          if (!keepWorkbook) state.workbook = null;
         }
         function reset() {
           clear();
           state.page = null;
           state.pageCount = 0;
+          state.citation = null;
+          lastSheetPosition = null;
         }
         function restoreImageScroll(event) {
           if (event.target.src === state.url) canvas.value?.scrollTo(0, scrollPosition);
         }
-        async function load(source, pageNumber, scroll = 0) {
+        async function load(source, {pageNumber, scroll = 0, citationPage, sheetPosition = lastSheetPosition}) {
           const format = previewFormat(source?.filename);
           if (!format) return;
-          clear();
+          clear(format === 'spreadsheet');
           const requestController = new AbortController();
           controller = requestController;
           const {signal} = requestController;
@@ -425,6 +430,14 @@
               if (signal.aborted) return;
               state.pageCount = Number(response.headers.get('X-PDF-Page-Count')) || 0;
               state.url = URL.createObjectURL(blob);
+            } else if (format === 'spreadsheet') {
+              lastSheetPosition = sheetPosition;
+              const params = new URLSearchParams(sheetPosition || (citationPage ? {citation_page:citationPage} : {}));
+              const query = params.size ? '?' + params : '';
+              const workbook = await jsonRequest(`${path}/spreadsheet-preview${query}`, {signal});
+              if (signal.aborted) return;
+              state.workbook = workbook;
+              if (workbook.citation_range) state.citation = {sheet:workbook.sheet,range:workbook.citation_range};
             } else {
               const response = await request(`${path}/content`, {signal});
               const bytes = await response.arrayBuffer();
@@ -436,14 +449,15 @@
           } finally {
             if (!signal.aborted) state.loading = false;
           }
-          if (!signal.aborted && scroll && state.text !== null) {
+          if (!signal.aborted && scroll && !state.url && state.hasContent) {
             await nextTick();
             if (!signal.aborted) canvas.value?.scrollTo(0, scroll);
           }
         }
       }
-      function loadPreview(pageNumber = preview.page ?? 1) {
-        return preview.load(activeSource.value, pageNumber);
+      function loadPreview(pageNumber = preview.page ?? 1, sheetPosition) {
+        const source = activeSource.value;
+        return preview.load(source, {pageNumber,sheetPosition,citationPage:chatPageNumber(source?.pageNumber)});
       }
       async function openPreview(source, event) {
         if (activeSource.value?.key !== source.key) {
@@ -634,10 +648,11 @@
         chatOriginalController?.abort(); chatOriginalController = null;
         chatOriginalLoading.value = false;
       }
-      function loadChatPreview(pageNumber = chatPreview.page ?? 1, scroll = 0) {
+      function loadChatPreview(pageNumber = chatPreview.page ?? 1, scroll = 0, sheetPosition) {
         if (!chatSourcesOpen.value || !chatPreviewFormat.value) return;
         chatPreviewScroll = scroll;
-        return chatPreview.load(chatSource.value, pageNumber, scroll);
+        const source = chatSource.value;
+        return chatPreview.load(source, {pageNumber,scroll,sheetPosition,citationPage:source.pageNumber});
       }
       async function downloadChatOriginal() {
         if (!hasChatOriginal.value || chatOriginalLoading.value) return;
@@ -810,11 +825,31 @@
   });
   app.component('mcp-document-preview',{
     props:{preview:Object,filename:String,query:String,zoom:{type:Number,default:100},compact:Boolean},
-    setup(props) {
+    emits:['sheet-navigation'],
+    setup(props, {emit}) {
       const isMarkdown = computed(() => previewFormat(props.filename) === 'md');
       const markdown = computed(() => parseMarkdown(props.preview.text, true));
       const textParts = computed(() => highlightParts(props.preview.text || '', props.query));
-      return {isMarkdown,markdown,textParts};
+      const workbook = computed(() => props.preview.workbook);
+      const sheetGrid = ref(null);
+      const citation = computed(() => {
+        const reference = props.preview.citation;
+        if (!reference || reference.sheet !== workbook.value?.sheet) return null;
+        const range = /^([A-Z]+)([0-9]+)(?::([A-Z]+)([0-9]+))?$/.exec(reference.range);
+        if (!range) return null;
+        const [,startColumn,startRow,endColumn = startColumn,endRow = startRow] = range;
+        const columnNumber = letters => [...letters].reduce((number, letter) => number * 26 + letter.charCodeAt(0) - 64, 0);
+        return {firstRow:Number(startRow),lastRow:Number(endRow),firstColumn:columnNumber(startColumn),lastColumn:columnNumber(endColumn)};
+      });
+      function isCitationCell(row, column) {
+        const bounds = citation.value;
+        return bounds && row >= bounds.firstRow && row <= bounds.lastRow && column >= bounds.firstColumn && column <= bounds.lastColumn;
+      }
+      function navigateSheet(sheet, row, column) {
+        if (!props.preview.loading) emit('sheet-navigation', {sheet,row,column});
+      }
+      watch(workbook, () => sheetGrid.value?.scrollTo(0, 0), {flush:'post'});
+      return {isMarkdown,markdown,textParts,workbook,sheetGrid,citation,isCitationCell,navigateSheet};
     },
     template:'#document-preview-template'
   });

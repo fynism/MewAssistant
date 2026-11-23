@@ -30,7 +30,7 @@ const json = (data,status=200) => ({ok:status>=200&&status<300,status,headers:ne
 responder = async (url,options={}) => {
   if(url === '/platform/services/knowledge') return json({externalAvailable:true,endpoint:'https://mcp.example/mcp/knowledge'});
   if(url === '/auth/login' || url === '/auth/register') return json({access_token:'fixture-token',username:'alice',role:userRole});
-  if(url === '/knowledge-settings') return json({allowed_extensions:['.pdf','.txt','.md','.doc','.docx'],max_upload_bytes:1000000,max_retrieval_results:20});
+  if(url === '/knowledge-settings') return json({allowed_extensions:['.pdf','.txt','.md','.doc','.docx','.xls','.xlsx'],max_upload_bytes:1000000,max_retrieval_results:20});
   if(url === '/knowledges') return json(options.method === 'POST' ? {id:knowledgeId,name:'Private',has_ready_documents:true} : {knowledges:[{id:knowledgeId,name:'Private',has_ready_documents:true}]});
   if(url === '/documents/search') return json({status:'ok',results:[{
     sourceId:'hit',documentId:'doc',knowledgeId,knowledgeName:'Private',filename:'same.pdf',pageNumber:7,
@@ -43,6 +43,16 @@ responder = async (url,options={}) => {
   if(url.endsWith('/utf32le/content')) return {ok:true,arrayBuffer:async()=>Uint8Array.from([0xff,0xfe,0,0,0x2d,0x4e,0,0,0x00,0xf6,1,0]).buffer};
   if(url.endsWith('/utf32be/content')) return {ok:true,arrayBuffer:async()=>Uint8Array.from([0,0,0xfe,0xff,0,0,0x4e,0x2d,0,1,0xf6,0x00]).buffer};
   if(url.endsWith('/markdown/content')) return {ok:true,arrayBuffer:async()=>new TextEncoder().encode('\uFEFF# 文档').buffer};
+  if(url.includes('/spreadsheet-preview')) {
+    const params = new URL(url,location.origin).searchParams;
+    const cited = params.has('citation_page');
+    return json({
+      sheets:['库存 & 采购','用途 # 数据'], sheet:params.get('sheet') || (cited ? '用途 # 数据' : '库存 & 采购'),
+      row_start:Number(params.get('row')) || (cited ? 41 : 1), column_start:Number(params.get('column')) || (cited ? 21 : 1),
+      total_rows:80,total_columns:40,row_limit:40,column_limit:20,columns:cited ? ['U','V'] : ['A','B'],
+      rows:[['42',null]],citation_range:cited ? 'U41:V41' : null
+    });
+  }
   if(url.includes('/documents')) return json({id:'doc',status:'pending'});
   if(url === '/tools/debug/retrieve') return json({status:'no_match',results:[]});
   if(url === '/tools/debug/listKnowledges') return json({items:[],nextCursor:null});
@@ -62,7 +72,8 @@ responder = async (url,options={}) => {
       {filename:'guide.MD',knowledge_id:knowledgeId,document_id:'markdown',text:'文档'},
       {filename:'old.DOC',knowledge_id:knowledgeId,document_id:'old-word',text:'旧 Word 来源'},
       {filename:'new.docx',knowledge_id:knowledgeId,document_id:'new-word',page_number:3,text:'Word 新引用'},
-      {filename:'old-reference.pdf',knowledge_id:knowledgeId,document_id:'old-pdf',text:'旧 PDF 来源'}
+      {filename:'old-reference.pdf',knowledge_id:knowledgeId,document_id:'old-pdf',text:'旧 PDF 来源'},
+      {filename:'inventory.XLS',knowledge_id:knowledgeId,document_id:'old-sheet',page_number:4,text:'表格来源'}
     ]}};
     const bytes = new TextEncoder().encode('data: {"type":"rag_step","step":{"label":"检索"}}\r\n\r\ndata: {"type":"content","content":"真实协议"}\r\n\r\ndata: ' + JSON.stringify(trace) + '\r\n\r\ndata: [DONE]\r\n\r\n');
     let cursor = 0;
@@ -137,7 +148,7 @@ vm.runInContext(fs.readFileSync(path.join(root,'frontend/app.js'),'utf8'),contex
   assert.equal(previewPaths().length,0);
   app.chatInput = '草稿';
   await app.toggleChatSources(messageId); await tick();
-  assert.equal(app.chatSources.length,7);
+  assert.equal(app.chatSources.length,8);
   assert.equal(app.chatSource.passages.join('|'),'来源|同一页的另一段');
   assert.equal(app.chatPreview.page,8);
   assert.equal(app.chatPreview.pageCount,12);
@@ -170,8 +181,24 @@ vm.runInContext(fs.readFileSync(path.join(root,'frontend/app.js'),'utf8'),contex
   assert.equal(app.hasChatOriginal,true);
   assert.equal(app.chatPreview.hasContent,false);
   assert.equal(previewPaths().length,5);
+  app.selectChatSource(app.chatSources[7]); await tick();
+  assert.ok(requests.at(-1).url.endsWith('/old-sheet/spreadsheet-preview?citation_page=5'));
+  assert.equal(app.chatPreview.workbook.row_start,41);
+  assert.equal(app.chatPreview.workbook.column_start,21);
+  assert.equal(app.chatPreview.citation.range,'U41:V41');
+  const selectedSheet = {sheet:'用途 # 数据',row:1,column:21};
+  await app.loadChatPreview(app.chatPreview.page, 0, selectedSheet);
+  assert.deepEqual(Object.fromEntries(new URL(requests.at(-1).url,location.origin).searchParams),{
+    sheet:selectedSheet.sheet,row:'1',column:'21'
+  });
+  assert.equal(app.chatPreview.workbook.sheet,selectedSheet.sheet);
+  assert.equal(app.chatPreview.citation.range,'U41:V41');
   await app.closeChatSources();
   assert.equal(app.chatPreview.hasContent,false);
+  await app.toggleChatSources(messageId); await tick();
+  assert.equal(app.chatPreview.workbook.column_start,21);
+  assert.ok(requests.at(-1).url.endsWith('row=1&column=21'));
+  await app.closeChatSources();
   const chatPageRequests = requests.length;
   await app.runTool(); assert.equal(requests.length,chatPageRequests);
   app.go('/services/knowledge'); await tick();
@@ -212,6 +239,12 @@ vm.runInContext(fs.readFileSync(path.join(root,'frontend/app.js'),'utf8'),contex
   assert.deepEqual(JSON.parse(previewPaths().at(-1).body),{query:'查询'});
   await app.loadPreview(5);
   assert.equal(app.preview.page,5);
+  const sheetSource = {key:'new-sheet',documentId:'new-sheet',knowledgeId,filename:'inventory.xlsx'};
+  await app.openPreview(sheetSource,{detail:1}); await tick();
+  assert.ok(requests.at(-1).url.endsWith('/new-sheet/spreadsheet-preview'));
+  assert.equal(app.preview.workbook.sheet,'库存 & 采购');
+  assert.equal(app.preview.workbook.rows[0][0],'42');
+  assert.equal(app.preview.citation,null);
   responder = async()=>json({detail:'expired'},401); await app.loadKnowledges();
   assert.equal(app.isAuthenticated,false); assert.equal(app.knowledges.length,0); assert.equal(app.authOpen,true);
   unmount();

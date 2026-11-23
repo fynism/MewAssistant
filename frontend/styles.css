@@ -495,6 +495,28 @@ html.dark :is(.reading-workspace, .ask-workspace) {
 .reading-text-page { white-space: pre-wrap; overflow-wrap: anywhere; font: 14px/1.8 var(--mcp-font-code); }
 .reading-markdown-page { color: var(--mcp-text); background: var(--mcp-surface); line-height: 1.75; }
 .reading-snippet mark, .reading-text-page mark { padding: 0 .09em; border-radius: 2px; color: #211d0e; background: var(--reading-mark); }
+.reading-sheet { min-width: 0; border: 1px solid var(--reading-line); border-radius: 2px; background: var(--mcp-surface); }
+.reading-sheet.is-compact { margin: 16px clamp(14px, 2.8vw, 40px); }
+.reading-sheet-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 14px; padding: 8px 10px; border-bottom: 1px solid var(--reading-line); }
+.reading-sheet-tools select {
+  min-width: 0;
+  max-width: min(100%, 14rem);
+  padding: 5px 7px;
+  border: 1px solid var(--reading-line);
+  border-radius: 6px;
+  background: var(--reading-field);
+  color: inherit;
+  font: inherit;
+  text-overflow: ellipsis;
+}
+.reading-sheet-pages { display: flex; align-items: center; gap: 3px; white-space: nowrap; font-size: 13px; font-variant-numeric: tabular-nums; }
+.reading-sheet-grid { overflow-x: auto; scrollbar-color: var(--reading-scroll-thumb) transparent; }
+.reading-sheet-grid table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.reading-sheet-grid :is(th, td) { padding: 6px 9px; border-inline-end: 1px solid var(--reading-line); border-bottom: 1px solid var(--reading-line); }
+.reading-sheet-grid thead, .reading-sheet-grid th[scope="row"] { background: var(--reading-header); color: var(--reading-muted); font-variant-numeric: tabular-nums; }
+.reading-sheet-grid th[scope="row"] { position: sticky; inset-inline-start: 0; text-align: end; }
+.reading-sheet-grid tbody td { min-width: 6ch; max-width: 34ch; vertical-align: top; white-space: pre-wrap; overflow-wrap: anywhere; }
+.reading-sheet-grid .is-cited { background: var(--reading-selected); }
 .reading-preview-empty { display: grid; justify-items: center; align-content: center; gap: 12px; min-height: 100%; color: var(--reading-muted); text-align: center; }
 .empty-state-art { display: block; background: center / contain no-repeat; }
 .dark .empty-state-art { opacity: .82; }
