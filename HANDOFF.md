@@ -1,5 +1,12 @@
 # Handoff
 
+## Multi-format preview verification (2026-11-24)
+
+- Word ingestion and preview share a private PDF stored under the original file's storage key. Preserve `.previews` when moving the original storage directory. Existing Word and Excel files can open before reprocessing. Reprocess them to build page or cell-range citations from the new extractors.
+- The Windows LibreOffice check used the official 26.8.3.1 runtime extracted into a temporary directory, with the `program` directory on `PATH`. The Windows Docker engine was unavailable. Local Office integration used temporary SQLite, real JWT and document parsers, with vector storage and rate limits replaced by test fixtures.
+- The same two-page Word fixture took 12.98 s on its first on-demand conversion and PNG response and 41 ms when cached. In a two-sheet 120-by-23 workbook, XLSX preview requests took 31–32 ms and BIFF8 XLS requests took 222 ms. Excel responses contained up to 40 rows by 20 columns. These are local single-fixture timings.
+- The full-suite test `test_m1_isolation.M1IsolationTests.test_removed_global_documents_endpoint_is_json_404` fails at the branch base `b95d162` too. It expects `GET /documents` to return 404 for an authenticated user, while the registered document-list endpoint returns 200.
+
 ## T2Retrieval evaluation
 
 - The source pack is `data/benchmarks/t2-smoke/`: 10 queries, 80 documents, 45 labeled positive documents and 35 random distractors. All labeled positives for the selected queries are present. This small corpus is a smoke test, not a full benchmark. The completed evaluation must use `data/benchmarks/t2-isolated/`; the first shared-environment attempt was interrupted before scoring.
