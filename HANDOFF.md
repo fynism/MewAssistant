@@ -1,5 +1,12 @@
 # Handoff
 
+## Langfuse tracing and single-query evaluation
+
+- The running server must include the tracing code and use the same Langfuse project as the evaluator. A successful request against an older or disabled server has no trace ID and cannot be scored on its existing trace.
+- MCP returns the trace ID in `structuredContent.traceId`. Chat returns it in `X-Langfuse-Trace-Id`. The evaluator checks stream completion before scoring, and the dashboard may need a refresh after batch ingestion.
+- The smoke score checks score delivery. MeowMCP only returns retrieved chunks, so its optional Ragas score uses reference document IDs. Faithfulness uses the chat stream's final retrieved chunks and complete answer.
+- A 500-iteration local check measured median tracing overhead of 0.46 ms for six metadata spans with the in-memory exporter. This excludes retrieval, network and optional content capture. Test first-byte latency and throughput on staging after enabling real export.
+
 ## Multi-format preview verification (2026-11-24)
 
 - Word ingestion and preview share a private PDF stored under the original file's storage key. Preserve `.previews` when moving the original storage directory. Existing Word and Excel files can open before reprocessing. Reprocess them to build page or cell-range citations from the new extractors.

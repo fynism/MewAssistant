@@ -1,5 +1,6 @@
 """Official MCP Streamable HTTP adapter for the private knowledge service."""
 
+from contextlib import nullcontext
 import json
 import time
 from urllib.parse import urlsplit
@@ -13,6 +14,9 @@ from pydantic import Field
 from starlette.concurrency import run_in_threadpool
 
 from backend.core.config import settings
+from backend.core.langfuse_tracing import (
+    capture_retrieval_content, trace_observation, update_observation,
+)
 from backend.infrastructure.database.session import SessionLocal
 from backend.services.platform.api_keys import authenticate_key
 from backend.services.knowledge.tools import list_knowledges, retrieve
@@ -42,8 +46,25 @@ def _invoke(headers, operation, **kwargs):
         if owner_id is None:
             raise ToolError("认证失败")
         category = "success"
+        trace = (
+            trace_observation("mcp.retrieve", as_type="retriever", root=True, metadata={
+                "top_k": kwargs["top_k"],
+                "knowledge_count": len(kwargs["knowledge_ids"]),
+            }) if operation is retrieve else nullcontext()
+        )
         try:
-            return operation(db, owner_id, **kwargs)
+            with trace as observation:
+                result = operation(db, owner_id, **kwargs)
+                if operation is retrieve:
+                    _bound_retrieval_context(result)
+                    if observation is not None:
+                        result["traceId"] = observation.trace_id
+                        update_observation(observation, metadata={
+                            "status": result["status"],
+                            "result_count": len(result["results"]),
+                        })
+                        capture_retrieval_content(observation, (item["text"] for item in result["results"]))
+                return result
         except HTTPException as exc:
             category = ("permission" if exc.status_code == 404 else
                         "invalid_input" if exc.status_code in (400, 422) else "service_error")
@@ -76,6 +97,10 @@ async def mcp_retrieve(ctx: Context, query: str = Field(min_length=1, max_length
         raise ToolError("knowledgeIds 不能重复")
     data = await run_in_threadpool(_invoke, ctx.headers, retrieve,
                                    query=query, knowledge_ids=knowledgeIds, top_k=topK)
+    return RetrievalResult.model_validate(data)
+
+
+def _bound_retrieval_context(data: dict) -> None:
     # Bound client context even if a future retriever returns oversized chunks.
     for item in data["results"]:
         item["text"] = item["text"][:4000]
@@ -84,7 +109,6 @@ async def mcp_retrieve(ctx: Context, query: str = Field(min_length=1, max_length
         data["results"] = data["results"][:5]
         for item in data["results"]:
             item["text"] = item["text"][:2000]
-    return RetrievalResult.model_validate(data)
 
 
 class ApiKeyMcpAuth:

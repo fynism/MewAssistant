@@ -152,6 +152,25 @@ MCP_EXTERNAL_ENABLED=true
 
 先列出知识库，再显式指定 ID 检索。`retrieve` 返回片段、文件名、来源标识、页码、检索 / 重排分数及处理报告，不生成回答。站内工具调试接口为 `POST /tools/debug/listKnowledges` 和 `POST /tools/debug/retrieve`，使用登录 JWT。
 
+## Langfuse 与 Ragas 单题验证
+
+SuperMew 在服务端将 MCP 检索和网页问答的 trace 发送到 Langfuse。本地脚本调用实际接口，再把分数写回该请求的 trace。准备一份测试文档和一个测试知识库即可验证整条链路。
+
+1. 在 [Langfuse Cloud](https://cloud.langfuse.com) 的 **Project Settings → API Keys** 创建凭证。在后端的本地 `.env` 或部署使用的私有 `staging.env` 中，填写 `LANGFUSE_BASE_URL`、`LANGFUSE_PUBLIC_KEY`、`LANGFUSE_SECRET_KEY`，设置 `LANGFUSE_TRACING_ENABLED=true`，再启动含此功能的应用版本。使用非 EU 项目时，`LANGFUSE_BASE_URL` 填项目所属区域的地址。
+2. 在本地终端设置同一 Langfuse 项目的 URL 和两把 Key，并沿用后端的 `LANGFUSE_TRACING_ENVIRONMENT`。MeowMCP 模式还需要个人 `MCP_API_KEY`，网页问答模式需要站内登录 JWT `SUPERMEW_BENCHMARK_TOKEN`。首次测试请选用只含测试资料的知识库。MCP 可用 `listKnowledges` 获取知识库 ID。
+3. 在项目根目录运行以下任一命令，替换地址及知识库 ID。请求公网 API 时，目标服务需先部署含 Langfuse 集成的版本。
+
+   ```powershell
+   uv run --locked python -m benchmarks.rag_eval mcp --base-url https://fyism.cn --query "测试文档里的退款期限是多久？" --knowledge-id YOUR_KNOWLEDGE_ID
+   uv run --locked python -m benchmarks.rag_eval chat --base-url http://127.0.0.1:8000 --query "根据测试文档，退款期限是多久？" --knowledge-id YOUR_KNOWLEDGE_ID
+   ```
+
+脚本输出服务端 trace ID，向该 trace 写入 `rag_eval_transport_smoke`。这个分数用于验证关联与回写。在 Langfuse 的 **Tracing** 打开对应 trace，检查检索、重排状态和 **Scores**，等待批次入库后刷新。
+
+运行 Ragas 指标时，在 `uv run --locked` 后加 `--group eval`。MCP 模式加 `--relevant-document-id DOCUMENT_ID`，可重复指定，计算基于文档 ID 的 Recall。网页问答模式加 `--faithfulness`，并配置 `RAGAS_JUDGE_MODEL`、`RAGAS_JUDGE_API_KEY` 和可选的 `RAGAS_JUDGE_BASE_URL`。Faithfulness 会把测试问题、召回文本和回答发送给裁判模型。Ragas 只在评测脚本里运行。
+
+Langfuse 默认接收耗时、状态、计数等追踪数据。若要在 Langfuse 查看召回文本，可在只含测试数据的环境中设置 `LANGFUSE_CAPTURE_RETRIEVAL_CONTENT=true`。Langfuse Secret Key、MeowMCP API Key 和登录 JWT 通过私有运行配置提供。
+
 ## Docker 发布
 
 应用镜像由开发机或 CI 构建推送，服务器通过 [deploy.sh](deploy.sh) 拉取指定版本；[docker-compose.yml](docker-compose.yml) 没有应用构建配置。

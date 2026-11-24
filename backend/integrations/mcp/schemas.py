@@ -1,6 +1,6 @@
 """Structured results exposed by the knowledge MCP adapter."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_serializer
 
 
 class KnowledgeItem(BaseModel):
@@ -30,3 +30,11 @@ class RetrievalHit(BaseModel):
 class RetrievalResult(BaseModel):
     status: str
     results: list[RetrievalHit]
+    traceId: str | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize(self, handler):
+        data = handler(self)
+        if self.traceId is None:
+            data.pop("traceId", None)
+        return data
