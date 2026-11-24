@@ -42,7 +42,9 @@
             </div>
           </div>
         </header>
-        <main id="main" :key="page" class="main" :class="{'reading-main': isAuthenticated && (isLibrary || page === '/try'), 'entry-main': isLibrary && !isAuthenticated}" tabindex="-1">
+        <!-- Remove the previous landmark immediately so route changes keep one #main. -->
+        <transition name="content" @leave="(_, done) => done()">
+          <main id="main" :key="page" class="main" :class="{'reading-main': isAuthenticated && (isLibrary || page === '/try'), 'entry-main': isLibrary && !isAuthenticated}" tabindex="-1">
             <template v-if="page === '/services/knowledge'">
               <a class="back-link" href="/account" @click.prevent="go('/account')"><mcp-icon name="ArrowLeft" :size="16"></mcp-icon>个人管理</a>
               <div class="page-head"><div><h1>客户端接入</h1></div></div>
@@ -183,7 +185,9 @@
                   </div>
                   <div v-else-if="preview.loading && !preview.workbook" class="reading-preview-empty" role="status"><mcp-icon name="Loading" class="processing-icon" :size="24"></mcp-icon><p>正在加载原文…</p></div>
                   <div v-else-if="preview.error" class="reading-preview-empty" role="alert"><p>{{ preview.error }}</p><el-button link type="primary" @click="loadPreview()">重试</el-button></div>
-                  <mcp-document-preview v-else-if="preview.hasContent" :preview="preview" :filename="activeSource.filename" :query="activeSource.query" :zoom="previewZoom" @sheet-navigation="loadPreview(preview.page, $event)"></mcp-document-preview>
+                  <transition v-else-if="preview.hasContent" name="content" appear>
+                    <mcp-document-preview :preview="preview" :filename="activeSource.filename" :query="activeSource.query" :zoom="previewZoom" @sheet-navigation="loadPreview(preview.page, $event)"></mcp-document-preview>
+                  </transition>
                   <div v-else class="reading-preview-empty"><mcp-icon name="Document" :size="31"></mcp-icon><p>此文件格式可下载后打开</p><el-button link type="primary" :loading="downloadLoading" @click="downloadSource">下载原文件</el-button></div>
                 </div>
               </section>
@@ -289,7 +293,9 @@
                   <div ref="chatSourcePreview" class="chat-source-preview" :aria-busy="chatPreview.loading">
                     <div v-if="chatPreview.loading && !chatPreview.workbook" class="chat-source-status" role="status"><mcp-icon name="Loading" class="processing-icon" :size="16"></mcp-icon>正在加载原文…</div>
                     <div v-else-if="chatPreview.error" class="chat-source-status" role="alert"><p>{{ chatPreview.error }}</p><el-button link type="primary" @click="loadChatPreview()">重试</el-button></div>
-                    <mcp-document-preview v-else-if="chatPreview.hasContent" :preview="chatPreview" :filename="chatSource.filename" compact @sheet-navigation="loadChatPreview(chatPreview.page, 0, $event)"></mcp-document-preview>
+                    <transition v-else-if="chatPreview.hasContent" name="content" appear>
+                      <mcp-document-preview :preview="chatPreview" :filename="chatSource.filename" compact @sheet-navigation="loadChatPreview(chatPreview.page, 0, $event)"></mcp-document-preview>
+                    </transition>
                     <component :is="chatPreview.hasContent && !chatPreview.error ? 'details' : 'div'" v-if="chatSource.passages.length" class="chat-source-passages">
                       <summary v-if="chatPreview.hasContent && !chatPreview.error">检索片段</summary>
                       <p v-for="passage in chatSource.passages" :key="passage">{{ passage }}</p>
@@ -308,6 +314,7 @@
               <section class="panel" v-loading="operationsLoading"><h2>近 {{ operations?.windowHours || 24 }} 小时运行概况</h2><el-alert v-if="operationsError" :title="operationsError" type="error" :closable="false" class="feedback"></el-alert><template v-if="operations"><dl class="info-list"><div><dt>工具调用</dt><dd>{{ operations.calls }}</dd></div><div><dt>异常调用</dt><dd>{{ operations.errors }}</dd></div><div><dt>平均耗时</dt><dd>{{ operations.averageDurationMs }} ms</dd></div><div><dt>等待处理</dt><dd>{{ operations.documents.pending }}</dd></div><div><dt>处理中</dt><dd>{{ operations.documents.processing }}</dd></div><div><dt>处理失败</dt><dd>{{ operations.documents.failed }}</dd></div></dl><el-collapse><el-collapse-item title="调用与失败详情" name="operations"><p v-for="item in operations.byOperation" :key="item.name">{{ item.name }}：{{ item.count }} 次</p><div v-for="item in operations.recentFailures" :key="item.requestId" class="source"><h3>{{ item.operation }} · {{ item.category }}</h3><p>{{ formatDate(item.createdAt) }}</p><code>{{ item.requestId }}</code></div><div v-for="item in operations.failedDocuments" :key="item.id" class="source"><h3>文件处理失败</h3><code>{{ item.id }}</code><p class="small">知识库 {{ item.knowledgeId }} · {{ formatDate(item.updatedAt) }}</p></div></el-collapse-item></el-collapse></template></section></div>
             </template>
           </main>
+        </transition>
         <footer v-if="!isLibrary && !(isAuthenticated && page === '/try')" class="site-footer"><span>MeowConnectPlatform</span></footer>
       </div>
       <el-drawer v-model="mobileNav" title="导航" direction="rtl" size="min(320px, 90vw)">
