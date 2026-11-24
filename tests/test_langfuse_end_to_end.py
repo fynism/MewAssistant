@@ -114,6 +114,7 @@ class LangfuseEndToEndTests(unittest.IsolatedAsyncioTestCase):
         )
         factory.cache_clear()
         with (patch.object(self.tracing, "settings", config),
+              patch.dict(os.environ, {"LANGFUSE_TRACING_ENABLED": "true"}),
               patch("langfuse.Langfuse", side_effect=lambda **kwargs: Langfuse(
                   span_exporter=self.exporter, flush_interval=3600, **kwargs)) as constructor):
             try:
@@ -171,6 +172,8 @@ class LangfuseEndToEndTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue({"rag.retrieve", "rag.embed", "rag.search", "rag.rerank"} <= child_names)
         self.assertTrue(any(span.name == "chat.agent" for span in spans))
         for span in spans:
+            self.assertNotIn("langfuse.observation.input", span.attributes)
+            self.assertNotIn("langfuse.observation.output", span.attributes)
             if span.name == "rag.rerank":
                 metadata = span.attributes
                 self.assertTrue(json.loads(metadata["langfuse.observation.metadata.rerank_enabled"]))
@@ -183,16 +186,19 @@ class LangfuseEndToEndTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(private_value, output.getvalue())
 
     async def test_retrieval_content_is_exported_only_when_explicitly_enabled(self):
-        from benchmarks.rag_eval import retrieve_mcp
+        from benchmarks.rag_eval import retrieve_mcp, stream_chat
 
         with self.use_langfuse(capture=True), self.use_asgi_client():
             async with self.app.router.lifespan_context(self.app):
                 result = await retrieve_mcp("https://testserver", self.mcp_key, QUERY, ["fixture-kb"], 5)
+                await stream_chat("https://testserver", self.token, QUERY, ["fixture-kb"])
 
         spans = self.exporter.get_finished_spans()
-        bodies = {span.name: json.loads(span.attributes["langfuse.observation.output"]) for span in spans
-                  if "langfuse.observation.output" in span.attributes}
-        self.assertEqual(bodies, {"mcp.retrieve": {"retrieved_contexts": [CONTEXT]}})
+        for field, body in (("input", {"query": QUERY}), ("output", {"retrieved_contexts": [CONTEXT]})):
+            attribute = f"langfuse.observation.{field}"
+            captured = {span.name: json.loads(span.attributes[attribute]) for span in spans
+                        if attribute in span.attributes}
+            self.assertEqual(captured, {"mcp.retrieve": body, "rag.graph": body})
         self.assertEqual(result["results"][0]["text"], CONTEXT)
 
     async def test_disabled_tracing_leaves_chat_and_mcp_responses_usable(self):

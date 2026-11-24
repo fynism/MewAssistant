@@ -101,8 +101,12 @@ def trace_observation(name, *, as_type="span", root=False, metadata=None):
             logger.warning("Langfuse observation could not close")
 
 
-def capture_retrieval_content(observation, texts) -> None:
-    if observation is not None and settings.langfuse_capture_retrieval_content:
+def capture_retrieval_content(observation, *, query: str | None = None, texts=None) -> None:
+    if observation is None or not settings.langfuse_capture_retrieval_content:
+        return
+    if query is not None:
+        update_observation(observation, input={"query": query[:500]})
+    if texts is not None:
         update_observation(observation, output={
             "retrieved_contexts": [text[:4000] for text in islice(texts, 20)],
         })

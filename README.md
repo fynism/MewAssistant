@@ -169,7 +169,7 @@ SuperMew 在服务端将 MCP 检索和网页问答的 trace 发送到 Langfuse�
 
 运行 Ragas 指标时，在 `uv run --locked` 后加 `--group eval`。MCP 模式加 `--relevant-document-id DOCUMENT_ID`，可重复指定，计算基于文档 ID 的 Recall。网页问答模式加 `--faithfulness`，并配置 `RAGAS_JUDGE_MODEL`、`RAGAS_JUDGE_API_KEY` 和可选的 `RAGAS_JUDGE_BASE_URL`。Faithfulness 会把测试问题、召回文本和回答发送给裁判模型。Ragas 只在评测脚本里运行。
 
-Langfuse 默认接收耗时、状态、计数等追踪数据。若要在 Langfuse 查看召回文本，可在只含测试数据的环境中设置 `LANGFUSE_CAPTURE_RETRIEVAL_CONTENT=true`。Langfuse Secret Key、MeowMCP API Key 和登录 JWT 通过私有运行配置提供。
+Langfuse 默认接收耗时、状态、计数等追踪数据。在只含测试数据的环境中设置 `LANGFUSE_CAPTURE_RETRIEVAL_CONTENT=true` 后，新请求的检索问题和最终片段分别出现在 `mcp.retrieve`（MeowMCP）或 `rag.graph`（网页问答）的 **Input** 和 **Output** 中。Langfuse Secret Key、MeowMCP API Key 和登录 JWT 通过私有运行配置提供。
 
 ## Docker 发布
 

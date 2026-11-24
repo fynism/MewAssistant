@@ -51,6 +51,7 @@ def create_agent_instance(owner_id: int, request_state: dict, event_sink=None,
         try:
             scope = {"knowledge_ids": knowledge_ids} if knowledge_ids is not None else {}
             with trace_observation("rag.graph", as_type="tool") as observation:
+                capture_retrieval_content(observation, query=query)
                 result = run_rag_graph(query, owner_id=owner_id, **scope)
                 request_state["rag_trace"] = result.get("rag_trace")
                 docs = result.get("docs", [])
@@ -61,7 +62,7 @@ def create_agent_instance(owner_id: int, request_state: dict, event_sink=None,
                         "retrieval_stage": rag_trace.get("retrieval_stage"),
                         "rewrite_needed": rag_trace.get("rewrite_needed"),
                     })
-                    capture_retrieval_content(observation, (doc.get("text") or "" for doc in docs))
+                    capture_retrieval_content(observation, texts=(doc.get("text") or "" for doc in docs))
         finally:
             if token is not None:
                 reset_rag_step_sink(token)

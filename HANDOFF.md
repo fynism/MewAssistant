@@ -5,6 +5,9 @@
 - The running server must include the tracing code and use the same Langfuse project as the evaluator. A successful request against an older or disabled server has no trace ID and cannot be scored on its existing trace.
 - MCP returns the trace ID in `structuredContent.traceId`. Chat returns it in `X-Langfuse-Trace-Id`. The evaluator checks stream completion before scoring, and the dashboard may need a refresh after batch ingestion.
 - The smoke score checks score delivery. MeowMCP only returns retrieved chunks, so its optional Ragas score uses reference document IDs. Faithfulness uses the chat stream's final retrieved chunks and complete answer.
+- Langfuse shows undefined Input and Output on metadata-only traces. Enable retrieval content capture for a fresh request against a synthetic test knowledge base, then inspect the final `mcp.retrieve` or `rag.graph` observation.
+- On this Windows machine, run from the feature worktree with `D:/fengye/projects/SuperMew/.venv/Scripts/python.exe`. Install required packages into that environment and reuse the existing BGE-M3 cache. Running project sync in the C-drive worktree can create a duplicate environment.
+- Run the live smoke and model-bearing test suites sequentially. A smoke process polling Cloud readback can still hold BGE-M3 in memory after its local HTTP server exits.
 - A 500-iteration local check measured median tracing overhead of 0.46 ms for six metadata spans with the in-memory exporter. This excludes retrieval, network and optional content capture. Test first-byte latency and throughput on staging after enabling real export.
 
 ## Multi-format preview verification (2026-11-24)

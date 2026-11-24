@@ -54,6 +54,8 @@ def _invoke(headers, operation, **kwargs):
         )
         try:
             with trace as observation:
+                if observation is not None:
+                    capture_retrieval_content(observation, query=kwargs["query"])
                 result = operation(db, owner_id, **kwargs)
                 if operation is retrieve:
                     _bound_retrieval_context(result)
@@ -63,7 +65,7 @@ def _invoke(headers, operation, **kwargs):
                             "status": result["status"],
                             "result_count": len(result["results"]),
                         })
-                        capture_retrieval_content(observation, (item["text"] for item in result["results"]))
+                        capture_retrieval_content(observation, texts=(item["text"] for item in result["results"]))
                 return result
         except HTTPException as exc:
             category = ("permission" if exc.status_code == 404 else
