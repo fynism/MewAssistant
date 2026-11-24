@@ -211,15 +211,25 @@
                       <template v-else>
                         <p class="message-scope">本轮范围：{{ scopeNames(message.knowledgeIds) }}</p>
                         <div v-if="message.text" class="markdown-body" v-html="parseMarkdown(message.text)"></div>
-                        <p v-if="message.thinking" class="chat-response-status" role="status"><mcp-icon name="Loading" class="processing-icon" :size="14"></mcp-icon>正在回答</p>
+                        <p v-if="message.thinking" class="chat-response-status chat-pending" role="status">
+                          <mcp-icon name="Loading" class="processing-icon" :size="15"></mcp-icon>
+                          <span>{{ message.steps?.at(-1)?.label || '正在回答…' }}</span>
+                        </p>
                         <el-alert v-if="message.error" :title="message.error === '已停止回答' || !message.text ? message.error : '回答未完成：' + message.error" :type="message.error === '已停止回答' ? 'info' : 'error'" :closable="false" class="feedback"></el-alert>
                         <div v-if="message.trace || message.steps?.length" class="chat-answer-tools">
-                          <button v-if="chatSourcesByMessage.get(message.id)?.length" class="chat-source-toggle" type="button" :aria-expanded="chatSourcesOpen && chatSourceView?.messageId === message.id" aria-controls="chat-source-panel" @click="toggleChatSources(message.id, $event)">来源 {{ chatSourcesByMessage.get(message.id).length }}</button>
+                          <button v-if="chatSourcesByMessage.get(message.id)?.length" class="chat-source-toggle" type="button" :aria-expanded="chatSourcesOpen && chatSourceView?.messageId === message.id" aria-controls="chat-source-panel" @click="toggleChatSources(message.id, $event)">
+                            <mcp-icon name="Document" :size="16"></mcp-icon>{{ chatSourcesByMessage.get(message.id).length }} 条来源
+                          </button>
                           <p v-else-if="message.trace?.tool_used && !message.error" class="chat-response-status">本轮未找到相关资料</p>
                           <details class="chat-trace">
                             <summary>检索详情</summary>
                             <div class="chat-trace-details">
-                              <p v-for="(step,i) in message.steps || []" :key="i" class="small muted">{{ step.label || step.node || step.step || '检索步骤' }} {{ step.status || '' }}<span v-if="step.detail"> · {{ step.detail }}</span></p>
+                              <ol v-if="message.steps?.length" class="chat-trace-steps" role="list">
+                                <li v-for="(step,i) in message.steps" :key="i">
+                                  <span>{{ step.label || step.node || step.step || '检索步骤' }} {{ step.status || '' }}</span>
+                                  <p v-if="step.detail">{{ step.detail }}</p>
+                                </li>
+                              </ol>
                               <p v-if="message.trace?.tool_used === false" class="small muted">本轮未调用检索工具</p>
                               <dl v-if="traceFacts(message.trace).length" class="trace-facts"><template v-for="fact in traceFacts(message.trace)" :key="fact.label"><dt>{{ fact.label }}</dt><dd>{{ fact.value }}</dd></template></dl>
                               <section v-for="group in traceGroups(message.trace)" :key="group.label" class="trace-group">
@@ -248,15 +258,22 @@
               <aside v-if="chatSourcesOpen" id="chat-source-panel" class="chat-source-panel" aria-labelledby="chat-sources-heading" @keydown.esc.prevent="closeChatSources">
                 <header class="chat-source-header">
                   <button type="button" class="chat-source-back" @click="closeChatSources"><mcp-icon name="ArrowLeft" :size="16"></mcp-icon>返回对话</button>
-                  <h2 id="chat-sources-heading" ref="chatSourcesHeading" tabindex="-1">来源</h2>
+                  <h2 id="chat-sources-heading" ref="chatSourcesHeading" tabindex="-1">检索来源</h2>
                   <button type="button" class="reading-icon-button chat-source-close" aria-label="关闭来源" @click="closeChatSources"><mcp-icon name="Close" :size="19"></mcp-icon></button>
                 </header>
                 <div class="chat-source-list" aria-label="检索来源">
                   <button v-for="source in chatSources" :key="source.key" type="button" class="chat-source-row" :aria-pressed="chatSource?.key === source.key" @click="selectChatSource(source)">
-                    <mcp-icon name="Document" class="reading-file-icon" :class="{'is-pdf':source.filename.toLowerCase().endsWith('.pdf')}" :size="24"></mcp-icon>
+                    <mcp-icon name="Document" class="reading-file-icon" :class="{'is-pdf':source.filename.toLowerCase().endsWith('.pdf')}" :size="20"></mcp-icon>
                     <span class="chat-source-label">
                       <strong :title="source.filename">{{ source.filename }}</strong>
-                      <span v-if="source.knowledgeId || (source.pageNumber && previewFormat(source.filename) === 'pdf')" class="chat-source-meta">{{ source.knowledgeId ? scopeNames([source.knowledgeId]) : '' }}<template v-if="source.pageNumber && previewFormat(source.filename) === 'pdf'">{{ source.knowledgeId ? ' · ' : '' }}第 {{ source.pageNumber }} 页</template></span>
+                      <span class="chat-source-meta">
+                        <span v-if="source.knowledgeId">{{ scopeNames([source.knowledgeId]) }}</span>
+                        <span v-if="source.pageNumber && previewFormat(source.filename) === 'pdf'">第 {{ source.pageNumber }} 页</span>
+                        <span v-else-if="chatSource?.key === source.key && chatPreview.citation">{{ chatPreview.citation.sheet }} · {{ chatPreview.citation.range }}</span>
+                      </span>
+                      <span v-if="source.passages[0]" class="chat-source-snippet" aria-hidden="true">
+                        {{ source.passages[0].slice(0, 120) }}{{ source.passages[0].length > 120 ? '…' : '' }}
+                      </span>
                     </span>
                   </button>
                 </div>
