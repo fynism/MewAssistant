@@ -7,6 +7,7 @@ Creates a disposable database and Milvus collection; run with
 import io
 import os
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 from uuid import uuid4
@@ -33,6 +34,25 @@ def docx_bytes(content: str) -> bytes:
             <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
             <w:body><w:p><w:r><w:t>{content}</w:t></w:r></w:p></w:body></w:document>""")
     return stream.getvalue()
+
+
+def check(response, status=200):
+    assert response.status_code == status, (response.status_code, response.text[:500])
+    return response.json()
+
+
+def wait_until_ready(client, path, headers):
+    deadline = time.monotonic() + 120
+    while True:
+        item = check(client.get(path, headers=headers))
+        status = item["status"]
+        if status == "ready":
+            return
+        if status not in {"pending", "replacing", "processing"}:
+            raise AssertionError(f"{path} ended in {status}: {item.get('error_summary')}")
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"{path} did not become ready within 120 seconds (last state: {status})")
+        time.sleep(0.5)
 
 
 def main() -> None:
@@ -82,10 +102,6 @@ def main() -> None:
             finally:
                 db.close()
 
-            def check(response, status=200):
-                assert response.status_code == status, (response.status_code, response.text[:500])
-                return response.json()
-
             with TestClient(create_app()) as client:
                 for path in ["/", "/services/knowledge", "/account", "/workspace/knowledges", "/try"]:
                     assert client.get(path).status_code == 200, path
@@ -113,8 +129,7 @@ def main() -> None:
                     item = check(client.post(f"/knowledges/{kb_id}/documents", headers=headers,
                         files={"file": ("same.docx", docx_bytes(content), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}), 202)
                     document_ids.append(item["id"])
-                    status = check(client.get(f"/knowledges/{kb_id}/documents/{item['id']}", headers=headers))["status"]
-                    assert status == "ready", status
+                    wait_until_ready(client, f"/knowledges/{kb_id}/documents/{item['id']}", headers)
                 assert len(set(document_ids)) == 3
                 listed = check(client.post("/tools/debug/listKnowledges", headers=alice, json={"limit": 1}))
                 assert len(listed["items"]) == 1 and listed["nextCursor"]
@@ -136,7 +151,7 @@ def main() -> None:
                     files={"file": ("same.docx", docx_bytes("silver comet library " * 16),
                         "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}), 202)
                 assert replaced["id"] == document_ids[0]
-                assert check(client.get(f"/knowledges/{a1}/documents/{document_ids[0]}", headers=alice))["status"] == "ready"
+                wait_until_ready(client, f"/knowledges/{a1}/documents/{document_ids[0]}", alice)
                 after = check(client.post("/tools/debug/retrieve", headers=alice,
                     json={"query": "silver comet", "knowledgeIds": [a1], "topK": 5}))
                 assert after["status"] == "ok" and after["results"]

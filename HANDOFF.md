@@ -1,5 +1,14 @@
 # Handoff
 
+## Multi-format preview verification (2026-11-24)
+
+- Word ingestion and preview share a private PDF stored under the original file's storage key. Preserve `.previews` when moving the original storage directory. Existing Word and Excel files can open before reprocessing. Reprocess them to build page or cell-range citations from the new extractors.
+- The Windows LibreOffice check used the official 26.8.3.1 runtime extracted into a temporary directory, with the `program` directory on `PATH`. The Windows Docker engine was unavailable. Local Office integration used temporary SQLite, real JWT and document parsers, with vector storage and rate limits replaced by test fixtures.
+- The same two-page Word fixture took 12.98 s on its first on-demand conversion and PNG response and 41 ms when cached. In a two-sheet 120-by-23 workbook, XLSX preview requests took 31–32 ms and BIFF8 XLS requests took 222 ms. Excel responses contained up to 40 rows by 20 columns. These are local single-fixture timings.
+- The legacy M1 test expected `GET /documents` to return 404. Commit `dd86ad8` added the authenticated, account-scoped listing. The old assertion was removed, and `test_m2_tools` still covers authentication and document ownership.
+- A local backend process can serve freshly edited frontend files while retaining its original API routes. If Excel preview returns 404, check for `/spreadsheet-preview` in `/openapi.json`. Verify uploads and previews against a fresh process backed by isolated test data.
+- Valid Strict Open XML workbooks can return 422 because openpyxl finds no worksheets in the Strict namespace. This response comes from the registered preview route. An old process without the route returns 404.
+
 ## T2Retrieval evaluation
 
 - The source pack is `data/benchmarks/t2-smoke/`: 10 queries, 80 documents, 45 labeled positive documents and 35 random distractors. All labeled positives for the selected queries are present. This small corpus is a smoke test, not a full benchmark. The completed evaluation must use `data/benchmarks/t2-isolated/`; the first shared-environment attempt was interrupted before scoring.

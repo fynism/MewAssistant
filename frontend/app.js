@@ -7,6 +7,14 @@
   const titles = {'/':'个人知识库', '/services/knowledge':'客户端接入', '/workspace/knowledges':'个人知识库', '/try':'问资料', '/account':'个人管理', '/admin':'管理页面'};
   const routePath = () => routes.includes(location.pathname.replace(/\/$/, '') || '/') ? location.pathname.replace(/\/$/, '') || '/' : '/';
   const storage = {get(key) {try {return localStorage.getItem(key);} catch {return null;}}, set(key, value) {try {value ? localStorage.setItem(key, value) : localStorage.removeItem(key);} catch {}}};
+  const newSessionId = () => 'session_' + crypto.randomUUID();
+  const fileExtension = filename => /\.([^.]+)$/.exec(filename || '')?.[1].toLowerCase();
+  function previewFormat(filename) {
+    const extension = fileExtension(filename);
+    if (['pdf','doc','docx'].includes(extension)) return 'pdf';
+    if (['xls','xlsx'].includes(extension)) return 'spreadsheet';
+    return ['txt','md'].includes(extension) ? extension : null;
+  }
   function decodePreviewText(buffer) {
     const bytes = new Uint8Array(buffer);
     const view = new DataView(buffer);
@@ -32,7 +40,22 @@
     try {return new TextDecoder('utf-8', {fatal:true}).decode(bytes);}
     catch {return new TextDecoder('gb18030').decode(bytes);}
   }
-  const newSessionId = () => 'session_' + crypto.randomUUID();
+  function parseMarkdown(text, preview = false) {
+    const options = {breaks:true,gfm:true};
+    const tags = ['style','iframe'];
+    const attrs = ['style'];
+    if (preview) {
+      // Previewing an uploaded document must not load resources it references.
+      options.renderer = new marked.Renderer();
+      options.renderer.html = () => '';
+      options.renderer.image = (_href, _title, alt) => alt;
+      tags.push('img','picture','audio','video','source','track','object','embed','input','form','link','meta');
+      attrs.push('src','srcset','poster','background');
+    }
+    return DOMPurify.sanitize(marked.parse(text || '', options), {
+      USE_PROFILES:{html:true},FORBID_TAGS:tags,FORBID_ATTR:attrs
+    });
+  }
   function highlightParts(text, query) {
     if (!query) return [{text, match:false}];
     const literal = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -118,13 +141,11 @@
       const documents = ref([]), documentsLoading = ref(false), documentsError = ref(''), documentBusyId = ref('');
       const searchQuery = ref(''), submittedQuery = ref(''), searchResult = shallowRef(null), searchLoading = ref(false), searchError = ref('');
       const sidebarPane = ref('results'), sidebarHidden = ref(false);
-      const activeSource = shallowRef(null), previewOpen = ref(false), previewLoading = ref(false), previewError = ref('');
-      const previewUrl = ref(''), previewText = ref(null), previewPage = ref(1), previewPageCount = ref(0), previewZoom = ref(100);
+      const activeSource = shallowRef(null), previewOpen = ref(false), previewZoom = ref(100);
       const downloadLoading = ref(false), searchInput = ref(null), previewTitle = ref(null), readingList = ref(null), previewCanvas = ref(null);
-      let searchController, previewController;
-      const previewType = computed(() => activeSource.value?.filename.split('.').at(-1).toLowerCase());
+      const preview = useDocumentPreview(previewCanvas);
+      let searchController;
       const activeDocument = computed(() => documents.value.find(doc => doc.id === activeSource.value?.documentId));
-      const previewTextParts = computed(() => highlightParts(previewText.value || '', activeSource.value?.query));
       const readingRows = computed(() => submittedQuery.value
         ? (searchResult.value?.results || []).map(source => ({...source, key:source.sourceId, query:submittedQuery.value, snippet:searchSnippet(source.text, submittedQuery.value)}))
         : documents.value.map(doc => ({key:doc.id, documentId:doc.id, knowledgeId:doc.knowledge_id,
@@ -140,18 +161,20 @@
       const toolName = ref('retrieve'), toolQuery = ref(''), topK = ref(5), toolLoading = ref(false), toolResult = ref(null), toolError = ref('');
       const messages = ref([]), chatInput = ref(''), chatLoading = ref(false), chatLog = ref(null), isComposing = ref(false);
       const chatSourcesOpen = ref(false), chatSourceView = shallowRef(null), chatSourcesHeading = ref(null);
-      const chatSourcePreview = ref(null), chatPreviewPage = ref(null), chatPreviewPageCount = ref(0);
-      const chatPreviewText = ref(null), chatPreviewUrl = ref(''), chatPreviewLoading = ref(false), chatPreviewError = ref('');
+      const chatSourcePreview = ref(null), chatPreview = useDocumentPreview(chatSourcePreview);
       const chatOriginalLoading = ref(false);
-      let chatSourceTrigger = null, chatPreviewController = null, chatOriginalController = null, chatPreviewScroll = 0;
+      let chatSourceTrigger = null, chatOriginalController = null, chatPreviewScroll = 0;
       const chatSourcesByMessage = computed(() => new Map(messages.value
         .map(message => [message.id,collectChatSources(message.trace?.retrieved_chunks || [])])));
       const chatSources = computed(() => chatSourcesByMessage.value.get(chatSourceView.value?.messageId) || []);
       const chatSource = computed(() => chatSources.value.find(source => source.key === chatSourceView.value?.sourceKey) || chatSources.value[0]);
       const hasChatOriginal = computed(() => Boolean(chatSource.value?.knowledgeId && chatSource.value?.documentId));
-      const hasChatPdfPage = computed(() => hasChatOriginal.value && chatSource.value.pageNumber !== null
-        && chatSource.value.filename.toLowerCase().endsWith('.pdf'));
-      const hasChatMarkdown = computed(() => hasChatOriginal.value && /\.md$/i.test(chatSource.value.filename));
+      const chatPreviewFormat = computed(() => {
+        if (!hasChatOriginal.value) return null;
+        const {filename,pageNumber} = chatSource.value;
+        if (fileExtension(filename) === 'pdf' && pageNumber === null) return null;
+        return previewFormat(filename);
+      });
       const sessions = ref([]), sessionsOpen = ref(false), sessionsLoading = ref(false), sessionsError = ref('');
       let sessionId = newSessionId(), streamController = null;
       const keys = ref([]), keyName = ref(''), newKey = ref(''), keysLoading = ref(false), keyBusy = ref(false), keyError = ref('');
@@ -356,58 +379,95 @@
           if (!controller.signal.aborted) searchLoading.value = false;
         }
       }
-      function releasePreview() {
-        previewController?.abort();
-        if (previewUrl.value) URL.revokeObjectURL(previewUrl.value);
-        previewUrl.value = ''; previewText.value = null; previewError.value = ''; previewLoading.value = false;
-      }
       function resetPreview() {
-        releasePreview();
-        activeSource.value = null; previewOpen.value = false; previewPageCount.value = 0; previewZoom.value = 100;
+        preview.reset();
+        activeSource.value = null; previewOpen.value = false; previewZoom.value = 100;
       }
       function sourcePath(source) {
         return `/knowledges/${encodeURIComponent(source.knowledgeId)}/documents/${encodeURIComponent(source.documentId)}`;
       }
-      async function fetchPreviewText(source, signal) {
-        const response = await request(`${sourcePath(source)}/content`, {signal});
-        return decodePreviewText(await response.arrayBuffer());
-      }
-      async function fetchPdfPage(source, pageNumber, signal) {
-        const response = await request(`${sourcePath(source)}/preview/${pageNumber}`, {
-          ...jsonBody('POST', {query:source.query || ''}), signal
+      function useDocumentPreview(canvas) {
+        let controller, scrollPosition = 0, lastSheetPosition = null;
+        const state = reactive({
+          url:'', text:null, page:null, pageCount:0, loading:false, error:'',
+          workbook:shallowRef(null), citation:null,
+          get hasContent() {return Boolean(this.url || this.workbook) || this.text !== null;},
+          clear, reset, load, restoreImageScroll
         });
-        return {blob:await response.blob(), pageCount:Number(response.headers.get('X-PDF-Page-Count')) || 0};
-      }
-      async function loadPreview(pageNumber = previewPage.value) {
-        const source = activeSource.value, format = previewType.value;
-        if (!source || !['pdf', 'txt', 'md'].includes(format)) return;
-        releasePreview();
-        const controller = new AbortController(); previewController = controller;
-        previewPage.value = pageNumber; previewLoading.value = true;
-        previewCanvas.value?.scrollTo(0, 0);
-        try {
-          if (format === 'pdf') {
-            const {blob,pageCount} = await fetchPdfPage(source, pageNumber, controller.signal);
-            if (controller.signal.aborted) return;
-            previewPageCount.value = pageCount;
-            previewUrl.value = URL.createObjectURL(blob);
-          } else {
-            const text = await fetchPreviewText(source, controller.signal);
-            if (controller.signal.aborted) return;
-            previewText.value = text;
-          }
-        } catch (error) {
-          if (!controller.signal.aborted && error.name !== 'AbortError') previewError.value = error.message;
-        } finally {
-          if (!controller.signal.aborted) previewLoading.value = false;
+        return state;
+
+        function clear(keepWorkbook = false) {
+          controller?.abort();
+          controller = null;
+          if (state.url) URL.revokeObjectURL(state.url);
+          Object.assign(state, {url:'',text:null,error:'',loading:false});
+          if (!keepWorkbook) state.workbook = null;
         }
+        function reset() {
+          clear();
+          state.page = null;
+          state.pageCount = 0;
+          state.citation = null;
+          lastSheetPosition = null;
+        }
+        function restoreImageScroll(event) {
+          if (event.target.src === state.url) canvas.value?.scrollTo(0, scrollPosition);
+        }
+        async function load(source, {pageNumber, scroll = 0, citationPage, sheetPosition = lastSheetPosition}) {
+          const format = previewFormat(source?.filename);
+          if (!format) return;
+          clear(format === 'spreadsheet');
+          const requestController = new AbortController();
+          controller = requestController;
+          const {signal} = requestController;
+          state.page = pageNumber;
+          state.loading = true;
+          scrollPosition = scroll;
+          canvas.value?.scrollTo(0, 0);
+          const path = sourcePath(source);
+          try {
+            if (format === 'pdf') {
+              const response = await request(`${path}/preview/${pageNumber}`, {
+                ...jsonBody('POST', {query:source.query || ''}), signal
+              });
+              const blob = await response.blob();
+              if (signal.aborted) return;
+              state.pageCount = Number(response.headers.get('X-PDF-Page-Count')) || 0;
+              state.url = URL.createObjectURL(blob);
+            } else if (format === 'spreadsheet') {
+              lastSheetPosition = sheetPosition;
+              const params = new URLSearchParams(sheetPosition || (citationPage ? {citation_page:citationPage} : {}));
+              const query = params.size ? '?' + params : '';
+              const workbook = await jsonRequest(`${path}/spreadsheet-preview${query}`, {signal});
+              if (signal.aborted) return;
+              state.workbook = workbook;
+              if (workbook.citation_range) state.citation = {sheet:workbook.sheet,range:workbook.citation_range};
+            } else {
+              const response = await request(`${path}/content`, {signal});
+              const bytes = await response.arrayBuffer();
+              if (signal.aborted) return;
+              state.text = decodePreviewText(bytes);
+            }
+          } catch (error) {
+            if (!signal.aborted && error.name !== 'AbortError') state.error = error.message;
+          } finally {
+            if (!signal.aborted) state.loading = false;
+          }
+          if (!signal.aborted && scroll && !state.url && state.hasContent) {
+            await nextTick();
+            if (!signal.aborted) canvas.value?.scrollTo(0, scroll);
+          }
+        }
+      }
+      function loadPreview(pageNumber = preview.page ?? 1, sheetPosition) {
+        const source = activeSource.value;
+        return preview.load(source, {pageNumber,sheetPosition,citationPage:chatPageNumber(source?.pageNumber)});
       }
       async function openPreview(source, event) {
         if (activeSource.value?.key !== source.key) {
           resetPreview();
           activeSource.value = source;
-          previewPage.value = (source.pageNumber ?? 0) + 1;
-          loadPreview();
+          loadPreview(chatPageNumber(source.pageNumber) ?? 1);
         }
         previewOpen.value = true;
         if (event.detail === 0 || compactReader.value) {
@@ -529,18 +589,6 @@
         catch (error) {if (epoch === identityEpoch && call === resultEpoch && error.name !== 'AbortError') toolError.value = error.message;}
         finally {if (epoch === identityEpoch && call === resultEpoch) toolLoading.value = false;}
       }
-      function parseMarkdown(text, documentPreview = false) {
-        const options = {breaks:true,gfm:true};
-        if (documentPreview) {
-          // Previewing an uploaded document must not load resources it references.
-          options.renderer = new marked.Renderer();
-          options.renderer.html = () => '';
-          options.renderer.image = (_href, _title, alt) => alt;
-        }
-        return DOMPurify.sanitize(marked.parse(text || '',options), {
-          USE_PROFILES:{html:true},FORBID_TAGS:['style','iframe'],FORBID_ATTR:['style']
-        });
-      }
       function traceFacts(trace) {
         if (!trace) return [];
         const fields = {
@@ -573,16 +621,16 @@
         }
         chatSourceTrigger = event?.currentTarget || null;
         chatSourcesOpen.value = true;
-        loadChatPreview(chatPreviewPage.value ?? chatSource.value?.pageNumber, chatPreviewScroll);
+        loadChatPreview(chatPreview.page ?? chatSource.value?.pageNumber ?? 1, chatPreviewScroll);
         await nextTick();
         chatSourcesHeading.value?.focus({preventScroll:true});
       }
       function selectChatSource(source) {
         if (source.key === chatSource.value?.key) return;
-        clearChatSourceContent();
+        clearChatSourceContent(true);
         chatSourceView.value = {...chatSourceView.value,sourceKey:source.key};
-        chatPreviewPageCount.value = 0; chatPreviewPage.value = null; chatPreviewScroll = 0;
-        loadChatPreview(source.pageNumber);
+        chatPreviewScroll = 0;
+        loadChatPreview(source.pageNumber ?? 1);
       }
       async function closeChatSources() {
         chatPreviewScroll = chatSourcePreview.value?.scrollTop || 0;
@@ -594,51 +642,21 @@
         if (!chatSourcesOpen.value) trigger?.focus({preventScroll:true});
       }
       function resetChatSources() {
-        clearChatSourceContent();
+        clearChatSourceContent(true);
         chatSourcesOpen.value = false; chatSourceView.value = null; chatSourceTrigger = null;
-        chatPreviewPageCount.value = 0; chatPreviewPage.value = null; chatPreviewScroll = 0;
+        chatPreviewScroll = 0;
       }
-      function clearChatPreview() {
-        chatPreviewController?.abort(); chatPreviewController = null;
-        if (chatPreviewUrl.value) URL.revokeObjectURL(chatPreviewUrl.value);
-        chatPreviewUrl.value = ''; chatPreviewText.value = null; chatPreviewLoading.value = false; chatPreviewError.value = '';
-      }
-      function clearChatSourceContent() {
-        clearChatPreview();
+      function clearChatSourceContent(resetPosition = false) {
+        if (resetPosition) chatPreview.reset();
+        else chatPreview.clear();
         chatOriginalController?.abort(); chatOriginalController = null;
         chatOriginalLoading.value = false;
       }
-      async function loadChatPreview(pageNumber = chatPreviewPage.value, scroll = 0) {
-        if (!chatSourcesOpen.value || (!hasChatMarkdown.value && (!hasChatPdfPage.value || !pageNumber))) return;
-        clearChatPreview();
-        const controller = new AbortController();
-        chatPreviewController = controller;
-        chatPreviewPage.value = pageNumber; chatPreviewLoading.value = true; chatPreviewScroll = scroll;
-        chatSourcePreview.value?.scrollTo(0, 0);
-        try {
-          if (hasChatMarkdown.value) {
-            const text = await fetchPreviewText(chatSource.value, controller.signal);
-            if (!controller.signal.aborted) chatPreviewText.value = text;
-            return;
-          }
-          const {blob,pageCount} = await fetchPdfPage(chatSource.value, pageNumber, controller.signal);
-          if (controller.signal.aborted) return;
-          chatPreviewPageCount.value = pageCount;
-          chatPreviewUrl.value = URL.createObjectURL(blob);
-        } catch (error) {
-          if (!controller.signal.aborted) chatPreviewError.value = error.message;
-        } finally {
-          if (!controller.signal.aborted) {
-            chatPreviewLoading.value = false;
-            if (chatPreviewText.value !== null) {
-              await nextTick();
-              if (!controller.signal.aborted) chatSourcePreview.value?.scrollTo(0, scroll);
-            }
-          }
-        }
-      }
-      function restoreChatPreviewScroll(event) {
-        if (event.target.src === chatPreviewUrl.value) chatSourcePreview.value?.scrollTo(0, chatPreviewScroll);
+      function loadChatPreview(pageNumber = chatPreview.page ?? 1, scroll = 0, sheetPosition) {
+        if (!chatSourcesOpen.value || !chatPreviewFormat.value) return;
+        chatPreviewScroll = scroll;
+        const source = chatSource.value;
+        return chatPreview.load(source, {pageNumber,scroll,sheetPosition,citationPage:source.pageNumber});
       }
       async function downloadChatOriginal() {
         if (!hasChatOriginal.value || chatOriginalLoading.value) return;
@@ -794,11 +812,11 @@
         documents,documentsLoading,documentsError,documentBusyId,loadDocuments,fileInput,replaceInput,isUploading,acceptedExtensions,uploadLimitLabel,uploadDocument,chooseReplacement,replaceDocument,documentAction,statusLabel,documentPending,openTryWithKnowledge,pageReview,pageReviewLoading,viewDocumentPage,
         searchQuery,submittedQuery,searchResult,searchLoading,searchError,readingRows,searchInput,readingList,runSearch,clearSearchInput,guardSearchComposition,
         compactReader,sidebarPane,sidebarHidden,browseKnowledge,toggleReadingSidebar,
-        activeSource,activeDocument,previewType,previewOpen,previewLoading,previewError,previewUrl,previewText,previewTextParts,previewTitle,previewCanvas,previewPage,previewPageCount,previewZoom,openPreview,loadPreview,downloadSource,downloadLoading,
+        activeSource,activeDocument,previewOpen,preview,previewFormat,previewTitle,previewCanvas,previewZoom,openPreview,loadPreview,downloadSource,downloadLoading,
         scopeNames,toolName,toolQuery,topK,knowledgeSettings,toolLoading,toolResult,toolError,runTool,messages,chatInput,chatLoading,chatLog,isComposing,sendChat,stopChat,handleChatKey,parseMarkdown,traceFacts,traceGroups,newChat,sessions,sessionsOpen,sessionsLoading,sessionsError,loadSessions,loadSession,deleteSession,
         chatSourcesOpen,chatSourceView,chatSourcesHeading,chatSourcesByMessage,chatSources,chatSource,toggleChatSources,selectChatSource,closeChatSources,
-        chatPageNumber,chatSourcePreview,chatPreviewPage,chatPreviewPageCount,chatPreviewUrl,chatPreviewLoading,chatPreviewError,
-        hasChatOriginal,hasChatPdfPage,chatPreviewText,chatOriginalLoading,loadChatPreview,restoreChatPreviewScroll,downloadChatOriginal,
+        chatPageNumber,chatSourcePreview,chatPreview,
+        hasChatOriginal,chatPreviewFormat,chatOriginalLoading,loadChatPreview,downloadChatOriginal,
         keys,keyName,newKey,keysLoading,keyBusy,keyError,loadKeys,createKey,revokeKey,invites,newInvite,invitesLoading,inviteBusy,inviteError,invitationForm,loadInvites,createInvite,revokeInvite,invitationStatus,formatDate,operations,operationsLoading,operationsError,loadOperations,copyText
       };
     }
@@ -808,6 +826,36 @@
     props:{modelValue:String,examples:Array},
     emits:['update:modelValue','copy','help'],
     template:'#connection-example-template'
+  });
+  app.component('mcp-document-preview',{
+    props:{preview:Object,filename:String,query:String,zoom:{type:Number,default:100},compact:Boolean},
+    emits:['sheet-navigation'],
+    setup(props, {emit}) {
+      const isMarkdown = computed(() => previewFormat(props.filename) === 'md');
+      const markdown = computed(() => parseMarkdown(props.preview.text, true));
+      const textParts = computed(() => highlightParts(props.preview.text || '', props.query));
+      const workbook = computed(() => props.preview.workbook);
+      const sheetGrid = ref(null);
+      const citation = computed(() => {
+        const reference = props.preview.citation;
+        if (!reference || reference.sheet !== workbook.value?.sheet) return null;
+        const range = /^([A-Z]+)([0-9]+)(?::([A-Z]+)([0-9]+))?$/.exec(reference.range);
+        if (!range) return null;
+        const [,startColumn,startRow,endColumn = startColumn,endRow = startRow] = range;
+        const columnNumber = letters => [...letters].reduce((number, letter) => number * 26 + letter.charCodeAt(0) - 64, 0);
+        return {firstRow:Number(startRow),lastRow:Number(endRow),firstColumn:columnNumber(startColumn),lastColumn:columnNumber(endColumn)};
+      });
+      function isCitationCell(row, column) {
+        const bounds = citation.value;
+        return bounds && row >= bounds.firstRow && row <= bounds.lastRow && column >= bounds.firstColumn && column <= bounds.lastColumn;
+      }
+      function navigateSheet(sheet, row, column) {
+        if (!props.preview.loading) emit('sheet-navigation', {sheet,row,column});
+      }
+      watch(workbook, () => sheetGrid.value?.scrollTo(0, 0), {flush:'post'});
+      return {isMarkdown,markdown,textParts,workbook,sheetGrid,citation,isCitationCell,navigateSheet};
+    },
+    template:'#document-preview-template'
   });
   app.component('mcp-icon',{props:{name:{type:String,required:true},size:{type:Number,default:20}},setup(props) {return () => Vue.h(ElIcon,{size:props.size,'aria-hidden':'true'},() => Vue.h(icons[props.name] || icons.Document));}});
   app.mount('#app');

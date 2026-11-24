@@ -6,10 +6,12 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from PIL import Image, ImageChops
+from pypdf import PdfReader, PdfWriter
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from backend.core.security import create_access_token
+from backend.documents.loader import DocumentLoader
 from backend.api.dependencies import get_db
 from backend.infrastructure import storage
 from backend.infrastructure.database.session import Base
@@ -152,6 +154,42 @@ class M2ToolTests(unittest.TestCase):
         with Image.open(io.BytesIO(preview.content)) as marked, Image.open(io.BytesIO(plain.content)) as unmarked:
             self.assertEqual(max(marked.size), 1600)
             self.assertIsNotNone(ImageChops.difference(marked, unmarked).getbbox())
+
+    def test_old_word_previews_on_demand_and_reprocessing_reuses_the_same_pages(self):
+        root = Path(self.temp.name)
+        original = root / "a.docx"
+        original.write_bytes(b"old Word original")
+        with self.factory() as db:
+            old = db.get(KnowledgeDocument, "alice-doc")
+            old.filename = "sample.docx"
+            old.storage_key = original.name
+            old.file_type = ".docx"
+            db.commit()
+
+        fixture = root / "native.pdf"
+        write_native_pdf(fixture)
+
+        def convert(source, work_dir):
+            writer = PdfWriter()
+            for _ in range(2):
+                writer.add_page(PdfReader(fixture).pages[0])
+            writer.write(work_dir / f"{source.stem}.pdf")
+
+        endpoint = "/knowledges/alice-kb/documents/alice-doc"
+        with (patch.object(storage, "KNOWLEDGE_DOCUMENTS_DIR", root),
+              patch("backend.documents.word._run_conversion", side_effect=convert) as converter):
+            self.assertEqual(self.client.post(endpoint + "/preview/1", json={}).status_code, 401)
+            self.assertEqual(self.client.post(endpoint + "/preview/1", headers=self.bob, json={}).status_code, 404)
+            converter.assert_not_called()
+            preview = self.client.post(endpoint + "/preview/2", headers=self.alice, json={"query": "2025"})
+            self.assertEqual(preview.status_code, 200, preview.text if preview.status_code != 200 else "")
+            self.assertEqual(preview.headers["x-pdf-page-count"], "2")
+            self.assertEqual(self.client.post(endpoint + "/preview/3", headers=self.alice, json={}).status_code, 404)
+            self.assertEqual(self.client.get(endpoint + "/content", headers=self.alice).content, original.read_bytes())
+            chunks = DocumentLoader().load_document(str(original), old.filename, old.id, old.knowledge_id)
+            self.assertEqual({c["page_number"] for c in chunks}, {0, 1})
+            self.assertEqual({c["file_type"] for c in chunks}, {"Word"})
+            converter.assert_called_once()
 
 
 if __name__ == "__main__":

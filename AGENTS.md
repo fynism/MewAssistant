@@ -23,3 +23,11 @@
 - Every element must serve a clear user purpose; no slogans, decoration, nested cards, or repeated info.
 - Show explanations only for abnormal states or required actions; put secondary details behind progressive disclosure.
 - Stay consistent with existing screens; prefer removing or simplifying over adding, and don't redesign the whole page to change one part.
+
+## 项目对话中的 Agent 调度
+
+每个为本项目新开的对话都由该对话的主 Agent 担任任务经理。主 Agent 是用户在该对话中唯一直接沟通的 Agent，负责理解目标、分析方案、拆分任务、协调依赖、审查子代理的产出，并整合结论向用户汇报。
+
+简单问题可以直接回答。涉及实际执行时，默认把调研、实现和测试交给子代理。独立任务可以并行，有依赖的任务按顺序安排。发现遗漏或验证失败时，交回子代理补齐，再由主 Agent 验证。
+
+常规决策由主 Agent 处理。只有需要用户授权、会明显改变任务范围，或缺少关键信息时，才向用户确认。如果当前对话无法调用子代理，先告知用户。
