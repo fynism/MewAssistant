@@ -10,7 +10,7 @@ const markdownFixture = '# 中文标题\n\n![远程图片](https://example.test/
 const requests = [], notices = [], classes = new Set(), stored = new Map();
 const location = {pathname:'/',search:'',origin:'https://platform.example'};
 const knowledgeId = '11111111-1111-1111-1111-111111111111';
-let app, mounted, unmount, userRole = 'user', confirmAllowed = true, responder;
+let app, mounted, unmount, userRole = 'user', confirmAllowed = true, responder, popState;
 const context = vm.createContext({console,setTimeout,clearTimeout,TextDecoder,TextEncoder,Headers,FormData,Blob,AbortController,DOMException,URL,URLSearchParams,crypto:require('node:crypto').webcrypto});
 vm.runInContext(fs.readFileSync(path.join(root,'frontend/vendor/vue/vue.global.prod.js'),'utf8'),context);
 const vue = context.Vue;
@@ -18,7 +18,7 @@ Object.assign(context, {
   Vue:{...vue,onMounted(fn) {mounted = fn;},onBeforeUnmount(fn) {unmount = fn;},createApp(definition) {return {use() {},component() {},mount() {app = vue.proxyRefs(definition.setup());}};}},
   ElementPlus:{ElMessage:{success:message=>notices.push(message),warning:message=>notices.push(message),error:message=>notices.push(message)},ElMessageBox:{confirm:async()=>{if(!confirmAllowed) throw new Error('cancel');}},locale:{}},
   location,history:{pushState(_,__,url) {const next = new URL(url,location.origin); location.pathname = next.pathname; location.search = next.search;}},
-  window:{addEventListener() {},removeEventListener() {},scrollTo() {}},
+  window:{addEventListener(name,handler) {if (name === 'popstate') popState = handler;},removeEventListener() {},scrollTo() {}},
   document:{documentElement:{classList:{contains:name=>classes.has(name),toggle:(name,on)=>on?classes.add(name):classes.delete(name)}},getElementById:()=>null},
   matchMedia:()=>({matches:false,addEventListener() {},removeEventListener() {}}),
   localStorage:{getItem:key=>stored.get(key),setItem:(key,value)=>stored.set(key,value),removeItem:key=>stored.delete(key)},
@@ -253,8 +253,48 @@ vm.runInContext(fs.readFileSync(path.join(root,'frontend/app.js'),'utf8'),contex
   assert.equal(app.preview.workbook.sheet,'库存 & 采购');
   assert.equal(app.preview.workbook.rows[0][0],'42');
   assert.equal(app.preview.citation,null);
+  // The library query, results and open document survive ordinary navigation,
+  // and returning revalidates the lists without repeating retrieval or preview.
+  await app.selectKnowledge(knowledgeId); await tick();
+  app.searchQuery = '借阅期'; await app.runSearch();
+  const markdownSource = {key:'md',documentId:'markdown',knowledgeId,filename:'guide.MD',query:'借阅期'};
+  await app.openPreview(markdownSource,{detail:1}); await tick();
+  assert.equal(app.preview.text,markdownFixture);
+  app.searchQuery = '未提交草稿';
+  const searchCalls = () => requests.filter(item=>item.url === '/documents/search').length;
+  const markdownCalls = () => requests.filter(item=>item.url.endsWith('/markdown/content')).length;
+  const documentCalls = () => requests.filter(item=>item.url.endsWith('/documents') && item.method === 'GET').length;
+  const beforeNavigation = {search:searchCalls(),markdown:markdownCalls(),documents:documentCalls()};
+  app.go('/try'); await tick(); app.go('/account'); await tick(); app.go('/workspace/knowledges'); await tick();
+  assert.equal(app.submittedQuery,'借阅期');
+  assert.equal(app.searchQuery,'未提交草稿');
+  assert.equal(app.searchResult.results[0].sourceId,'hit');
+  assert.equal(app.selectedKnowledgeId,knowledgeId);
+  assert.equal(app.activeSource.key,'md');
+  assert.equal(app.preview.text,markdownFixture);
+  assert.equal(app.previewOpen,true);
+  assert.equal(searchCalls(),beforeNavigation.search);
+  assert.equal(markdownCalls(),beforeNavigation.markdown);
+  assert.ok(documentCalls() > beforeNavigation.documents);
+  location.pathname = '/try'; popState(); await tick();
+  assert.equal(app.page,'/try');
+  location.pathname = '/workspace/knowledges'; popState(); await tick();
+  assert.equal(app.page,'/workspace/knowledges');
+  assert.equal(app.submittedQuery,'借阅期');
+  assert.equal(app.preview.text,markdownFixture);
+  // A search finishing after the user leaves still belongs to the library view.
+  let finishSearch;
+  responder = async(url,options)=>url === '/documents/search' ? new Promise(resolve=>{finishSearch = resolve;}) : normalResponder(url,options);
+  app.searchQuery = '借阅期'; const pendingSearch = app.runSearch(); await tick();
+  app.go('/account'); await tick();
+  finishSearch(json({status:'ok',results:[{sourceId:'late',documentId:'doc',knowledgeId,knowledgeName:'Private',filename:'same.pdf',pageNumber:1,text:'借阅期'}]}));
+  await pendingSearch; await tick();
+  app.go('/workspace/knowledges'); await tick();
+  assert.equal(app.searchResult.results[0].sourceId,'late');
   responder = async()=>json({detail:'expired'},401); await app.loadKnowledges();
   assert.equal(app.isAuthenticated,false); assert.equal(app.knowledges.length,0); assert.equal(app.authOpen,true);
+  assert.equal(app.searchQuery,''); assert.equal(app.submittedQuery,''); assert.equal(app.searchResult,null);
+  assert.equal(app.activeSource,null); assert.equal(app.preview.hasContent,false);
   unmount();
   console.log('PASS: frontend API contracts, login continuity, files, scope, chunked SSE, sources, tools, history, credentials, admin, theme, stale responses, 401 cleanup.');
 })().catch(error=>{unmount?.();console.error(error);process.exitCode=1;});

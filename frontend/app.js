@@ -308,7 +308,11 @@
             selectedKnowledgeIds.value = requested && owned.has(requested) ? [requested] : knowledges.value.filter(kb => kb.has_ready_documents).slice(0,20).map(kb => kb.id);
             scopeInitialized = true;
           } else selectedKnowledgeIds.value = selectedKnowledgeIds.value.filter(id => owned.has(id));
-          if (!owned.has(selectedKnowledgeId.value)) selectedKnowledgeId.value = '';
+          if (selectedKnowledgeId.value && !owned.has(selectedKnowledgeId.value)) {
+            selectedKnowledgeId.value = '';
+            // Retained results cannot outlive the scope they were retrieved from.
+            searchQuery.value = ''; clearSearch();
+          }
           topK.value = Math.min(topK.value, knowledgeSettings.value.max_retrieval_results || 20);
           if (isLibrary.value) await loadDocuments();
         } catch (error) {if (epoch === identityEpoch && call === knowledgeEpoch && error.name !== 'AbortError') knowledgeError.value = error.message;}
@@ -335,7 +339,7 @@
         documentsLoading.value = true; documentsError.value = '';
         try {
           const data = await jsonRequest(id ? `/knowledges/${encodeURIComponent(id)}/documents` : '/documents');
-          if (epoch !== identityEpoch || call !== documentEpoch || id !== selectedKnowledgeId.value || !isLibrary.value) return;
+          if (epoch !== identityEpoch || call !== documentEpoch || id !== selectedKnowledgeId.value) return;
           documents.value = data.documents || [];
           const readyCounts = new Map();
           for (const doc of documents.value) if (doc.status === 'ready') readyCounts.set(doc.knowledge_id, (readyCounts.get(doc.knowledge_id) || 0) + 1);
@@ -345,7 +349,9 @@
               kb.has_ready_documents = kb.ready_document_count > 0;
             }
           }
-          if (documents.value.some(doc => ['pending','processing','replacing','deleting'].includes(doc.status))) documentTimer = setTimeout(loadDocuments,2500);
+          // A load that finishes after leaving the library still updates the
+          // retained state, but polling only resumes while the page is visible.
+          if (isLibrary.value && documents.value.some(doc => ['pending','processing','replacing','deleting'].includes(doc.status))) documentTimer = setTimeout(loadDocuments,2500);
         } catch (error) {if (epoch === identityEpoch && call === documentEpoch && error.name !== 'AbortError') documentsError.value = error.message;}
         finally {if (epoch === identityEpoch && call === documentEpoch) documentsLoading.value = false;}
       }
@@ -786,10 +792,13 @@
       watch(selectedKnowledgeIds, () => {clearToolResults();}, {deep:true});
       watch(toolName, clearToolResults);
       watch(page, async () => {
-        newKey.value = ''; newInvite.value = ''; stopDocumentPolling(); documentEpoch++; clearToolResults(); sessionEpoch++; stopChat();
+        newKey.value = ''; newInvite.value = ''; stopDocumentPolling(); clearToolResults(); sessionEpoch++; stopChat();
         resetChatSources();
-        createOpen.value = false; editOpen.value = false; sessionsOpen.value = false; helpTopic.value = ''; qualityReview.value = null;
-        searchQuery.value = ''; clearSearch(); sidebarPane.value = 'results'; sidebarHidden.value = false; pageReview.value = null;
+        createOpen.value = false; editOpen.value = false; sessionsOpen.value = false; helpTopic.value = ''; qualityReview.value = null; pageReview.value = null;
+        // The library keeps its query, results and open document in memory while
+        // the user visits other pages. In-flight requests are left to finish so
+        // returning neither repeats them nor hides their result. The lists are
+        // revalidated below, and account changes clear this state in logout().
         document.title = pageTitle.value + ' · MeowConnectPlatform'; await loadPageData(); await nextTick();
         document.getElementById('main')?.focus({preventScroll:true});
       });
