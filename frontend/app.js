@@ -146,6 +146,23 @@
       const downloadLoading = ref(false), searchInput = ref(null), previewTitle = ref(null), readingList = ref(null), previewCanvas = ref(null);
       const preview = useDocumentPreview(previewCanvas);
       let searchController;
+      // The results list is also rebuilt by in-site navigation, so keep its
+      // position with the retained query instead of the element. It is reset
+      // with the rest of the account's state in logout().
+      let readingListScroll = {left:0, top:0};
+      function rememberReadingListScroll(event) {
+        // A scroll queued just before the route unmounts must not overwrite
+        // the position with the detached element's reset value.
+        if (event.target.isConnected === false) return;
+        readingListScroll = {left:event.target.scrollLeft, top:event.target.scrollTop};
+      }
+      function resetReadingListScroll() {
+        readingListScroll = {left:0, top:0};
+        readingList.value?.scrollTo(0, 0);
+      }
+      watch(readingList, element => {
+        if (element) element.scrollTo(readingListScroll.left, readingListScroll.top);
+      }, {flush:'post'});
       const activeDocument = computed(() => documents.value.find(doc => doc.id === activeSource.value?.documentId));
       const readingRows = computed(() => submittedQuery.value
         ? (searchResult.value?.results || []).map(source => ({...source, key:source.sourceId, query:submittedQuery.value, snippet:searchSnippet(source.text, submittedQuery.value)}))
@@ -287,7 +304,7 @@
       function clearToolResults() {resultEpoch++; toolResult.value = null; toolError.value = ''; toolLoading.value = false;}
       function logout(navigateHome = true) {
         identityEpoch++; knowledgeEpoch++; documentEpoch++; sessionEpoch++; stopChat(); stopDocumentPolling(); clearToolResults();
-        searchQuery.value = ''; clearSearch(); sidebarPane.value = 'results'; sidebarHidden.value = false; downloadLoading.value = false;
+        searchQuery.value = ''; clearSearch(); resetReadingListScroll(); sidebarPane.value = 'results'; sidebarHidden.value = false; downloadLoading.value = false;
         token.value = ''; storage.set('accessToken',''); currentUser.value = null;
         newKey.value = ''; newInvite.value = ''; keys.value = []; invites.value = []; operations.value = null;
         knowledges.value = []; documents.value = []; selectedKnowledgeId.value = ''; selectedKnowledgeIds.value = []; scopeInitialized = false;
@@ -349,7 +366,7 @@
         resetPreview();
         const loading = loadDocuments();
         if (submittedQuery.value) runSearch(submittedQuery.value);
-        nextTick(() => readingList.value?.scrollTo(0, 0));
+        nextTick(resetReadingListScroll);
         return loading;
       }
       function browseKnowledge(id) {
@@ -388,7 +405,7 @@
       function clearSearchInput() {
         searchQuery.value = '';
         clearSearch();
-        readingList.value?.scrollTo(0, 0);
+        resetReadingListScroll();
         searchInput.value?.focus();
       }
       function guardSearchComposition(event) {
@@ -397,6 +414,9 @@
       function clearSearchOnEscape(event) {
         // Escape during IME composition cancels the composition, not the search.
         if (event.isComposing || event.keyCode === 229) return;
+        // A blank box with no committed search has nothing to clear, so the
+        // only visible effect would be closing the document the user is reading.
+        if (!searchQuery.value.trim() && !submittedQuery.value) return;
         event.preventDefault();
         clearSearchInput();
       }
@@ -411,7 +431,7 @@
         const controller = new AbortController(); searchController = controller;
         activeSearchKey = key;
         submittedQuery.value = query; searchLoading.value = true; searchError.value = ''; searchResult.value = null;
-        resetPreview(); readingList.value?.scrollTo(0, 0);
+        resetPreview(); resetReadingListScroll();
         try {
           const body = jsonBody('POST', {query, knowledgeId:selectedKnowledgeId.value || null, topK:Math.min(10, knowledgeSettings.value.max_retrieval_results || 20)});
           const data = await jsonRequest('/documents/search', {...body, signal:controller.signal});
@@ -433,13 +453,23 @@
         return `/knowledges/${encodeURIComponent(source.knowledgeId)}/documents/${encodeURIComponent(source.documentId)}`;
       }
       function useDocumentPreview(canvas) {
-        let controller, scrollPosition = 0, lastSheetPosition = null;
+        let controller, lastSheetPosition = null;
+        // Reading position is view state, not document data: it survives
+        // in-site navigation but is deliberately not persisted. Both axes
+        // matter because a zoomed page can be wider than the canvas.
+        let scrollPosition = {left:0, top:0};
         const state = reactive({
           url:'', text:null, page:null, pageCount:0, loading:false, error:'',
           workbook:shallowRef(null), citation:null,
           get hasContent() {return Boolean(this.url || this.workbook) || this.text !== null;},
-          clear, reset, load, restoreImageScroll
+          clear, reset, load, rememberScroll, restoreImageScroll
         });
+        // The route rebuilds <main>, so the canvas is a fresh element on
+        // return. Text and sheets have their final size when they mount; an
+        // image restores from its load event once its height is known.
+        watch(canvas, element => {
+          if (element && !state.url) element.scrollTo(scrollPosition.left, scrollPosition.top);
+        }, {flush:'post'});
         return state;
 
         function clear(keepWorkbook = false) {
@@ -455,9 +485,18 @@
           state.pageCount = 0;
           state.citation = null;
           lastSheetPosition = null;
+          scrollPosition = {left:0, top:0};
+        }
+        function rememberScroll(event) {
+          // A scroll queued just before the route unmounts must not overwrite
+          // the position with the detached element's reset value.
+          if (event.target.isConnected === false) return;
+          scrollPosition = {left:event.target.scrollLeft, top:event.target.scrollTop};
         }
         function restoreImageScroll(event) {
-          if (event.target.src === state.url) canvas.value?.scrollTo(0, scrollPosition);
+          // The image grows after the canvas remounts. Re-apply the remembered
+          // position here so the earlier, clamped mount restore cannot win.
+          if (event.target.src === state.url) canvas.value?.scrollTo(scrollPosition.left, scrollPosition.top);
         }
         async function load(source, {pageNumber, scroll = 0, citationPage, sheetPosition = lastSheetPosition}) {
           const format = previewFormat(source?.filename);
@@ -468,7 +507,7 @@
           const {signal} = requestController;
           state.page = pageNumber;
           state.loading = true;
-          scrollPosition = scroll;
+          scrollPosition = {left:0, top:scroll};
           canvas.value?.scrollTo(0, 0);
           const path = sourcePath(source);
           try {
@@ -910,7 +949,7 @@
         authOpen,authMode,authView,authTitle,authLoading,authError,authForm,authFormRef,authRules,usernameInput,githubLoginButton,resetAuth,openAuth,switchAuth,focusAuth,choosePasswordLogin,showAuthMethods,submitAuth,logout,githubEnabled,githubLoading,startGitHubLogin,
         knowledges,selectedKnowledgeId,selectedKnowledgeIds,selectedKnowledge,knowledgeLoading,knowledgeError,loadKnowledges,selectKnowledge,createOpen,editOpen,knowledgeName,knowledgeDescription,knowledgeEdit,createKnowledge,openKnowledgeEdit,updateKnowledge,deleteKnowledge,
         documents,documentsLoading,documentsError,documentBusyId,loadDocuments,fileInput,replaceInput,isUploading,acceptedExtensions,uploadLimitLabel,requestUpload,chooseUploadTarget,cancelUploadTarget,uploadTargetOpen,uploadTargetId,uploadDocument,chooseReplacement,replaceDocument,documentAction,statusLabel,documentPending,openTryWithKnowledge,pageReview,pageReviewLoading,viewDocumentPage,
-        searchQuery,submittedQuery,searchResult,searchLoading,searchError,readingRows,resultSummary,searchInput,readingList,runSearch,clearSearchInput,clearSearchOnEscape,guardSearchComposition,
+        searchQuery,submittedQuery,searchResult,searchLoading,searchError,readingRows,resultSummary,searchInput,readingList,rememberReadingListScroll,runSearch,clearSearchInput,clearSearchOnEscape,guardSearchComposition,
         compactReader,sidebarPane,sidebarHidden,browseKnowledge,toggleReadingSidebar,
         activeSource,activeDocument,previewOpen,preview,previewFormat,previewTitle,previewCanvas,previewZoom,openPreview,loadPreview,downloadSource,downloadLoading,
         scopeNames,toolName,toolQuery,topK,knowledgeSettings,toolLoading,toolResult,toolError,runTool,messages,chatInput,chatLoading,chatLog,isComposing,sendChat,stopChat,handleChatKey,parseMarkdown,traceFacts,traceGroups,newChat,sessions,sessionsOpen,sessionsLoading,sessionsError,loadSessions,loadSession,deleteSession,

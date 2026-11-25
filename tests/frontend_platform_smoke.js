@@ -282,6 +282,49 @@ vm.runInContext(fs.readFileSync(path.join(root,'frontend/app.js'),'utf8'),contex
   assert.equal(app.page,'/workspace/knowledges');
   assert.equal(app.submittedQuery,'借阅期');
   assert.equal(app.preview.text,markdownFixture);
+  // A route rebuild recreates the reading canvas. Its position comes from the
+  // retained view state, and nothing is persisted to the browser.
+  const readingCanvas = {scrollTop:0,scrollLeft:0,scrollTo(left,top) {this.scrollLeft = left; this.scrollTop = top;}};
+  app.previewCanvas = readingCanvas; await tick();
+  readingCanvas.scrollTop = 560; readingCanvas.scrollLeft = 40;
+  app.preview.rememberScroll({target:readingCanvas});
+  app.previewCanvas = null; await tick();
+  readingCanvas.scrollTop = 0; readingCanvas.scrollLeft = 0;
+  app.previewCanvas = readingCanvas; await tick();
+  // Text has its final height at mount, so both axes restore directly.
+  assert.equal(readingCanvas.scrollTop,560);
+  assert.equal(readingCanvas.scrollLeft,40);
+  // A PDF page regains its height asynchronously, so the image load is the
+  // authority and re-applies the position after the clamped mount restore.
+  const pdfSource = {key:'scroll-pdf',documentId:'scroll-pdf',knowledgeId,filename:'scroll.pdf'};
+  await app.openPreview(pdfSource,{detail:1}); await tick();
+  readingCanvas.scrollTop = 420; readingCanvas.scrollLeft = 30;
+  app.preview.rememberScroll({target:readingCanvas});
+  app.previewCanvas = null; await tick();
+  readingCanvas.scrollTop = 0; readingCanvas.scrollLeft = 0;
+  app.previewCanvas = readingCanvas; await tick();
+  assert.equal(readingCanvas.scrollTop,0);
+  app.preview.restoreImageScroll({target:{src:app.preview.url}});
+  assert.equal(readingCanvas.scrollTop,420);
+  assert.equal(readingCanvas.scrollLeft,30);
+  // Changing the page or the document starts at the top rather than reusing it.
+  await app.loadPreview(2); await tick();
+  app.preview.restoreImageScroll({target:{src:app.preview.url}});
+  assert.equal(readingCanvas.scrollTop,0);
+  assert.equal(readingCanvas.scrollLeft,0);
+  await app.openPreview({key:'scroll-pdf-2',documentId:'scroll-pdf-2',knowledgeId,filename:'other.pdf'},{detail:1}); await tick();
+  app.preview.restoreImageScroll({target:{src:app.preview.url}});
+  assert.equal(readingCanvas.scrollTop,0);
+  assert.equal(readingCanvas.scrollLeft,0);
+  // The results list keeps its position across the same rebuild.
+  const readingListElement = {scrollTop:0,scrollLeft:0,scrollTo(left,top) {this.scrollLeft = left; this.scrollTop = top;}};
+  app.readingList = readingListElement; await tick();
+  readingListElement.scrollTop = 180;
+  app.rememberReadingListScroll({target:readingListElement});
+  app.readingList = null; await tick();
+  readingListElement.scrollTop = 0;
+  app.readingList = readingListElement; await tick();
+  assert.equal(readingListElement.scrollTop,180);
   // A search finishing after the user leaves still belongs to the library view.
   let finishSearch;
   responder = async(url,options)=>url === '/documents/search' ? new Promise(resolve=>{finishSearch = resolve;}) : normalResponder(url,options);
@@ -315,6 +358,16 @@ vm.runInContext(fs.readFileSync(path.join(root,'frontend/app.js'),'utf8'),contex
   assert.equal(app.submittedQuery,'');
   assert.equal(app.searchResult,null);
   assert.equal(app.activeSource,null);
+  // An empty box with no committed search has nothing to clear, so Escape
+  // must leave the document being read open.
+  await app.openPreview(preservedSource,{detail:1}); await tick();
+  let emptyEscapePrevented = false;
+  app.clearSearchOnEscape({isComposing:false,keyCode:0,preventDefault(){emptyEscapePrevented = true;}});
+  assert.equal(emptyEscapePrevented,false);
+  assert.equal(app.activeSource.key,'md');
+  assert.equal(app.previewOpen,true);
+  assert.equal(app.searchQuery,'');
+  assert.equal(app.submittedQuery,'');
   // Submitting the same scope while it is still loading is one request; a new
   // scope replaces it, and the stale response cannot win the race.
   const secondKnowledgeId = '22222222-2222-2222-2222-222222222222';
@@ -388,10 +441,22 @@ vm.runInContext(fs.readFileSync(path.join(root,'frontend/app.js'),'utf8'),contex
   app.requestUpload();
   assert.equal(app.uploadTargetOpen,false);
   assert.equal(app.uploadTargetId,'');
+  // Remembered scroll positions belong to the signed-in session.
+  readingCanvas.scrollTop = 99; readingCanvas.scrollLeft = 9;
+  app.preview.rememberScroll({target:readingCanvas});
+  readingListElement.scrollTop = 77;
+  app.rememberReadingListScroll({target:readingListElement});
   responder = async()=>json({detail:'expired'},401); await app.loadKnowledges();
   assert.equal(app.isAuthenticated,false); assert.equal(app.knowledges.length,0); assert.equal(app.authOpen,true);
   assert.equal(app.searchQuery,''); assert.equal(app.submittedQuery,''); assert.equal(app.searchResult,null);
   assert.equal(app.activeSource,null); assert.equal(app.preview.hasContent,false);
+  readingCanvas.scrollTop = 99; readingCanvas.scrollLeft = 9;
+  app.previewCanvas = null; await tick(); app.previewCanvas = readingCanvas; await tick();
+  assert.equal(readingCanvas.scrollTop,0);
+  assert.equal(readingCanvas.scrollLeft,0);
+  readingListElement.scrollTop = 77;
+  app.readingList = null; await tick(); app.readingList = readingListElement; await tick();
+  assert.equal(readingListElement.scrollTop,0);
   unmount();
   console.log('PASS: frontend API contracts, login continuity, files, search dedupe/retry/escape, upload destinations, scope, chunked SSE, sources, tools, history, credentials, admin, theme, stale responses, 401 cleanup.');
 })().catch(error=>{unmount?.();console.error(error);process.exitCode=1;});

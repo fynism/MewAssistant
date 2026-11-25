@@ -125,7 +125,7 @@
                 </nav>
                 <div v-show="sidebarPane === 'results'" id="reading-results" class="reading-results">
                   <div class="reading-list-toolbar" role="status">{{ resultSummary }}</div>
-                  <div ref="readingList" class="reading-items" :aria-busy="searchLoading || (documentsLoading && !submittedQuery && !readingRows.length)">
+                  <div ref="readingList" class="reading-items" :aria-busy="searchLoading || (documentsLoading && !submittedQuery && !readingRows.length)" @scroll.passive="rememberReadingListScroll">
                     <div v-if="submittedQuery ? searchError : documentsError" class="reading-feedback" role="alert"><p>{{ submittedQuery ? searchError : documentsError }}</p><el-button link type="primary" @click="submittedQuery ? runSearch(submittedQuery) : loadDocuments()">重试</el-button></div>
                     <div v-else-if="readingRows.length" class="reading-row-list">
                       <button v-for="row in readingRows" :key="row.key" type="button" class="reading-row" :aria-pressed="activeSource?.key === row.key" @click="openPreview(row, $event)">
@@ -178,7 +178,7 @@
                   </div>
                 </header>
                 <p v-if="activeDocument?.error_summary" class="reading-preview-warning" role="status">{{ activeDocument.error_summary }}</p>
-                <div ref="previewCanvas" class="reading-canvas" :aria-busy="preview.loading">
+                <div ref="previewCanvas" class="reading-canvas" :aria-busy="preview.loading" @scroll.passive="preview.rememberScroll">
                   <div v-if="!activeSource" class="reading-preview-empty with-illustration">
                     <span class="empty-state-art reading-preview-illustration" aria-hidden="true"></span>
                     <p>选择文档查看原文</p>
