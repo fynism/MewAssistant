@@ -35,7 +35,7 @@
               <el-button v-if="authChecking" loading disabled aria-label="确认登录状态"></el-button>
               <el-button v-else-if="!isAuthenticated" @click="openAuth('login')">登录</el-button>
               <el-dropdown v-else @command="accountCommand" trigger="click">
-                <el-button><mcp-icon name="User"></mcp-icon>{{ displayName }}<mcp-icon name="ArrowDown" :size="12"></mcp-icon></el-button>
+                <el-button class="header-account" :title="displayName"><mcp-icon name="User"></mcp-icon><span class="header-account-name">{{ displayName }}</span><mcp-icon name="ArrowDown" :size="12"></mcp-icon></el-button>
                 <template #dropdown><el-dropdown-menu><el-dropdown-item command="account"><mcp-icon name="User" :size="16"></mcp-icon>个人管理</el-dropdown-item><el-dropdown-item v-if="isAdmin" command="admin"><mcp-icon name="Setting" :size="16"></mcp-icon>管理页面</el-dropdown-item><el-dropdown-item command="logout" divided><mcp-icon name="SwitchButton" :size="16"></mcp-icon>退出登录</el-dropdown-item></el-dropdown-menu></template>
               </el-dropdown>
               <el-button v-if="isAuthenticated" class="mobile-trigger" circle @click="mobileNav = true" aria-label="打开导航"><mcp-icon name="Operation"></mcp-icon></el-button>
@@ -89,7 +89,7 @@
                   <form v-show="sidebarPane === 'results'" class="reading-search" role="search" @submit.prevent="runSearch()">
                     <div class="reading-search-field">
                       <mcp-icon name="Search" :size="18"></mcp-icon>
-                      <input id="document-search" ref="searchInput" v-model="searchQuery" type="search" maxlength="500" placeholder="搜索文档内容" aria-label="搜索文档内容" autocomplete="off" @keydown.enter="guardSearchComposition">
+                      <input id="document-search" ref="searchInput" v-model="searchQuery" type="search" maxlength="500" placeholder="搜索文档内容" aria-label="搜索文档内容" autocomplete="off" @keydown.enter="guardSearchComposition" @keydown.escape="clearSearchOnEscape">
                       <button v-if="searchQuery || submittedQuery" type="button" class="reading-icon-button search-clear" title="清除搜索" aria-label="清除搜索" @click="clearSearchInput"><mcp-icon name="Close" :size="16"></mcp-icon></button>
                     </div>
                     <button type="submit" class="reading-submit">搜索</button>
@@ -104,7 +104,7 @@
                     </label>
                     <span v-else class="reading-library-label">知识库</span>
                     <button type="button" class="reading-icon-button" title="创建知识库" aria-label="创建知识库" @click="createOpen = true"><mcp-icon name="Plus" :size="19"></mcp-icon></button>
-                    <button v-if="selectedKnowledge" type="button" class="reading-upload" title="上传文件" aria-label="上传文件" :disabled="isUploading" @click="fileInput?.click()"><mcp-icon :name="isUploading ? 'Loading' : 'Upload'" :class="{'processing-icon':isUploading}" :size="17"></mcp-icon>上传</button>
+                    <button v-if="selectedKnowledge || knowledges.length" type="button" class="reading-upload" title="上传文件" aria-label="上传文件" :disabled="isUploading" @click="requestUpload"><mcp-icon :name="isUploading ? 'Loading' : 'Upload'" :class="{'processing-icon':isUploading}" :size="17"></mcp-icon>上传</button>
                     <el-dropdown v-if="sidebarPane === 'collections' && selectedKnowledge" trigger="click">
                       <button type="button" class="reading-icon-button" title="知识库操作" aria-label="知识库操作"><mcp-icon name="MoreFilled" :size="16"></mcp-icon></button>
                       <template #dropdown><el-dropdown-menu>
@@ -124,7 +124,7 @@
                   <button v-for="kb in knowledges" :key="kb.id" type="button" :aria-pressed="selectedKnowledgeId === kb.id" :title="kb.name" @click="browseKnowledge(kb.id)"><mcp-icon name="Folder" :size="18"></mcp-icon><span>{{ kb.name }}</span></button>
                 </nav>
                 <div v-show="sidebarPane === 'results'" id="reading-results" class="reading-results">
-                  <div class="reading-list-toolbar" role="status">{{ searchLoading ? '正在检索…' : submittedQuery ? readingRows.length + ' 条结果' : (knowledgeLoading || documentsLoading) && !readingRows.length ? '正在加载…' : readingRows.length + ' 个文档' }}</div>
+                  <div class="reading-list-toolbar" role="status">{{ resultSummary }}</div>
                   <div ref="readingList" class="reading-items" :aria-busy="searchLoading || (documentsLoading && !submittedQuery && !readingRows.length)">
                     <div v-if="submittedQuery ? searchError : documentsError" class="reading-feedback" role="alert"><p>{{ submittedQuery ? searchError : documentsError }}</p><el-button link type="primary" @click="submittedQuery ? runSearch(submittedQuery) : loadDocuments()">重试</el-button></div>
                     <div v-else-if="readingRows.length" class="reading-row-list">
@@ -140,7 +140,7 @@
                     <div v-else-if="!searchLoading && !documentsLoading && !knowledgeLoading && !knowledgeError" class="reading-list-empty">
                       <p>{{ submittedQuery ? (searchResult?.status === 'no_documents' ? '当前范围没有可检索文档' : '没有匹配的文档片段') : '还没有文档' }}</p>
                       <el-button v-if="!submittedQuery && !knowledges.length" link type="primary" @click="createOpen = true">创建知识库</el-button>
-                      <el-button v-else-if="!submittedQuery && selectedKnowledge" link type="primary" @click="fileInput?.click()">上传文件</el-button>
+                      <el-button v-else-if="!submittedQuery && knowledges.length" link type="primary" @click="requestUpload">上传文件</el-button>
                     </div>
                   </div>
                 </div>
@@ -372,6 +372,7 @@
       <el-dialog :model-value="!!newInvite" title="保存邀请码" width="520px" :close-on-click-modal="false" @close="newInvite = ''"><div class="credential"><p>仅显示一次，请妥善保存。</p><code>{{ newInvite }}</code></div><template #footer><el-button @click="copyText(newInvite)">复制</el-button><el-button type="primary" @click="newInvite = ''">已保存，关闭</el-button></template></el-dialog>
       <el-dialog v-model="createOpen" title="创建知识库" width="440px"><el-form label-position="top" @submit.prevent="createKnowledge"><el-form-item label="名称"><el-input v-model="knowledgeName" maxlength="200"></el-input></el-form-item><el-form-item label="描述（选填）"><el-input v-model="knowledgeDescription" type="textarea" :rows="2"></el-input></el-form-item><div class="actions"><el-button @click="createOpen = false">取消</el-button><el-button type="primary" native-type="submit" :loading="knowledgeLoading" :disabled="!knowledgeName.trim()">创建</el-button></div></el-form></el-dialog>
       <el-dialog v-model="editOpen" title="编辑知识库" width="440px"><el-form label-position="top" @submit.prevent="updateKnowledge"><el-form-item label="名称"><el-input v-model="knowledgeEdit.name" maxlength="200"></el-input></el-form-item><el-form-item label="描述"><el-input v-model="knowledgeEdit.description" type="textarea" :rows="2"></el-input></el-form-item><div class="actions"><el-button @click="editOpen = false">取消</el-button><el-button type="primary" native-type="submit" :loading="knowledgeLoading" :disabled="!knowledgeEdit.name.trim()">保存</el-button></div></el-form></el-dialog>
+      <el-dialog v-model="uploadTargetOpen" title="选择上传目的地" width="440px"><div class="upload-destinations"><el-button v-for="kb in knowledges" :key="kb.id" @click="chooseUploadTarget(kb.id)"><span class="upload-destination-name">{{ kb.name }}</span></el-button></div><template #footer><el-button @click="cancelUploadTarget">取消</el-button></template></el-dialog>
       <el-drawer v-model="sessionsOpen" title="历史会话" size="min(460px,95vw)"><el-alert v-if="sessionsError" :title="sessionsError" type="error" :closable="false" class="feedback"><template #default><el-button link @click="loadSessions">重试</el-button></template></el-alert><div v-loading="sessionsLoading"><p v-if="!sessions.length && !sessionsLoading && !sessionsError" class="muted">还没有历史会话。</p><article v-for="session in sessions" :key="session.session_id" class="session-row"><el-button text :disabled="sessionsLoading" @click="loadSession(session)">{{ session.title || '未命名会话' }}</el-button><p class="small muted">{{ formatDate(session.updated_at) }}</p><p class="small muted">{{ scopeNames(session.last_knowledge_ids) }}</p><el-button link type="danger" @click="deleteSession(session)">删除</el-button></article></div></el-drawer>
     </el-config-provider>
   </div>

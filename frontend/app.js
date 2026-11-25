@@ -140,6 +140,7 @@
       const knowledges = ref([]), selectedKnowledgeId = ref(''), selectedKnowledgeIds = ref([]), knowledgeLoading = ref(false), knowledgeError = ref('');
       const documents = ref([]), documentsLoading = ref(false), documentsError = ref(''), documentBusyId = ref('');
       const searchQuery = ref(''), submittedQuery = ref(''), searchResult = shallowRef(null), searchLoading = ref(false), searchError = ref('');
+      let activeSearchKey = '';
       const sidebarPane = ref('results'), sidebarHidden = ref(false);
       const activeSource = shallowRef(null), previewOpen = ref(false), previewZoom = ref(100);
       const downloadLoading = ref(false), searchInput = ref(null), previewTitle = ref(null), readingList = ref(null), previewCanvas = ref(null);
@@ -150,10 +151,19 @@
         ? (searchResult.value?.results || []).map(source => ({...source, key:source.sourceId, query:submittedQuery.value, snippet:searchSnippet(source.text, submittedQuery.value)}))
         : documents.value.map(doc => ({key:doc.id, documentId:doc.id, knowledgeId:doc.knowledge_id,
           knowledgeName:knowledges.value.find(kb => kb.id === doc.knowledge_id)?.name, filename:doc.filename, doc})));
+      const resultSummary = computed(() => {
+        if (searchLoading.value) return '正在检索…';
+        // An error must not read as a successful empty result set.
+        if (submittedQuery.value && searchError.value) return '检索失败';
+        if (submittedQuery.value) return `${readingRows.value.length} 条结果`;
+        if ((knowledgeLoading.value || documentsLoading.value) && !readingRows.value.length) return '正在加载…';
+        return `${readingRows.value.length} 个文档`;
+      });
       const pageReview = ref(null), pageReviewLoading = ref(false);
       const knowledgeSettings = ref({allowed_extensions:[],max_upload_bytes:0,max_retrieval_results:20});
       const createOpen = ref(false), editOpen = ref(false), knowledgeName = ref(''), knowledgeDescription = ref(''), knowledgeEdit = reactive({name:'',description:''});
       const fileInput = ref(null), replaceInput = ref(null), replacingDocumentId = ref(''), isUploading = ref(false);
+      const uploadTargetOpen = ref(false), uploadTargetId = ref('');
       const selectedKnowledge = computed(() => knowledges.value.find(kb => kb.id === selectedKnowledgeId.value));
       const acceptedExtensions = computed(() => knowledgeSettings.value.allowed_extensions.join(','));
       const uploadLimitLabel = computed(() => knowledgeSettings.value.max_upload_bytes ? `${Math.round(knowledgeSettings.value.max_upload_bytes / 1048576)} MB` : '以服务端限制为准');
@@ -285,6 +295,7 @@
         chatInput.value = ''; resetChatSources();
         knowledgeLoading.value = false; documentsLoading.value = false; keysLoading.value = false; invitesLoading.value = false; sessionsLoading.value = false; operationsLoading.value = false;
         keyBusy.value = false; inviteBusy.value = false; isUploading.value = false; documentBusyId.value = '';
+        uploadTargetOpen.value = false; uploadTargetId.value = '';
         createOpen.value = false; editOpen.value = false; sessionsOpen.value = false;
         pageReview.value = null; pageReviewLoading.value = false; qualityReview.value = null; helpTopic.value = '';
         knowledgeError.value = ''; documentsError.value = ''; keyError.value = ''; inviteError.value = ''; operationsError.value = '';
@@ -370,6 +381,7 @@
       }
       function clearSearch() {
         searchController?.abort();
+        activeSearchKey = '';
         submittedQuery.value = ''; searchResult.value = null; searchError.value = ''; searchLoading.value = false;
         resetPreview();
       }
@@ -382,10 +394,22 @@
       function guardSearchComposition(event) {
         if (event.isComposing || event.keyCode === 229) event.preventDefault();
       }
+      function clearSearchOnEscape(event) {
+        // Escape during IME composition cancels the composition, not the search.
+        if (event.isComposing || event.keyCode === 229) return;
+        event.preventDefault();
+        clearSearchInput();
+      }
       async function runSearch(query = searchQuery.value.trim()) {
-        if (!query) {clearSearch(); return;}
+        // An empty submit is not a request to clear. The clear button does that.
+        if (!query) return;
+        const key = JSON.stringify([query, selectedKnowledgeId.value]);
+        // Repeated Enter for the scope already being retrieved must not fan out
+        // into duplicate requests. A different query or scope replaces it.
+        if (searchLoading.value && key === activeSearchKey) return;
         searchController?.abort();
         const controller = new AbortController(); searchController = controller;
+        activeSearchKey = key;
         submittedQuery.value = query; searchLoading.value = true; searchError.value = ''; searchResult.value = null;
         resetPreview(); readingList.value?.scrollTo(0, 0);
         try {
@@ -395,7 +419,10 @@
         } catch (error) {
           if (!controller.signal.aborted && error.name !== 'AbortError') searchError.value = error.message;
         } finally {
-          if (!controller.signal.aborted) searchLoading.value = false;
+          if (!controller.signal.aborted) {
+            searchLoading.value = false;
+            if (activeSearchKey === key) activeSearchKey = '';
+          }
         }
       }
       function resetPreview() {
@@ -553,12 +580,32 @@
         if (knowledgeSettings.value.max_upload_bytes && file.size > knowledgeSettings.value.max_upload_bytes) return `文件不能超过 ${uploadLimitLabel.value}`;
         return '';
       }
+      function openUploadInput(id) {
+        uploadTargetId.value = id;
+        fileInput.value?.click();
+      }
+      function requestUpload() {
+        if (isUploading.value) return;
+        // "All documents" is a view, not an upload destination. A single
+        // knowledge base is unambiguous; several require an explicit choice.
+        if (selectedKnowledgeId.value) {openUploadInput(selectedKnowledgeId.value); return;}
+        if (knowledges.value.length === 1) {openUploadInput(knowledges.value[0].id); return;}
+        if (knowledges.value.length > 1) uploadTargetOpen.value = true;
+      }
+      function chooseUploadTarget(id) {
+        uploadTargetOpen.value = false;
+        if (knowledges.value.some(kb => kb.id === id)) openUploadInput(id);
+      }
+      function cancelUploadTarget() {
+        uploadTargetOpen.value = false;
+        uploadTargetId.value = '';
+      }
       async function uploadDocument(event) {
-        const file = event.target.files?.[0], id = selectedKnowledgeId.value, epoch = identityEpoch; event.target.value = '';
+        const file = event.target.files?.[0], id = uploadTargetId.value || selectedKnowledgeId.value, epoch = identityEpoch; event.target.value = '';
         if (!file || !id || isUploading.value) return;
         const validationError = validateFile(file); if (validationError) {ElMessage.warning(validationError); return;}
         isUploading.value = true;
-        try {const body = new FormData(); body.append('file',file); await jsonRequest(`/knowledges/${encodeURIComponent(id)}/documents`,{method:'POST',body}); if (epoch !== identityEpoch) return; if (!selectedKnowledgeId.value || id === selectedKnowledgeId.value) await loadDocuments(); ElMessage.success('已上传，处理状态将自动更新');}
+        try {const body = new FormData(); body.append('file',file); await jsonRequest(`/knowledges/${encodeURIComponent(id)}/documents`,{method:'POST',body}); if (epoch !== identityEpoch) return; if (!selectedKnowledgeId.value || id === selectedKnowledgeId.value) await loadDocuments(); const name = knowledges.value.find(kb => kb.id === id)?.name; ElMessage.success(name ? `已上传到“${name}”，处理状态将自动更新` : '已上传，处理状态将自动更新');}
         catch (error) {report(error);} finally {if (epoch === identityEpoch) isUploading.value = false;}
       }
       function chooseReplacement(doc) {replacingDocumentId.value = {id:doc.id, knowledgeId:doc.knowledge_id}; replaceInput.value?.click();}
@@ -838,7 +885,7 @@
       watch(page, async () => {
         newKey.value = ''; newInvite.value = ''; stopDocumentPolling(); clearToolResults(); sessionEpoch++; stopChat();
         resetChatSources();
-        createOpen.value = false; editOpen.value = false; sessionsOpen.value = false; helpTopic.value = ''; qualityReview.value = null; pageReview.value = null;
+        createOpen.value = false; editOpen.value = false; sessionsOpen.value = false; uploadTargetOpen.value = false; uploadTargetId.value = ''; helpTopic.value = ''; qualityReview.value = null; pageReview.value = null;
         // The library keeps its query, results and open document in memory while
         // the user visits other pages. In-flight requests are left to finish so
         // returning neither repeats them nor hides their result. The lists are
@@ -862,8 +909,8 @@
         connectionClient,servicePanels,connectionEndpoint,connectionExamples,helpTopic,helpTitle,qualityReview,
         authOpen,authMode,authView,authTitle,authLoading,authError,authForm,authFormRef,authRules,usernameInput,githubLoginButton,resetAuth,openAuth,switchAuth,focusAuth,choosePasswordLogin,showAuthMethods,submitAuth,logout,githubEnabled,githubLoading,startGitHubLogin,
         knowledges,selectedKnowledgeId,selectedKnowledgeIds,selectedKnowledge,knowledgeLoading,knowledgeError,loadKnowledges,selectKnowledge,createOpen,editOpen,knowledgeName,knowledgeDescription,knowledgeEdit,createKnowledge,openKnowledgeEdit,updateKnowledge,deleteKnowledge,
-        documents,documentsLoading,documentsError,documentBusyId,loadDocuments,fileInput,replaceInput,isUploading,acceptedExtensions,uploadLimitLabel,uploadDocument,chooseReplacement,replaceDocument,documentAction,statusLabel,documentPending,openTryWithKnowledge,pageReview,pageReviewLoading,viewDocumentPage,
-        searchQuery,submittedQuery,searchResult,searchLoading,searchError,readingRows,searchInput,readingList,runSearch,clearSearchInput,guardSearchComposition,
+        documents,documentsLoading,documentsError,documentBusyId,loadDocuments,fileInput,replaceInput,isUploading,acceptedExtensions,uploadLimitLabel,requestUpload,chooseUploadTarget,cancelUploadTarget,uploadTargetOpen,uploadTargetId,uploadDocument,chooseReplacement,replaceDocument,documentAction,statusLabel,documentPending,openTryWithKnowledge,pageReview,pageReviewLoading,viewDocumentPage,
+        searchQuery,submittedQuery,searchResult,searchLoading,searchError,readingRows,resultSummary,searchInput,readingList,runSearch,clearSearchInput,clearSearchOnEscape,guardSearchComposition,
         compactReader,sidebarPane,sidebarHidden,browseKnowledge,toggleReadingSidebar,
         activeSource,activeDocument,previewOpen,preview,previewFormat,previewTitle,previewCanvas,previewZoom,openPreview,loadPreview,downloadSource,downloadLoading,
         scopeNames,toolName,toolQuery,topK,knowledgeSettings,toolLoading,toolResult,toolError,runTool,messages,chatInput,chatLoading,chatLog,isComposing,sendChat,stopChat,handleChatKey,parseMarkdown,traceFacts,traceGroups,newChat,sessions,sessionsOpen,sessionsLoading,sessionsError,loadSessions,loadSession,deleteSession,

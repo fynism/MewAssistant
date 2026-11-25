@@ -5,14 +5,19 @@
 .skip-link { position: fixed; top: -80px; left: 16px; z-index: 4000; padding: 8px 16px; background: var(--mcp-surface); border: 1px solid var(--mcp-line); }
 .skip-link:focus { top: 8px; }
 .site-header { height: 76px; border-bottom: 1px solid var(--mcp-line); }
-.header-inner { max-width: 1280px; height: 100%; margin: auto; padding: 0 40px; display: flex; align-items: center; gap: 48px; }
+.header-inner { max-width: 1280px; height: 100%; margin: auto; padding: 0 40px; display: flex; align-items: center; gap: 48px; min-width: 0; }
 .logo { display: inline-flex; align-items: center; gap: 12px; flex-shrink: 0; font-size: 20px; font-weight: 600; letter-spacing: .04em; }
 .logo img { width: 30px; height: 30px; }
 .desktop-nav { display: flex; gap: 28px; height: 100%; align-items: center; }
 .nav-link { display: inline-flex; align-items: center; gap: 8px; color: var(--mcp-muted); height: 100%; position: relative; }
 .nav-link:hover, .nav-link.active { color: var(--mcp-text); }
 .nav-link.active::after { content: ''; position: absolute; height: 2px; background: var(--mcp-accent); bottom: -1px; left: 0; right: 0; }
-.header-actions { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.header-actions { margin-left: auto; display: flex; align-items: center; gap: 12px; min-width: 0; }
+.header-actions > .el-dropdown { min-width: 0; max-width: 220px; }
+.header-account { min-width: 0; max-width: 100%; }
+.header-account .el-icon { flex: none; }
+.header-account-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.header-account-name + .el-icon { margin-left: 6px; }
 .mobile-trigger { display: none; }
 .main { width: calc(100% - 80px); max-width: 1120px; margin: 0 auto; padding: 56px 0 72px; flex: 1; }
 
@@ -91,6 +96,9 @@ h3 { font-size: 15px; line-height: 1.6; font-weight: 600; }
 .spaced-heading { margin-top: 20px; }
 .endpoint { display: block; margin-top: 16px; font-family: var(--mcp-font-code); font-size: 12px; overflow-wrap: anywhere; }
 .native-file-input { display: none; }
+.upload-destinations { display: flex; flex-direction: column; gap: 8px; max-height: min(50vh, 360px); overflow: auto; }
+.upload-destinations .el-button { width: 100%; margin: 0; justify-content: flex-start; }
+.upload-destination-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .invitation-table { margin-top: 24px; }
 .trace-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; font-size: 12px; margin: 16px 0; }
 .trace-facts dt { color: var(--mcp-muted); }
@@ -165,6 +173,7 @@ h3 { font-size: 15px; line-height: 1.6; font-weight: 600; }
   .header-inner { padding: 0 20px; gap: 16px; }
   .desktop-nav { display: none; }
   .header-actions { gap: 8px; }
+  .header-actions > .el-dropdown { max-width: 116px; }
   .mobile-trigger { display: inline-flex; }
   .logo { font-size: 18px; gap: 8px; }
   .logo img { width: 26px; height: 26px; }

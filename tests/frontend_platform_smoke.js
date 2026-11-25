@@ -291,10 +291,107 @@ vm.runInContext(fs.readFileSync(path.join(root,'frontend/app.js'),'utf8'),contex
   await pendingSearch; await tick();
   app.go('/workspace/knowledges'); await tick();
   assert.equal(app.searchResult.results[0].sourceId,'late');
+  // An empty submit is inert: it must not close the open document or clear
+  // the committed search.
+  const preservedSource = {key:'md',documentId:'markdown',knowledgeId,filename:'guide.MD',query:'借阅期'};
+  await app.openPreview(preservedSource,{detail:1}); await tick();
+  const submittedBeforeEmpty = app.submittedQuery, searchCountBeforeEmpty = searchCalls();
+  app.searchQuery = '';
+  await app.runSearch(); await tick();
+  assert.equal(app.submittedQuery,submittedBeforeEmpty);
+  assert.equal(searchCalls(),searchCountBeforeEmpty);
+  assert.equal(app.activeSource.key,'md');
+  assert.equal(app.previewOpen,true);
+  // Escape matches the clear button, but an IME composition owns Escape.
+  app.searchQuery = '未提交草稿';
+  let prevented = false;
+  app.clearSearchOnEscape({isComposing:true,keyCode:0,preventDefault(){prevented = true;}});
+  assert.equal(prevented,false);
+  assert.equal(app.searchQuery,'未提交草稿');
+  assert.equal(app.submittedQuery,'借阅期');
+  app.clearSearchOnEscape({isComposing:false,keyCode:0,preventDefault(){prevented = true;}});
+  assert.equal(prevented,true);
+  assert.equal(app.searchQuery,'');
+  assert.equal(app.submittedQuery,'');
+  assert.equal(app.searchResult,null);
+  assert.equal(app.activeSource,null);
+  // Submitting the same scope while it is still loading is one request; a new
+  // scope replaces it, and the stale response cannot win the race.
+  const secondKnowledgeId = '22222222-2222-2222-2222-222222222222';
+  let searchResolvers = [];
+  responder = (url,options={}) => url === '/documents/search'
+    ? new Promise(resolve=>searchResolvers.push({resolve,body:options.body}))
+    : normalResponder(url,options);
+  app.searchQuery = '在途检索';
+  const firstInFlight = app.runSearch(); await tick();
+  await app.runSearch(); await app.runSearch(); await tick();
+  assert.equal(searchResolvers.length,1);
+  app.selectedKnowledgeId = secondKnowledgeId;
+  const scopedSearch = app.runSearch(); await tick();
+  assert.equal(searchResolvers.length,2);
+  assert.equal(JSON.parse(searchResolvers[1].body).knowledgeId,secondKnowledgeId);
+  const resultFor = (sourceId,text) => ({status:'ok',results:[{sourceId,documentId:'doc',knowledgeId,knowledgeName:'Private',filename:'same.pdf',pageNumber:1,text}]});
+  searchResolvers[0].resolve(json(resultFor('stale','在途检索')));
+  searchResolvers[1].resolve(json(resultFor('current','在途检索')));
+  await Promise.all([firstInFlight,scopedSearch]); await tick();
+  assert.equal(app.searchResult.results[0].sourceId,'current');
+  assert.equal(app.searchLoading,false);
+  // A failed search can be retried once the request is no longer in flight.
+  app.selectedKnowledgeId = knowledgeId;
+  let failedSearches = 0;
+  responder = (url,options={}) => {
+    if (url !== '/documents/search') return normalResponder(url,options);
+    failedSearches += 1;
+    return json({detail:'检索暂不可用'},503);
+  };
+  app.searchQuery = '重试检索';
+  await app.runSearch(); await tick();
+  assert.equal(failedSearches,1);
+  assert.equal(app.searchError,'检索暂不可用');
+  assert.equal(app.resultSummary,'检索失败');
+  responder = normalResponder;
+  await app.runSearch('重试检索');
+  assert.equal(app.searchError,'');
+  assert.equal(app.searchResult.results[0].sourceId,'hit');
+  // "All documents" is not an upload destination. One library goes direct,
+  // several require an explicit destination, and cancelling changes nothing.
+  app.clearSearchInput(); await app.selectKnowledge(''); await tick();
+  const privateKb = {id:knowledgeId,name:'Private',has_ready_documents:true};
+  const secondKb = {id:secondKnowledgeId,name:'第二知识库',has_ready_documents:false};
+  app.knowledges = [privateKb];
+  app.uploadTargetId = '';
+  app.requestUpload();
+  assert.equal(app.uploadTargetOpen,false);
+  assert.equal(app.uploadTargetId,knowledgeId);
+  app.knowledges = [privateKb,secondKb];
+  app.uploadTargetId = '';
+  app.requestUpload();
+  assert.equal(app.uploadTargetOpen,true);
+  assert.equal(app.uploadTargetId,'');
+  const postsBeforeCancel = requests.filter(item=>item.method==='POST'&&item.url.endsWith('/documents')).length;
+  app.cancelUploadTarget();
+  assert.equal(app.uploadTargetOpen,false);
+  assert.equal(app.uploadTargetId,'');
+  assert.equal(app.selectedKnowledgeId,'');
+  assert.equal(requests.filter(item=>item.method==='POST'&&item.url.endsWith('/documents')).length,postsBeforeCancel);
+  app.requestUpload();
+  app.chooseUploadTarget(secondKb.id);
+  assert.equal(app.uploadTargetOpen,false);
+  assert.equal(app.uploadTargetId,secondKb.id);
+  const scopeBeforeUpload = app.selectedKnowledgeId, documentReadsBeforeUpload = documentCalls();
+  const uploadFile = new Blob(['upload']); uploadFile.name = 'new.pdf';
+  await app.uploadDocument({target:{files:[uploadFile],value:'selected'}});
+  assert.equal(requests.filter(item=>item.url.endsWith('/documents')&&item.method==='POST').at(-1).url,`/knowledges/${secondKb.id}/documents`);
+  assert.equal(app.selectedKnowledgeId,scopeBeforeUpload);
+  assert.ok(documentCalls() > documentReadsBeforeUpload);
+  app.knowledges = []; app.selectedKnowledgeId = ''; app.uploadTargetId = '';
+  app.requestUpload();
+  assert.equal(app.uploadTargetOpen,false);
+  assert.equal(app.uploadTargetId,'');
   responder = async()=>json({detail:'expired'},401); await app.loadKnowledges();
   assert.equal(app.isAuthenticated,false); assert.equal(app.knowledges.length,0); assert.equal(app.authOpen,true);
   assert.equal(app.searchQuery,''); assert.equal(app.submittedQuery,''); assert.equal(app.searchResult,null);
   assert.equal(app.activeSource,null); assert.equal(app.preview.hasContent,false);
   unmount();
-  console.log('PASS: frontend API contracts, login continuity, files, scope, chunked SSE, sources, tools, history, credentials, admin, theme, stale responses, 401 cleanup.');
+  console.log('PASS: frontend API contracts, login continuity, files, search dedupe/retry/escape, upload destinations, scope, chunked SSE, sources, tools, history, credentials, admin, theme, stale responses, 401 cleanup.');
 })().catch(error=>{unmount?.();console.error(error);process.exitCode=1;});
