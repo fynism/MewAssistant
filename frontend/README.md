@@ -32,6 +32,7 @@ Vue 3 浏览器版 + Element Plus，HTML / CSS / JavaScript，启动时无需构
 ```powershell
 node --check frontend/app.js
 node tests/frontend_knowledge_smoke.js
+node tests/frontend_network_recovery_smoke.js
 node tests/frontend_github_smoke.js
 uv run python -m unittest tests.test_frontend_routes tests.test_backend_contracts tests.test_m3_platform
 ```

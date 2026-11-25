@@ -85,6 +85,16 @@
 - At 18:19 China Standard Time, production enabled JS/CSS gzip and `Vary: Accept-Encoding` in `/etc/nginx/sites-available/supermew`. The original is at `/root/nginx-supermew-backup-20261123T101920Z-8102nzik/supermew`. `nginx -t` passed, and the graceful reload kept the same master PID. Public JS/CSS payloads totaled approximately 0.63 MB. Two clean Chrome runs reached first contentful paint in 5.9–6.8 s and the load event in 6.7–8.3 s. The preloaded Serif font still finished last in the slower run.
 - At 18:41 China Standard Time, the production app removed the two font preloads from its active `/app/frontend/index.html`. The original is at `/root/supermew-font-preloads-20261123T104125Z-gZ8OnGH5/index.html`. Replacing the container with an image that still has the preloads restores them. The current local frontend already omits both.
 
+## Network failure and chat recovery (2026-11-25)
+
+- `fetch` rejects an unreachable request with a browser-written `TypeError` (`Failed to fetch`, `Load failed`, `NetworkError when attempting to fetch resource`) before any response exists; body reads fail the same way after a dropped connection. Convert it once in the shared request helper and `report`, and keep HTTP status/detail handling separate so business messages still reach the UI.
+- Aborts and network failures both surface as rejection. Check `controller.signal.aborted` before writing an error; otherwise clicking 停止回答 would show a failure and restore the question. An `identityEpoch`/`sessionId` guard must also run first so a late failure cannot restore input into a new account or session.
+- The SSE protocol has no completion marker other than `data: [DONE]`. A clean EOF without it is a truncated answer: keep partial text and label it, or recover the question when no text arrived. A server `error` event followed by `[DONE]` is a failed turn, not a successful empty answer; the backend does not save that turn, so keeping the duplicate exchange would make later retries look repeated.
+- `[DONE]` is not the end of the server generator. `chat_with_agent_stream` persists the conversation after yielding it, so the client must keep reading until the body closes. Breaking out of the read loop at `[DONE]` or cancelling the reader can lose the turn from history.
+- Vue stores array entries as reactive proxies. Filtering a failed exchange by comparing against the raw objects pushed earlier misses the user bubble; compare stable message ids instead.
+- The chat textarea now stays editable while an answer streams so a next-question draft is not lost. `sendChat`'s `chatLoading` guard is still what prevents a second submit; Enter is prevented by the key handler even when the request is in flight.
+- In the Node vm regression harness the outer `fetch` stub throws its own realm's `TypeError`. Classify by `error.name`, not `instanceof TypeError`, or the network path silently takes the wrong branch. `node tests/frontend_network_recovery_smoke.js` covers registration/search/chat network failures, HTTP details, aborts, drafts, partial and truncated streams, stop, and session/account switches.
+
 ## Frontend performance follow-ups
 
 - [ ] HTTP caching. Version static resource URLs by content, apply long-lived immutable caching to successful versioned responses, and revalidate HTML.

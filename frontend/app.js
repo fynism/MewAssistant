@@ -182,6 +182,15 @@
       const invitationForm = reactive({max_uses:1,expires_at:''});
       const operations = ref(null), operationsLoading = ref(false), operationsError = ref('');
 
+      const NETWORK_ERROR = '网络连接失败，请检查网络后重试';
+      // Browsers reject unreachable requests with a TypeError such as
+      // "Failed to fetch" before any response exists. Stream reads fail the
+      // same way when the connection drops. Keep aborts intact so callers can
+      // tell an intentional stop from a network failure.
+      function networkFailure(error) {
+        if (error?.name === 'AbortError') return error;
+        return error?.name === 'TypeError' ? new Error(NETWORK_ERROR) : error;
+      }
       function errorMessage(response, data, fallback) {
         let message = typeof data.detail === 'string' ? data.detail : Array.isArray(data.detail) ? data.detail.map(item => item.msg).join('；') : fallback;
         if (response.status === 429) message += `，请${response.headers.get('Retry-After') ? response.headers.get('Retry-After') + ' 秒后' : '稍后'}重试`;
@@ -191,15 +200,19 @@
         const epoch = identityEpoch;
         const headers = new Headers(options.headers || {});
         if (authenticated && token.value) headers.set('Authorization', `Bearer ${token.value}`);
-        const response = await fetch(path, {...options, headers});
+        let response;
+        try {response = await fetch(path, {...options, headers});} catch (error) {throw networkFailure(error);}
         if (authenticated && epoch !== identityEpoch) throw new DOMException('账号已切换', 'AbortError');
         if (authenticated && response.status === 401) {logout(false); openAuth(); throw new Error('登录已过期，请重新登录');}
         if (!response.ok) {const data = await response.json().catch(() => ({})); throw new Error(errorMessage(response, data, '请求失败'));}
         return response;
       }
-      async function jsonRequest(path, options = {}, authenticated = true) {return (await request(path, options, authenticated)).json();}
+      async function jsonRequest(path, options = {}, authenticated = true) {
+        const response = await request(path, options, authenticated);
+        try {return await response.json();} catch (error) {throw networkFailure(error);}
+      }
       const jsonBody = (method, value) => ({method,headers:{'Content-Type':'application/json'},body:JSON.stringify(value)});
-      function report(error) {if (error.name !== 'AbortError') ElMessage.error(error.message);}
+      function report(error) {if (error.name !== 'AbortError') ElMessage.error(networkFailure(error).message);}
       async function confirmAction(message, title) {try {await ElMessageBox.confirm(message,title,{confirmButtonText:'确认',cancelButtonText:'取消',type:'warning',autofocus:false}); return true;} catch {return false;}}
       async function copyText(value) {try {await navigator.clipboard.writeText(value); ElMessage.success('已复制');} catch {ElMessage.warning('复制失败，请选中文本手动复制');}}
       function resetAuth() {authForm.password = ''; authForm.invite = ''; authError.value = ''; authFormRef.value?.clearValidate();}
@@ -455,7 +468,7 @@
               state.text = decodePreviewText(bytes);
             }
           } catch (error) {
-            if (!signal.aborted && error.name !== 'AbortError') state.error = error.message;
+            if (!signal.aborted && error.name !== 'AbortError') state.error = networkFailure(error).message;
           } finally {
             if (!signal.aborted) state.loading = false;
           }
@@ -683,10 +696,12 @@
       async function sendChat() {
         const text = chatInput.value.trim(); if (!text || chatLoading.value || isComposing.value || !isAuthenticated.value) return;
         const epoch = identityEpoch, scope = [...selectedKnowledgeIds.value], id = sessionId;
-        messages.value.push({id:crypto.randomUUID(),author:'user',text,knowledgeIds:scope});
-        const bot = reactive({id:crypto.randomUUID(),author:'agent',text:'',thinking:true,steps:[],trace:null,error:'',knowledgeIds:scope}); messages.value.push(bot);
+        const user = {id:crypto.randomUUID(),author:'user',text,knowledgeIds:scope};
+        const bot = reactive({id:crypto.randomUUID(),author:'agent',text:'',thinking:true,steps:[],trace:null,error:'',knowledgeIds:scope});
+        messages.value.push(user, bot);
         chatInput.value = ''; chatLoading.value = true; scrollChat();
         const controller = new AbortController(); streamController = controller;
+        let completed = false, failure = null;
         const applyEvent = event => {
           if (event.type === 'content') {bot.thinking = false; bot.text += event.content || '';}
           else if (event.type === 'trace') bot.trace = event.rag_trace;
@@ -696,19 +711,48 @@
         let reader;
         try {
           const response = await request('/chat/stream',{...jsonBody('POST',{message:text,session_id:id,knowledge_ids:scope}),signal:controller.signal});
+          if (!response.body) throw new Error('对话服务没有返回内容，请重试');
           reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = '';
           const consume = final => {
             let match;
             while ((match = /\r?\n\r?\n/.exec(buffer))) {
               const raw = buffer.slice(0,match.index); buffer = buffer.slice(match.index + match[0].length);
               const data = raw.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n');
-              if (data && data !== '[DONE]') {try {applyEvent(JSON.parse(data));} catch {bot.error = '收到无法解析的响应，请重试';}}
+              if (data === '[DONE]') completed = true;
+              else if (data) {try {applyEvent(JSON.parse(data));} catch {bot.error = '收到无法解析的响应，请重试';}}
             }
             if (final && buffer.trim()) {buffer += '\n\n'; consume(false);}
           };
           while (true) {const {done,value} = await reader.read(); if (epoch !== identityEpoch) break; if (done) {buffer += decoder.decode(); consume(true); break;} buffer += decoder.decode(value,{stream:true}); consume(false); scrollChat();}
-        } catch (error) {if (epoch === identityEpoch) bot.error = error.name === 'AbortError' ? '已停止回答' : error.message;}
-        finally {reader?.releaseLock(); bot.thinking = false; if (streamController === controller) {chatLoading.value = false; streamController = null;} scrollChat();}
+        } catch (error) {failure = networkFailure(error);}
+        finally {
+          reader?.releaseLock(); bot.thinking = false;
+          if (streamController === controller) {chatLoading.value = false; streamController = null;}
+          // A session or account switch owns the transcript and input now.
+          if (epoch === identityEpoch && id === sessionId) {
+            if (controller.signal.aborted) {
+              if (!completed && !bot.error) bot.error = '已停止回答';
+            } else if (bot.error || !completed) {
+              // [DONE] completes the turn. A read error after it is ignored,
+              // but a server error event still wins over partial text.
+              const message = !completed && failure
+                ? (failure.name === 'AbortError' ? '回答已中断' : failure.message || NETWORK_ERROR)
+                : bot.error || (bot.text ? '连接提前结束，内容可能不完整' : '连接提前结束，请重试');
+              if (!bot.text && !chatInput.value.trim()) {
+                // The turn produced no answer. Remove the failed exchange
+                // instead of stacking a duplicate question, and hand the text
+                // back for editing. A draft typed while waiting wins.
+                const failedIds = new Set([user.id, bot.id]);
+                messages.value = messages.value.filter(item => !failedIds.has(item.id));
+                chatInput.value = text;
+                ElMessage.error(`${message}；问题已恢复到输入框，可修改后重新发送`);
+              } else {
+                bot.error = message;
+              }
+            }
+          }
+          scrollChat();
+        }
       }
       function handleChatKey(event) {if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && !isComposing.value) {event.preventDefault(); sendChat();}}
       function newChat() {stopChat(); sessionEpoch++; resetChatSources(); messages.value = []; sessionId = newSessionId(); sessionsOpen.value = false;}

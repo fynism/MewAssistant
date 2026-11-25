@@ -254,7 +254,7 @@
                 </div>
                 <el-form class="chat-compose" @submit.prevent="sendChat">
                   <el-select id="knowledge-scope" v-model="selectedKnowledgeIds" multiple collapse-tags collapse-tags-tooltip :max-collapse-tags="2" :multiple-limit="20" :loading="knowledgeLoading" :disabled="chatLoading" placeholder="选择知识库" aria-label="知识库范围"><el-option v-for="kb in knowledges" :key="kb.id" :label="kb.name" :value="kb.id"></el-option></el-select>
-                  <el-input v-model="chatInput" type="textarea" :autosize="{minRows:1,maxRows:4}" :placeholder="messages.length ? '继续追问…' : '输入问题…'" aria-label="问题" :disabled="chatLoading" @keydown="handleChatKey" @compositionstart="isComposing = true" @compositionend="isComposing = false"></el-input>
+                  <el-input v-model="chatInput" type="textarea" :autosize="{minRows:1,maxRows:4}" :placeholder="messages.length ? '继续追问…' : '输入问题…'" aria-label="问题" @keydown="handleChatKey" @compositionstart="isComposing = true" @compositionend="isComposing = false"></el-input>
                   <el-button v-if="chatLoading" @click="stopChat">停止回答</el-button>
                   <el-button v-else type="primary" native-type="submit" :disabled="!chatInput.trim()">发送</el-button>
                 </el-form>
