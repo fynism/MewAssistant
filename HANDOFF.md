@@ -30,12 +30,18 @@
 
 ## Local execution pitfalls
 
+- On 2026-11-07, the C-drive worktrees `09a0/SuperMew` and `a68e/SuperMew` were removed along with their local dependencies and runtime data. References below to files in `a68e` are historical; those files are no longer available there. The D-drive checkout and shared Python installation/caches were retained.
+
 - `.env.example` includes empty model and embedding values; empty environment variables override code defaults, and an empty `DENSE_EMBEDDING_DIM` fails integer parsing. Fill the required values before startup. The root README includes a minimal configuration.
 - `/docs` is ignored except for already-tracked files. The former README linked an untracked deployment guide, and `docs/deploy/DEPLOY_DOCKER.md` describes obsolete commands. Use the root README and current `deploy.sh` for the two-environment release flow; README links must resolve in a fresh checkout.
 - `.codegraph/` exists, but neither the `codegraph` shell command nor a CodeGraph MCP tool was available during this task. Attempt CodeGraph first, then use source inspection if it remains unavailable.
 - A Chromium stress check reproduced two Element Plus `offsetHeight` errors on both `d75fb79` and `a467b3c` when alternating routes six times with only Vue's `nextTick` between switches. Six switches spaced 38 ms apart passed. Compare programmatic route stress failures with the base commit when checking for regressions.
+- The Python frontend route tests import the application and initialize the embedding model. With BGE-M3 already cached, set `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` to avoid Hugging Face metadata retries when running the route and contract tests offline.
+- The local Windows Python MIME database can omit `.webp`, causing FastAPI's file response to use `text/plain`. Check the asset's `Content-Type` with a GET request. The homepage preview illustration uses PNG with alpha and serves as `image/png`.
 - An application can finish starting between a readiness check and a new launch. Check the listener PID and process logs; a successful readiness response alone does not prove the newly spawned process owns the port. Do not run multiple maintenance workers against the same database. During this test an additional launch exited because port 8000 was already occupied; the existing listener was reused.
 - A listener on port 8000 belonged to `C:/Users/fengy/.codex/worktrees/a68e/SuperMew`, at a different Git revision. It shared PostgreSQL and Milvus with the main checkout but had separate uploaded files and BM25 vocabulary state. After it stopped, recovery from the main checkout failed to find its files. Never mix these storage roots or vocabularies when evaluating; use the isolated fixture. No scores were emitted from that interrupted attempt.
+
+- The PDF preview endpoint returns a page image with literal query matches painted onto the bitmap using the page's embedded text. Keep the search snippet and page number available for semantic hits and OCR-only text, which need additional coordinate mapping for in-page highlighting.
 - The measured application uses local BGE-M3 on CPU and a configured Jina reranker. Record actual returned rerank scores, because configured reranking can fall back after an upstream error. Request latency on a small serial test is not a load-test result.
 - Windows polling occasionally reset an idle HTTP connection while the service stayed alive. The execution driver reconnected read-only GET requests only; uploads and retrieval POSTs were not replayed after ambiguous failures.
 
@@ -71,3 +77,15 @@
 
 - Upload and ingestion are supported by commit `96c6921`. The frontend reads original bytes through the authenticated content route and renders Markdown with the bundled Marked and DOMPurify only when a preview is opened. Uploaded Markdown preview strips inline HTML and displays image alt text so opening a document does not fetch external images.
 - The repository virtual environment has unittest and does not include pytest. Run the ingestion suite with `python -m unittest discover -s tests -p test_document_ingestion.py`.
+
+## Production frontend delivery baseline (2026-11-23)
+
+- Measure with a clean browser profile. On `fyism.cn`, a cold Chrome load reached first contentful paint in 17.7 s and the load event in 32.4 s. Element Plus JS and CSS spent 13.1 s and 17.2 s downloading after their first bytes. Nginx served the same JS over HTTPS loopback in 34 ms, so public transfer time is the main measured bottleneck. The cloud bandwidth tier was not verified.
+- Production Nginx served HTTP/1.1 and compressed HTML only. The 7 JS and 4 CSS responses were uncompressed and marked `no-store`. Gzip level 1 applied offline reduced their combined size from 2.00 MB to 0.61 MB. Enable compression for JS and CSS first, then compare headers, transferred bytes and cold-browser paint before changing bundles. Long-lived caching requires versioned asset URLs.
+- At 18:19 China Standard Time, production enabled JS/CSS gzip and `Vary: Accept-Encoding` in `/etc/nginx/sites-available/supermew`. The original is at `/root/nginx-supermew-backup-20261123T101920Z-8102nzik/supermew`. `nginx -t` passed, and the graceful reload kept the same master PID. Public JS/CSS payloads totaled approximately 0.63 MB. Two clean Chrome runs reached first contentful paint in 5.9–6.8 s and the load event in 6.7–8.3 s. The preloaded Serif font still finished last in the slower run.
+- At 18:41 China Standard Time, the production app removed the two font preloads from its active `/app/frontend/index.html`. The original is at `/root/supermew-font-preloads-20261123T104125Z-gZ8OnGH5/index.html`. Replacing the container with an image that still has the preloads restores them. The current local frontend already omits both.
+
+## Frontend performance follow-ups
+
+- [ ] HTTP caching. Version static resource URLs by content, apply long-lived immutable caching to successful versioned responses, and revalidate HTML.
+- [ ] On-demand frontend icons. Import and ship only the icons the frontend uses instead of the full icon bundle.

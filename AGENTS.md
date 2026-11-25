@@ -3,6 +3,11 @@
 - Log pitfalls in HANDOFF.md and read it before each new task.
 - For production work, include performance cost in design and acceptance.
 
+## Branches and Commits
+- Create a dedicated `codex/` branch before starting each new feature. Use a different prefix if the user requests one.
+- Commit after completing and verifying each coherent stage. Keep each commit focused on one change that can be reviewed on its own.
+- Aim for fewer than 1,000 changed lines per commit, counting additions and deletions together. Split larger changes by logical stage when practical. If a change needs to stay together and exceeds the target, explain why in the commit message.
+
 ## Simplicity First
 - Build only what was asked: no unrequested features, options or configurability, no abstractions for single-use code, no error handling for impossible scenarios.
 - If 50 lines would do what you wrote in 200, rewrite it.
