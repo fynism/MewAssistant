@@ -1,5 +1,13 @@
 # Handoff
 
+## Default chat scope lifecycle (2026-11-25)
+
+- The scope selectors bind directly to `selectedKnowledgeIds`. A synchronous deep watcher now pins the scope on any v-model write that did not come from `applyDefaultScope`; internal default or cleanup writes must set its flag or a background refresh can freeze an accidental explicit scope.
+- Readiness reaches the client in two places: `GET /knowledges` returns `has_ready_documents`, and the library document poll rewrites it from document status. An automatic scope must resync in both `loadKnowledges` and `loadDocuments`; otherwise the first processed upload is searchable only after a reload.
+- An explicit empty array is a real scope, not "not initialized". Manual clear, restored history (`last_knowledge_ids: []`), and legacy-unknown history all pin it. `sendChat` must still send `knowledge_ids: []`; the backend treats an empty list as no visible documents, and the product allows that conversation.
+- A deep link is interpreted only on the first knowledge load after login or account switch. Later loads must not reapply it over a scope the user changed.
+- `node tests/frontend_platform_smoke.js` covers the no-refresh first upload, manual clear with empty-scope chat, empty and non-empty history restore, account switch, deep-link precedence, and refresh behavior.
+
 ## Langfuse tracing and single-query evaluation
 
 - The running server must include the tracing code and use the same Langfuse project as the evaluator. A successful request against an older or disabled server has no trace ID and cannot be scored on its existing trace.

@@ -441,6 +441,91 @@ vm.runInContext(fs.readFileSync(path.join(root,'frontend/app.js'),'utf8'),contex
   app.requestUpload();
   assert.equal(app.uploadTargetOpen,false);
   assert.equal(app.uploadTargetId,'');
+  // The default scope follows readiness only until the user makes it explicit.
+  // A new account uploads its first PDF and asks without reloading the page.
+  const firstKbId = '33333333-3333-3333-3333-333333333333';
+  const laterKbId = '44444444-4444-4444-4444-444444444444';
+  const deepKbId = '55555555-5555-5555-5555-555555555555';
+  const firstKb = {id:firstKbId,name:'首批资料',has_ready_documents:false};
+  const laterKb = {id:laterKbId,name:'后续资料',has_ready_documents:true};
+  const deepKb = {id:deepKbId,name:'深链资料',has_ready_documents:true};
+  const scopedIds = () => [...app.selectedKnowledgeIds];
+  let scopeStage = 'first', firstKbCreated = false, firstDocStatus = 'none';
+  const firstDocument = () => ({id:'first-doc',knowledge_id:firstKbId,filename:'first.pdf',status:firstDocStatus});
+  responder = async (url, options={}) => {
+    if (url === '/knowledges') {
+      if (options.method === 'POST') {firstKbCreated = true; return json(firstKb);}
+      if (scopeStage === 'first') return json({knowledges:firstKbCreated
+        ? [{...firstKb,ready_document_count:firstDocStatus === 'ready' ? 1 : 0,has_ready_documents:firstDocStatus === 'ready'}]
+        : []});
+      if (scopeStage === 'later') return json({knowledges:[laterKb]});
+      return json({knowledges:[laterKb,deepKb]});
+    }
+    if (url === `/knowledges/${firstKbId}/documents`) {
+      if (options.method === 'POST') {firstDocStatus = 'pending'; return json(firstDocument());}
+      return json({documents:firstDocStatus === 'none' ? [] : [firstDocument()]});
+    }
+    if (url === '/documents' && options.method === 'GET') return json({documents:firstDocStatus === 'none' ? [] : [firstDocument()]});
+    if (url === '/sessions/empty-scope') return json({messages:[{type:'human',content:'空范围历史'}],last_knowledge_ids:[]});
+    if (url === '/sessions/first-scope') return json({messages:[{type:'human',content:'首份历史'}],last_knowledge_ids:[firstKbId]});
+    return normalResponder(url, options);
+  };
+  app.logout(false);
+  scopeStage = 'first'; firstKbCreated = false; firstDocStatus = 'none';
+  Object.assign(app.authForm,{username:'new-user',password:'password'});
+  app.authMode = 'login';
+  await app.submitAuth(); await tick();
+  assert.equal(app.selectedKnowledgeIds.length,0);
+  app.knowledgeName = '首批资料';
+  await app.createKnowledge(); await tick();
+  assert.equal(app.selectedKnowledgeId,firstKbId);
+  assert.deepEqual(scopedIds(),[]);
+  const firstPdf = new Blob(['first']); firstPdf.name = 'first.pdf';
+  await app.uploadDocument({target:{files:[firstPdf],value:'selected'}});
+  assert.equal(firstDocStatus,'pending');
+  assert.deepEqual(scopedIds(),[]);
+  // The next library poll reports the document ready; no reload happens.
+  firstDocStatus = 'ready';
+  await app.loadDocuments(); await tick();
+  assert.deepEqual(scopedIds(),[firstKbId]);
+  app.go('/try'); await tick();
+  assert.deepEqual(scopedIds(),[firstKbId]);
+  app.chatInput = '第一份资料讲了什么'; await app.sendChat();
+  assert.deepEqual(JSON.parse(requests.filter(item=>item.url === '/chat/stream').at(-1).body).knowledge_ids,[firstKbId]);
+  app.newChat();
+  // Clearing is an explicit empty scope. Background refreshes must not refill
+  // it, and the product still sends the empty scope instead of blocking.
+  app.selectedKnowledgeIds = [];
+  await tick();
+  await app.loadKnowledges(); await tick();
+  assert.deepEqual(scopedIds(),[]);
+  app.chatInput = '没有选择范围'; await app.sendChat();
+  assert.deepEqual(JSON.parse(requests.filter(item=>item.url === '/chat/stream').at(-1).body).knowledge_ids,[]);
+  app.newChat();
+  // Restored conversations own their scope, including an empty one.
+  await app.loadSession({session_id:'empty-scope'}); await tick();
+  assert.deepEqual(scopedIds(),[]);
+  await app.loadKnowledges(); await tick();
+  assert.deepEqual(scopedIds(),[]);
+  await app.loadSession({session_id:'first-scope'}); await tick();
+  assert.deepEqual(scopedIds(),[firstKbId]);
+  // Switching accounts starts a new automatic scope for the new account.
+  app.logout(false);
+  scopeStage = 'later';
+  Object.assign(app.authForm,{username:'another-user',password:'password'});
+  await app.submitAuth(); await tick();
+  assert.deepEqual(scopedIds(),[laterKbId]);
+  // A deep link outranks the ready default and survives later refreshes.
+  app.logout(false);
+  scopeStage = 'deep';
+  location.search = `?knowledge=${deepKbId}`;
+  Object.assign(app.authForm,{username:'linked-user',password:'password'});
+  await app.submitAuth(); await tick();
+  assert.deepEqual(scopedIds(),[deepKbId]);
+  await app.loadKnowledges(); await tick();
+  assert.deepEqual(scopedIds(),[deepKbId]);
+  responder = normalResponder;
+  location.search = '';
   // Remembered scroll positions belong to the signed-in session.
   readingCanvas.scrollTop = 99; readingCanvas.scrollLeft = 9;
   app.preview.rememberScroll({target:readingCanvas});

@@ -184,7 +184,20 @@
       const selectedKnowledge = computed(() => knowledges.value.find(kb => kb.id === selectedKnowledgeId.value));
       const acceptedExtensions = computed(() => knowledgeSettings.value.allowed_extensions.join(','));
       const uploadLimitLabel = computed(() => knowledgeSettings.value.max_upload_bytes ? `${Math.round(knowledgeSettings.value.max_upload_bytes / 1048576)} MB` : '以服务端限制为准');
-      let documentTimer = null, scopeInitialized = false;
+      let documentTimer = null, scopeInitialized = false, scopeExplicit = false, applyingDefaultScope = false;
+      const defaultScopeIds = () => knowledges.value.filter(kb => kb.has_ready_documents).slice(0, 20).map(kb => kb.id);
+      function setExplicitScope(ids) {scopeExplicit = true; selectedKnowledgeIds.value = ids;}
+      // Until the user, history or a deep link chooses a scope, it follows the
+      // ready libraries so the first processed upload is searchable without a
+      // reload. Background updates must never disturb an explicit scope.
+      function applyDefaultScope() {
+        if (scopeExplicit) return;
+        const ids = defaultScopeIds(), current = selectedKnowledgeIds.value;
+        if (ids.length === current.length && ids.every((id, index) => current[index] === id)) return;
+        applyingDefaultScope = true;
+        selectedKnowledgeIds.value = ids;
+        applyingDefaultScope = false;
+      }
       const toolName = ref('retrieve'), toolQuery = ref(''), topK = ref(5), toolLoading = ref(false), toolResult = ref(null), toolError = ref('');
       const messages = ref([]), chatInput = ref(''), chatLoading = ref(false), chatLog = ref(null), isComposing = ref(false);
       const chatSourcesOpen = ref(false), chatSourceView = shallowRef(null), chatSourcesHeading = ref(null);
@@ -307,7 +320,9 @@
         searchQuery.value = ''; clearSearch(); resetReadingListScroll(); sidebarPane.value = 'results'; sidebarHidden.value = false; downloadLoading.value = false;
         token.value = ''; storage.set('accessToken',''); currentUser.value = null;
         newKey.value = ''; newInvite.value = ''; keys.value = []; invites.value = []; operations.value = null;
-        knowledges.value = []; documents.value = []; selectedKnowledgeId.value = ''; selectedKnowledgeIds.value = []; scopeInitialized = false;
+        knowledges.value = []; documents.value = []; selectedKnowledgeId.value = '';
+        applyingDefaultScope = true; selectedKnowledgeIds.value = []; applyingDefaultScope = false;
+        scopeInitialized = false; scopeExplicit = false;
         messages.value = []; sessions.value = []; sessionId = newSessionId(); authChecking.value = false;
         chatInput.value = ''; resetChatSources();
         knowledgeLoading.value = false; documentsLoading.value = false; keysLoading.value = false; invitesLoading.value = false; sessionsLoading.value = false; operationsLoading.value = false;
@@ -345,10 +360,14 @@
           knowledges.value = data.knowledges || [];
           const owned = new Set(knowledges.value.map(kb => kb.id));
           if (!scopeInitialized) {
-            const requested = new URLSearchParams(location.search).get('knowledge');
-            selectedKnowledgeIds.value = requested && owned.has(requested) ? [requested] : knowledges.value.filter(kb => kb.has_ready_documents).slice(0,20).map(kb => kb.id);
             scopeInitialized = true;
-          } else selectedKnowledgeIds.value = selectedKnowledgeIds.value.filter(id => owned.has(id));
+            const requested = new URLSearchParams(location.search).get('knowledge');
+            // Only the first load interprets the deep link; later loads must
+            // not override a scope the user has changed since.
+            if (requested && owned.has(requested)) setExplicitScope([requested]);
+          }
+          if (scopeExplicit) selectedKnowledgeIds.value = selectedKnowledgeIds.value.filter(id => owned.has(id));
+          else applyDefaultScope();
           if (selectedKnowledgeId.value && !owned.has(selectedKnowledgeId.value)) {
             selectedKnowledgeId.value = '';
             // Retained results cannot outlive the scope they were retrieved from.
@@ -390,6 +409,9 @@
               kb.has_ready_documents = kb.ready_document_count > 0;
             }
           }
+          // Processing completes through this poll, so it is the point where a
+          // newly ready library can join an automatic scope.
+          applyDefaultScope();
           // A load that finishes after leaving the library still updates the
           // retained state, but polling only resumes while the page is visible.
           if (isLibrary.value && documents.value.some(doc => ['pending','processing','replacing','deleting'].includes(doc.status))) documentTimer = setTimeout(loadDocuments,2500);
@@ -611,7 +633,10 @@
       async function deleteKnowledge() {
         const id = selectedKnowledgeId.value, epoch = identityEpoch;
         if (!id || !await confirmAction(`删除“${selectedKnowledge.value.name}”及其文件、索引？此操作无法恢复。`,'删除知识库') || epoch !== identityEpoch) return;
-        try {await jsonRequest(`/knowledges/${encodeURIComponent(id)}`,{method:'DELETE'}); if (epoch !== identityEpoch) return; selectedKnowledgeIds.value = selectedKnowledgeIds.value.filter(value => value !== id); clearSearchInput(); await loadKnowledges(); ElMessage.success('知识库已删除');} catch (error) {report(error);}
+        try {await jsonRequest(`/knowledges/${encodeURIComponent(id)}`,{method:'DELETE'}); if (epoch !== identityEpoch) return;
+          // Deleting a library is not a scope choice; an automatic scope keeps following readiness.
+          applyingDefaultScope = true; selectedKnowledgeIds.value = selectedKnowledgeIds.value.filter(value => value !== id); applyingDefaultScope = false;
+          clearSearchInput(); await loadKnowledges(); ElMessage.success('知识库已删除');} catch (error) {report(error);}
       }
       function validateFile(file) {
         const ext = '.' + (file.name.split('.').pop() || '').toLowerCase();
@@ -681,7 +706,7 @@
         catch (error) {if (epoch === identityEpoch && pageReview.value === review) review.error = error.message;}
         finally {if (epoch === identityEpoch && pageReview.value === review) pageReviewLoading.value = false;}
       }
-      function openTryWithKnowledge(id) {selectedKnowledgeIds.value = [id]; scopeInitialized = true; history.pushState({},'',`/try?knowledge=${encodeURIComponent(id)}`); page.value = '/try';}
+      function openTryWithKnowledge(id) {setExplicitScope([id]); scopeInitialized = true; history.pushState({},'',`/try?knowledge=${encodeURIComponent(id)}`); page.value = '/try';}
       function scopeNames(ids) {return ids == null ? '历史会话未记录范围' : !ids.length ? '空范围' : ids.map(id => knowledges.value.find(kb => kb.id === id)?.name || '已删除的知识库').join('、');}
       async function runTool() {
         if (!isAuthenticated.value) {openAuth(); return;}
@@ -855,8 +880,9 @@
           if (epoch !== identityEpoch || call !== sessionEpoch || page.value !== '/try') return;
           resetChatSources(); sessionId = item.session_id;
           messages.value = data.messages.map(msg => ({id:crypto.randomUUID(),author:msg.type === 'human' ? 'user' : 'agent',text:msg.content,trace:msg.rag_trace,knowledgeIds:msg.knowledge_ids}));
-          if (Array.isArray(data.last_knowledge_ids)) selectedKnowledgeIds.value = data.last_knowledge_ids.filter(id => knowledges.value.some(kb => kb.id === id)).slice(0,20);
-          else if (data.legacy_scope_unknown) selectedKnowledgeIds.value = [];
+          // A restored session owns its scope, including an explicitly empty one.
+          if (Array.isArray(data.last_knowledge_ids)) setExplicitScope(data.last_knowledge_ids.filter(id => knowledges.value.some(kb => kb.id === id)).slice(0,20));
+          else if (data.legacy_scope_unknown) setExplicitScope([]);
           sessionsOpen.value = false; scrollChat();
         }
         catch (error) {if (epoch === identityEpoch && call === sessionEpoch && error.name !== 'AbortError') sessionsError.value = error.message;}
@@ -919,6 +945,9 @@
         catch (error) {if (epoch === identityEpoch && error.name !== 'AbortError') operationsError.value = error.message;}
         finally {if (epoch === identityEpoch) operationsLoading.value = false;}
       }
+      // Element Plus writes v-model changes straight to the ref. Anything that
+      // does not come from applyDefaultScope is a deliberate scope choice.
+      watch(selectedKnowledgeIds, () => {if (!applyingDefaultScope) scopeExplicit = true;}, {deep:true, flush:'sync'});
       watch(selectedKnowledgeIds, () => {clearToolResults();}, {deep:true});
       watch(toolName, clearToolResults);
       watch(page, async () => {
