@@ -15,7 +15,7 @@ function page(url, responder, oldToken = '') {
   const vue = context.Vue;
   Object.assign(context, {
     Vue:{...vue,onMounted(fn) {mounted=fn;},onBeforeUnmount() {},createApp(definition) {return {use() {},component() {},mount() {app=vue.proxyRefs(definition.setup());}};}},
-    ElementPlus:{ElMessage:{success() {},warning() {},error() {}},ElMessageBox:{}},ElementPlusLocaleZhCn:{},
+    ElementPlus:{ElMessage:{success() {},warning() {},error() {}},ElMessageBox:{},locale:{}},
     location,history:{replaceState(_,__,value) {const next=new URL(value,location.origin);location.pathname=next.pathname;location.search=next.search;location.hash=next.hash;}},
     window:{addEventListener() {},removeEventListener() {},scrollTo() {}},
     document:{documentElement:{classList:{contains:()=>false}},getElementById:()=>null},
@@ -50,7 +50,8 @@ const responder = async url => {
   await callback.mount();
   assert.equal(callback.app.isAuthenticated,true);
   assert.equal(callback.app.displayName,'gh_cat_123');
-  assert.equal(callback.app.role,'user');
+  assert.equal(callback.app.currentUser.role,'user');
+  assert.equal(callback.app.isAdmin,false);
   assert.equal(callback.app.authChecking,false);
   assert.equal(callback.stored.get('accessToken'),'site-jwt');
   assert.equal(callback.location.pathname,'/try');

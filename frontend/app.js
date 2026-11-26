@@ -1,13 +1,94 @@
 /* Vue 3 + Element Plus. Business data comes exclusively from the existing API. */
 (() => {
   'use strict';
-  const {createApp, ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick} = Vue;
-  const {ElMessage, ElMessageBox} = ElementPlus;
+  const {createApp, ref, shallowRef, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick} = Vue;
+  const {ElIcon, ElMessage, ElMessageBox, icons, locale} = ElementPlus;
   const routes = ['/', '/services/knowledge', '/workspace/knowledges', '/try', '/account', '/admin'];
-  const titles = {'/':'MCP 服务广场', '/services/knowledge':'知识库检索 MCP', '/workspace/knowledges':'我的知识库', '/try':'试一下', '/account':'个人管理', '/admin':'管理页面'};
+  const titles = {'/':'个人知识库', '/services/knowledge':'客户端接入', '/workspace/knowledges':'个人知识库', '/try':'问资料', '/account':'个人管理', '/admin':'管理页面'};
   const routePath = () => routes.includes(location.pathname.replace(/\/$/, '') || '/') ? location.pathname.replace(/\/$/, '') || '/' : '/';
   const storage = {get(key) {try {return localStorage.getItem(key);} catch {return null;}}, set(key, value) {try {value ? localStorage.setItem(key, value) : localStorage.removeItem(key);} catch {}}};
   const newSessionId = () => 'session_' + crypto.randomUUID();
+  const fileExtension = filename => /\.([^.]+)$/.exec(filename || '')?.[1].toLowerCase();
+  function previewFormat(filename) {
+    const extension = fileExtension(filename);
+    if (['pdf','doc','docx'].includes(extension)) return 'pdf';
+    if (['xls','xlsx'].includes(extension)) return 'spreadsheet';
+    return ['txt','md'].includes(extension) ? extension : null;
+  }
+  function decodePreviewText(buffer) {
+    const bytes = new Uint8Array(buffer);
+    const view = new DataView(buffer);
+    const bom = view.byteLength >= 4 ? view.getUint32(0) : 0;
+    if (bom === 0xfffe0000 || bom === 0x0000feff) {
+      // TextDecoder does not support UTF-32, and the LE BOM starts with the UTF-16 BOM.
+      const chunks = [], points = [];
+      const littleEndian = bom === 0xfffe0000;
+      if (view.byteLength % 4) throw new Error('文本编码无法识别，请另存为 UTF-8');
+      for (let offset = 4; offset < view.byteLength; offset += 4) {
+        const point = view.getUint32(offset, littleEndian);
+        if (point > 0x10ffff || (point >= 0xd800 && point <= 0xdfff)) throw new Error('文本编码无法识别，请另存为 UTF-8');
+        points.push(point);
+        if (points.length === 4096) {
+          chunks.push(String.fromCodePoint(...points));
+          points.length = 0;
+        }
+      }
+      return chunks.join('') + String.fromCodePoint(...points);
+    }
+    if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder('utf-16le').decode(bytes);
+    if (bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder('utf-16be').decode(bytes);
+    try {return new TextDecoder('utf-8', {fatal:true}).decode(bytes);}
+    catch {return new TextDecoder('gb18030').decode(bytes);}
+  }
+  function parseMarkdown(text, preview = false) {
+    const options = {breaks:true,gfm:true};
+    const tags = ['style','iframe'];
+    const attrs = ['style'];
+    if (preview) {
+      // Previewing an uploaded document must not load resources it references.
+      options.renderer = new marked.Renderer();
+      options.renderer.html = () => '';
+      options.renderer.image = (_href, _title, alt) => alt;
+      tags.push('img','picture','audio','video','source','track','object','embed','input','form','link','meta');
+      attrs.push('src','srcset','poster','background');
+    }
+    return DOMPurify.sanitize(marked.parse(text || '', options), {
+      USE_PROFILES:{html:true},FORBID_TAGS:tags,FORBID_ATTR:attrs
+    });
+  }
+  function highlightParts(text, query) {
+    if (!query) return [{text, match:false}];
+    const literal = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return text.split(new RegExp(`(${literal})`, 'giu')).map((text, index) => ({text, match:index % 2 === 1}));
+  }
+  function searchSnippet(text, query) {
+    const compact = (text || '').replace(/\s+/g, ' ').trim();
+    const match = compact.toLowerCase().indexOf(query.toLowerCase());
+    // Keep the match within the visible line of the results sidebar.
+    const start = Math.max(0, match - 8);
+    const end = start + Math.max(115, Math.min(query.length + 40, 224));
+    return highlightParts((start ? '…' : '') + compact.slice(start, end) + (end < compact.length ? '…' : ''), query);
+  }
+  function chatPageNumber(value) {
+    const page = typeof value === 'string' && value.trim() ? Number(value) : value;
+    return Number.isSafeInteger(page) && page >= 0 && page < Number.MAX_SAFE_INTEGER ? page + 1 : null;
+  }
+  function collectChatSources(chunks) {
+    const sources = new Map();
+    for (const [index, chunk] of chunks.entries()) {
+      if (!chunk || (!chunk.filename && !chunk.document_id && !chunk.text)) continue;
+      const {knowledge_id:knowledgeId, document_id:documentId, page_number:rawPage} = chunk;
+      const pageNumber = chatPageNumber(rawPage);
+      const key = knowledgeId && documentId ? JSON.stringify([knowledgeId,documentId,pageNumber]) : index;
+      let source = sources.get(key);
+      if (!source) {
+        source = {key,knowledgeId,documentId,pageNumber,filename:chunk.filename || '未命名文档',passages:[]};
+        sources.set(key,source);
+      }
+      if (chunk.text && !source.passages.includes(chunk.text)) source.passages.push(chunk.text);
+    }
+    return [...sources.values()];
+  }
   function tokenizeConfig(source, language) {
     const pattern = /#[^\n]*|"(?:\\.|[^"\\])*"|\[[^\]\n]+\]|\b[A-Za-z_][\w.-]*\b|[{}\[\]:=,]/g;
     const tokens = []; let cursor = 0;
@@ -29,24 +110,16 @@
       const isAdmin = computed(() => role.value === 'admin');
       const displayName = computed(() => currentUser.value?.username || '');
       const pageTitle = computed(() => titles[page.value]);
-      const workspaceLinks = [{path:'/workspace/knowledges',label:'我的知识库',icon:'FolderOpened'}, {path:'/try',label:'试一下',icon:'ChatDotRound'}, {path:'/account',label:'个人管理',icon:'User'}];
-      const isExplore = computed(() => page.value === '/' || page.value === '/services/knowledge');
-      const isWorkspace = computed(() => workspaceLinks.some(link => link.path === page.value));
+      const isLibrary = computed(() => page.value === '/' || page.value === '/workspace/knowledges');
       const isDark = ref(document.documentElement.classList.contains('dark'));
-      const motionQuery = matchMedia('(prefers-reduced-motion: reduce)'), systemTheme = matchMedia('(prefers-color-scheme: dark)');
-      const brandAnimating = ref(false), brandWords = [{initial:'M',suffix:'eow',offset:0},{initial:'C',suffix:'onnect',offset:3},{initial:'P',suffix:'latform',offset:9}];
-      let brandPlayed = false, brandTimer;
-      try {brandPlayed = sessionStorage.getItem('mcp-brand-seen-v02') === '1';} catch {}
-      function playBrand() {
-        if (page.value !== '/' || brandPlayed) return;
-        brandPlayed = true; try {sessionStorage.setItem('mcp-brand-seen-v02', '1');} catch {}
-        if (motionQuery.matches) return;
-        brandAnimating.value = true; brandTimer = setTimeout(() => {brandAnimating.value = false;}, 1100);
-      }
+      const systemTheme = matchMedia('(prefers-color-scheme: dark)');
+      const readerMedia = matchMedia('(max-width: 880px)');
+      const compactReader = ref(readerMedia.matches);
+      const onReaderWidth = event => {compactReader.value = event.matches;};
       function toggleTheme() {isDark.value = !isDark.value; document.documentElement.classList.toggle('dark', isDark.value); storage.set('mcp-theme', isDark.value ? 'dark' : 'light');}
       const onSystemTheme = event => {if (!storage.get('mcp-theme')) {isDark.value = event.matches; document.documentElement.classList.toggle('dark', event.matches);}};
-      const onMotion = event => {if (event.matches) brandAnimating.value = false;};
-      systemTheme.addEventListener('change', onSystemTheme); motionQuery.addEventListener('change', onMotion);
+      systemTheme.addEventListener('change', onSystemTheme);
+      readerMedia.addEventListener('change', onReaderWidth);
 
       const connectionClient = ref('codex'), servicePanels = ref([]);
       const connectionEndpoint = 'https://fyism.cn/mcp/knowledge';
@@ -66,17 +139,82 @@
       const authRules = {username:[{required:true,whitespace:true,message:'请输入用户名',trigger:'blur'}],password:[{required:true,message:'请输入密码',trigger:'blur'}],invite:[{required:true,whitespace:true,message:'请输入邀请码',trigger:'blur'}]};
       const knowledges = ref([]), selectedKnowledgeId = ref(''), selectedKnowledgeIds = ref([]), knowledgeLoading = ref(false), knowledgeError = ref('');
       const documents = ref([]), documentsLoading = ref(false), documentsError = ref(''), documentBusyId = ref('');
+      const searchQuery = ref(''), submittedQuery = ref(''), searchResult = shallowRef(null), searchLoading = ref(false), searchError = ref('');
+      let activeSearchKey = '';
+      const sidebarPane = ref('results'), sidebarHidden = ref(false);
+      const activeSource = shallowRef(null), previewOpen = ref(false), previewZoom = ref(100);
+      const downloadLoading = ref(false), searchInput = ref(null), previewTitle = ref(null), readingList = ref(null), previewCanvas = ref(null);
+      const preview = useDocumentPreview(previewCanvas);
+      let searchController;
+      // The results list is also rebuilt by in-site navigation, so keep its
+      // position with the retained query instead of the element. It is reset
+      // with the rest of the account's state in logout().
+      let readingListScroll = {left:0, top:0};
+      function rememberReadingListScroll(event) {
+        // A scroll queued just before the route unmounts must not overwrite
+        // the position with the detached element's reset value.
+        if (event.target.isConnected === false) return;
+        readingListScroll = {left:event.target.scrollLeft, top:event.target.scrollTop};
+      }
+      function resetReadingListScroll() {
+        readingListScroll = {left:0, top:0};
+        readingList.value?.scrollTo(0, 0);
+      }
+      watch(readingList, element => {
+        if (element) element.scrollTo(readingListScroll.left, readingListScroll.top);
+      }, {flush:'post'});
+      const activeDocument = computed(() => documents.value.find(doc => doc.id === activeSource.value?.documentId));
+      const readingRows = computed(() => submittedQuery.value
+        ? (searchResult.value?.results || []).map(source => ({...source, key:source.sourceId, query:submittedQuery.value, snippet:searchSnippet(source.text, submittedQuery.value)}))
+        : documents.value.map(doc => ({key:doc.id, documentId:doc.id, knowledgeId:doc.knowledge_id,
+          knowledgeName:knowledges.value.find(kb => kb.id === doc.knowledge_id)?.name, filename:doc.filename, doc})));
+      const resultSummary = computed(() => {
+        if (searchLoading.value) return '正在检索…';
+        // An error must not read as a successful empty result set.
+        if (submittedQuery.value && searchError.value) return '检索失败';
+        if (submittedQuery.value) return `${readingRows.value.length} 条结果`;
+        if ((knowledgeLoading.value || documentsLoading.value) && !readingRows.value.length) return '正在加载…';
+        return `${readingRows.value.length} 个文档`;
+      });
       const pageReview = ref(null), pageReviewLoading = ref(false);
       const knowledgeSettings = ref({allowed_extensions:[],max_upload_bytes:0,max_retrieval_results:20});
       const createOpen = ref(false), editOpen = ref(false), knowledgeName = ref(''), knowledgeDescription = ref(''), knowledgeEdit = reactive({name:'',description:''});
       const fileInput = ref(null), replaceInput = ref(null), replacingDocumentId = ref(''), isUploading = ref(false);
+      const uploadTargetOpen = ref(false), uploadTargetId = ref('');
       const selectedKnowledge = computed(() => knowledges.value.find(kb => kb.id === selectedKnowledgeId.value));
       const acceptedExtensions = computed(() => knowledgeSettings.value.allowed_extensions.join(','));
       const uploadLimitLabel = computed(() => knowledgeSettings.value.max_upload_bytes ? `${Math.round(knowledgeSettings.value.max_upload_bytes / 1048576)} MB` : '以服务端限制为准');
-      const scopeLabel = computed(() => selectedKnowledgeIds.value.length ? scopeNames(selectedKnowledgeIds.value) : '未选择知识库');
-      let documentTimer = null, scopeInitialized = false;
+      let documentTimer = null, scopeInitialized = false, scopeExplicit = false, applyingDefaultScope = false;
+      const defaultScopeIds = () => knowledges.value.filter(kb => kb.has_ready_documents).slice(0, 20).map(kb => kb.id);
+      function setExplicitScope(ids) {scopeExplicit = true; selectedKnowledgeIds.value = ids;}
+      // Until the user, history or a deep link chooses a scope, it follows the
+      // ready libraries so the first processed upload is searchable without a
+      // reload. Background updates must never disturb an explicit scope.
+      function applyDefaultScope() {
+        if (scopeExplicit) return;
+        const ids = defaultScopeIds(), current = selectedKnowledgeIds.value;
+        if (ids.length === current.length && ids.every((id, index) => current[index] === id)) return;
+        applyingDefaultScope = true;
+        selectedKnowledgeIds.value = ids;
+        applyingDefaultScope = false;
+      }
       const toolName = ref('retrieve'), toolQuery = ref(''), topK = ref(5), toolLoading = ref(false), toolResult = ref(null), toolError = ref('');
       const messages = ref([]), chatInput = ref(''), chatLoading = ref(false), chatLog = ref(null), isComposing = ref(false);
+      const chatSourcesOpen = ref(false), chatSourceView = shallowRef(null), chatSourcesHeading = ref(null);
+      const chatSourcePreview = ref(null), chatPreview = useDocumentPreview(chatSourcePreview);
+      const chatOriginalLoading = ref(false);
+      let chatSourceTrigger = null, chatOriginalController = null, chatPreviewScroll = 0;
+      const chatSourcesByMessage = computed(() => new Map(messages.value
+        .map(message => [message.id,collectChatSources(message.trace?.retrieved_chunks || [])])));
+      const chatSources = computed(() => chatSourcesByMessage.value.get(chatSourceView.value?.messageId) || []);
+      const chatSource = computed(() => chatSources.value.find(source => source.key === chatSourceView.value?.sourceKey) || chatSources.value[0]);
+      const hasChatOriginal = computed(() => Boolean(chatSource.value?.knowledgeId && chatSource.value?.documentId));
+      const chatPreviewFormat = computed(() => {
+        if (!hasChatOriginal.value) return null;
+        const {filename,pageNumber} = chatSource.value;
+        if (fileExtension(filename) === 'pdf' && pageNumber === null) return null;
+        return previewFormat(filename);
+      });
       const sessions = ref([]), sessionsOpen = ref(false), sessionsLoading = ref(false), sessionsError = ref('');
       let sessionId = newSessionId(), streamController = null;
       const keys = ref([]), keyName = ref(''), newKey = ref(''), keysLoading = ref(false), keyBusy = ref(false), keyError = ref('');
@@ -84,6 +222,15 @@
       const invitationForm = reactive({max_uses:1,expires_at:''});
       const operations = ref(null), operationsLoading = ref(false), operationsError = ref('');
 
+      const NETWORK_ERROR = '网络连接失败，请检查网络后重试';
+      // Browsers reject unreachable requests with a TypeError such as
+      // "Failed to fetch" before any response exists. Stream reads fail the
+      // same way when the connection drops. Keep aborts intact so callers can
+      // tell an intentional stop from a network failure.
+      function networkFailure(error) {
+        if (error?.name === 'AbortError') return error;
+        return error?.name === 'TypeError' ? new Error(NETWORK_ERROR) : error;
+      }
       function errorMessage(response, data, fallback) {
         let message = typeof data.detail === 'string' ? data.detail : Array.isArray(data.detail) ? data.detail.map(item => item.msg).join('；') : fallback;
         if (response.status === 429) message += `，请${response.headers.get('Retry-After') ? response.headers.get('Retry-After') + ' 秒后' : '稍后'}重试`;
@@ -93,15 +240,19 @@
         const epoch = identityEpoch;
         const headers = new Headers(options.headers || {});
         if (authenticated && token.value) headers.set('Authorization', `Bearer ${token.value}`);
-        const response = await fetch(path, {...options, headers});
+        let response;
+        try {response = await fetch(path, {...options, headers});} catch (error) {throw networkFailure(error);}
         if (authenticated && epoch !== identityEpoch) throw new DOMException('账号已切换', 'AbortError');
         if (authenticated && response.status === 401) {logout(false); openAuth(); throw new Error('登录已过期，请重新登录');}
         if (!response.ok) {const data = await response.json().catch(() => ({})); throw new Error(errorMessage(response, data, '请求失败'));}
         return response;
       }
-      async function jsonRequest(path, options = {}, authenticated = true) {return (await request(path, options, authenticated)).json();}
+      async function jsonRequest(path, options = {}, authenticated = true) {
+        const response = await request(path, options, authenticated);
+        try {return await response.json();} catch (error) {throw networkFailure(error);}
+      }
       const jsonBody = (method, value) => ({method,headers:{'Content-Type':'application/json'},body:JSON.stringify(value)});
-      function report(error) {if (error.name !== 'AbortError') ElMessage.error(error.message);}
+      function report(error) {if (error.name !== 'AbortError') ElMessage.error(networkFailure(error).message);}
       async function confirmAction(message, title) {try {await ElMessageBox.confirm(message,title,{confirmButtonText:'确认',cancelButtonText:'取消',type:'warning',autofocus:false}); return true;} catch {return false;}}
       async function copyText(value) {try {await navigator.clipboard.writeText(value); ElMessage.success('已复制');} catch {ElMessage.warning('复制失败，请选中文本手动复制');}}
       function resetAuth() {authForm.password = ''; authForm.invite = ''; authError.value = ''; authFormRef.value?.clearValidate();}
@@ -166,18 +317,27 @@
       function clearToolResults() {resultEpoch++; toolResult.value = null; toolError.value = ''; toolLoading.value = false;}
       function logout(navigateHome = true) {
         identityEpoch++; knowledgeEpoch++; documentEpoch++; sessionEpoch++; stopChat(); stopDocumentPolling(); clearToolResults();
+        searchQuery.value = ''; clearSearch(); resetReadingListScroll(); sidebarPane.value = 'results'; sidebarHidden.value = false; downloadLoading.value = false;
         token.value = ''; storage.set('accessToken',''); currentUser.value = null;
         newKey.value = ''; newInvite.value = ''; keys.value = []; invites.value = []; operations.value = null;
-        knowledges.value = []; documents.value = []; selectedKnowledgeId.value = ''; selectedKnowledgeIds.value = []; scopeInitialized = false;
+        knowledges.value = []; documents.value = []; selectedKnowledgeId.value = '';
+        applyingDefaultScope = true; selectedKnowledgeIds.value = []; applyingDefaultScope = false;
+        scopeInitialized = false; scopeExplicit = false;
         messages.value = []; sessions.value = []; sessionId = newSessionId(); authChecking.value = false;
+        chatInput.value = ''; resetChatSources();
         knowledgeLoading.value = false; documentsLoading.value = false; keysLoading.value = false; invitesLoading.value = false; sessionsLoading.value = false; operationsLoading.value = false;
         keyBusy.value = false; inviteBusy.value = false; isUploading.value = false; documentBusyId.value = '';
+        uploadTargetOpen.value = false; uploadTargetId.value = '';
         createOpen.value = false; editOpen.value = false; sessionsOpen.value = false;
         pageReview.value = null; pageReviewLoading.value = false; qualityReview.value = null; helpTopic.value = '';
         knowledgeError.value = ''; documentsError.value = ''; keyError.value = ''; inviteError.value = ''; operationsError.value = '';
         if (navigateHome) go('/');
       }
-      function accountCommand(command) {command === 'account' ? go('/account') : logout();}
+      function accountCommand(command) {
+        if (command === 'logout') logout();
+        else if (command === 'theme') toggleTheme();
+        else go('/' + command);
+      }
       function go(path) {
         mobileNav.value = false; if (!routes.includes(path) || page.value === path) return;
         history.pushState({},'',path); page.value = path; window.scrollTo({top:0,behavior:'instant'});
@@ -185,7 +345,7 @@
       const onPopState = () => {page.value = routePath(); mobileNav.value = false;};
       async function loadPageData() {
         if (!isAuthenticated.value) return;
-        if (['/workspace/knowledges', '/try', '/services/knowledge'].includes(page.value)) await loadKnowledges();
+        if (isLibrary.value || ['/try', '/services/knowledge'].includes(page.value)) await loadKnowledges();
         else if (page.value === '/account') await loadKeys();
         else if (page.value === '/admin' && isAdmin.value) await Promise.all([loadInvites(),loadOperations()]);
       }
@@ -200,30 +360,257 @@
           knowledges.value = data.knowledges || [];
           const owned = new Set(knowledges.value.map(kb => kb.id));
           if (!scopeInitialized) {
-            const requested = new URLSearchParams(location.search).get('knowledge');
-            selectedKnowledgeIds.value = requested && owned.has(requested) ? [requested] : knowledges.value.filter(kb => kb.has_ready_documents).slice(0,20).map(kb => kb.id);
             scopeInitialized = true;
-          } else selectedKnowledgeIds.value = selectedKnowledgeIds.value.filter(id => owned.has(id));
-          if (!owned.has(selectedKnowledgeId.value)) selectedKnowledgeId.value = knowledges.value[0]?.id || '';
+            const requested = new URLSearchParams(location.search).get('knowledge');
+            // Only the first load interprets the deep link; later loads must
+            // not override a scope the user has changed since.
+            if (requested && owned.has(requested)) setExplicitScope([requested]);
+          }
+          if (scopeExplicit) selectedKnowledgeIds.value = selectedKnowledgeIds.value.filter(id => owned.has(id));
+          else applyDefaultScope();
+          if (selectedKnowledgeId.value && !owned.has(selectedKnowledgeId.value)) {
+            selectedKnowledgeId.value = '';
+            // Retained results cannot outlive the scope they were retrieved from.
+            searchQuery.value = ''; clearSearch();
+          }
           topK.value = Math.min(topK.value, knowledgeSettings.value.max_retrieval_results || 20);
-          if (page.value === '/workspace/knowledges') await loadDocuments();
+          if (isLibrary.value) await loadDocuments();
         } catch (error) {if (epoch === identityEpoch && call === knowledgeEpoch && error.name !== 'AbortError') knowledgeError.value = error.message;}
         finally {if (epoch === identityEpoch && call === knowledgeEpoch) knowledgeLoading.value = false;}
       }
-      function selectKnowledge(id) {selectedKnowledgeId.value = id; documents.value = []; documentsError.value = ''; stopDocumentPolling(); loadDocuments();}
+      function selectKnowledge(id) {
+        if (selectedKnowledgeId.value === id) return;
+        selectedKnowledgeId.value = id;
+        documents.value = [];
+        resetPreview();
+        const loading = loadDocuments();
+        if (submittedQuery.value) runSearch(submittedQuery.value);
+        nextTick(resetReadingListScroll);
+        return loading;
+      }
+      function browseKnowledge(id) {
+        sidebarPane.value = 'results';
+        selectKnowledge(id);
+        nextTick(() => searchInput.value?.focus({preventScroll:true}));
+      }
       async function loadDocuments() {
         const id = selectedKnowledgeId.value, epoch = identityEpoch, call = ++documentEpoch; stopDocumentPolling();
-        if (!id || !isAuthenticated.value) {documents.value = []; documentsLoading.value = false; return;}
+        if (!isAuthenticated.value || !isLibrary.value) return;
         documentsLoading.value = true; documentsError.value = '';
         try {
-          const data = await jsonRequest(`/knowledges/${encodeURIComponent(id)}/documents`);
-          if (epoch !== identityEpoch || call !== documentEpoch || id !== selectedKnowledgeId.value || page.value !== '/workspace/knowledges') return;
+          const data = await jsonRequest(id ? `/knowledges/${encodeURIComponent(id)}/documents` : '/documents');
+          if (epoch !== identityEpoch || call !== documentEpoch || id !== selectedKnowledgeId.value) return;
           documents.value = data.documents || [];
-          const knowledge = selectedKnowledge.value;
-          if (knowledge) {knowledge.ready_document_count = documents.value.filter(doc => doc.status === 'ready').length; knowledge.has_ready_documents = knowledge.ready_document_count > 0;}
-          if (documents.value.some(doc => ['pending','processing','replacing','deleting'].includes(doc.status))) documentTimer = setTimeout(loadDocuments,2500);
+          const readyCounts = new Map();
+          for (const doc of documents.value) if (doc.status === 'ready') readyCounts.set(doc.knowledge_id, (readyCounts.get(doc.knowledge_id) || 0) + 1);
+          for (const kb of knowledges.value) {
+            if (!id || id === kb.id) {
+              kb.ready_document_count = readyCounts.get(kb.id) || 0;
+              kb.has_ready_documents = kb.ready_document_count > 0;
+            }
+          }
+          // Processing completes through this poll, so it is the point where a
+          // newly ready library can join an automatic scope.
+          applyDefaultScope();
+          // A load that finishes after leaving the library still updates the
+          // retained state, but polling only resumes while the page is visible.
+          if (isLibrary.value && documents.value.some(doc => ['pending','processing','replacing','deleting'].includes(doc.status))) documentTimer = setTimeout(loadDocuments,2500);
         } catch (error) {if (epoch === identityEpoch && call === documentEpoch && error.name !== 'AbortError') documentsError.value = error.message;}
         finally {if (epoch === identityEpoch && call === documentEpoch) documentsLoading.value = false;}
+      }
+      function clearSearch() {
+        searchController?.abort();
+        activeSearchKey = '';
+        submittedQuery.value = ''; searchResult.value = null; searchError.value = ''; searchLoading.value = false;
+        resetPreview();
+      }
+      function clearSearchInput() {
+        searchQuery.value = '';
+        clearSearch();
+        resetReadingListScroll();
+        searchInput.value?.focus();
+      }
+      function guardSearchComposition(event) {
+        if (event.isComposing || event.keyCode === 229) event.preventDefault();
+      }
+      function clearSearchOnEscape(event) {
+        // Escape during IME composition cancels the composition, not the search.
+        if (event.isComposing || event.keyCode === 229) return;
+        // A blank box with no committed search has nothing to clear, so the
+        // only visible effect would be closing the document the user is reading.
+        if (!searchQuery.value.trim() && !submittedQuery.value) return;
+        event.preventDefault();
+        clearSearchInput();
+      }
+      async function runSearch(query = searchQuery.value.trim()) {
+        // An empty submit is not a request to clear. The clear button does that.
+        if (!query) return;
+        const key = JSON.stringify([query, selectedKnowledgeId.value]);
+        // Repeated Enter for the scope already being retrieved must not fan out
+        // into duplicate requests. A different query or scope replaces it.
+        if (searchLoading.value && key === activeSearchKey) return;
+        searchController?.abort();
+        const controller = new AbortController(); searchController = controller;
+        activeSearchKey = key;
+        submittedQuery.value = query; searchLoading.value = true; searchError.value = ''; searchResult.value = null;
+        resetPreview(); resetReadingListScroll();
+        try {
+          const body = jsonBody('POST', {query, knowledgeId:selectedKnowledgeId.value || null, topK:Math.min(10, knowledgeSettings.value.max_retrieval_results || 20)});
+          const data = await jsonRequest('/documents/search', {...body, signal:controller.signal});
+          if (!controller.signal.aborted) searchResult.value = data;
+        } catch (error) {
+          if (!controller.signal.aborted && error.name !== 'AbortError') searchError.value = error.message;
+        } finally {
+          if (!controller.signal.aborted) {
+            searchLoading.value = false;
+            if (activeSearchKey === key) activeSearchKey = '';
+          }
+        }
+      }
+      function resetPreview() {
+        preview.reset();
+        activeSource.value = null; previewOpen.value = false; previewZoom.value = 100;
+      }
+      function sourcePath(source) {
+        return `/knowledges/${encodeURIComponent(source.knowledgeId)}/documents/${encodeURIComponent(source.documentId)}`;
+      }
+      function useDocumentPreview(canvas) {
+        let controller, lastSheetPosition = null;
+        // Reading position is view state, not document data: it survives
+        // in-site navigation but is deliberately not persisted. Both axes
+        // matter because a zoomed page can be wider than the canvas.
+        let scrollPosition = {left:0, top:0};
+        const state = reactive({
+          url:'', text:null, page:null, pageCount:0, loading:false, error:'',
+          workbook:shallowRef(null), citation:null,
+          get hasContent() {return Boolean(this.url || this.workbook) || this.text !== null;},
+          clear, reset, load, rememberScroll, restoreImageScroll
+        });
+        // The route rebuilds <main>, so the canvas is a fresh element on
+        // return. Text and sheets have their final size when they mount; an
+        // image restores from its load event once its height is known.
+        watch(canvas, element => {
+          if (element && !state.url) element.scrollTo(scrollPosition.left, scrollPosition.top);
+        }, {flush:'post'});
+        return state;
+
+        function clear(keepWorkbook = false) {
+          controller?.abort();
+          controller = null;
+          if (state.url) URL.revokeObjectURL(state.url);
+          Object.assign(state, {url:'',text:null,error:'',loading:false});
+          if (!keepWorkbook) state.workbook = null;
+        }
+        function reset() {
+          clear();
+          state.page = null;
+          state.pageCount = 0;
+          state.citation = null;
+          lastSheetPosition = null;
+          scrollPosition = {left:0, top:0};
+        }
+        function rememberScroll(event) {
+          // A scroll queued just before the route unmounts must not overwrite
+          // the position with the detached element's reset value.
+          if (event.target.isConnected === false) return;
+          scrollPosition = {left:event.target.scrollLeft, top:event.target.scrollTop};
+        }
+        function restoreImageScroll(event) {
+          // The image grows after the canvas remounts. Re-apply the remembered
+          // position here so the earlier, clamped mount restore cannot win.
+          if (event.target.src === state.url) canvas.value?.scrollTo(scrollPosition.left, scrollPosition.top);
+        }
+        async function load(source, {pageNumber, scroll = 0, citationPage, sheetPosition = lastSheetPosition}) {
+          const format = previewFormat(source?.filename);
+          if (!format) return;
+          clear(format === 'spreadsheet');
+          const requestController = new AbortController();
+          controller = requestController;
+          const {signal} = requestController;
+          state.page = pageNumber;
+          state.loading = true;
+          scrollPosition = {left:0, top:scroll};
+          canvas.value?.scrollTo(0, 0);
+          const path = sourcePath(source);
+          try {
+            if (format === 'pdf') {
+              const response = await request(`${path}/preview/${pageNumber}`, {
+                ...jsonBody('POST', {query:source.query || ''}), signal
+              });
+              const blob = await response.blob();
+              if (signal.aborted) return;
+              state.pageCount = Number(response.headers.get('X-PDF-Page-Count')) || 0;
+              state.url = URL.createObjectURL(blob);
+            } else if (format === 'spreadsheet') {
+              lastSheetPosition = sheetPosition;
+              const params = new URLSearchParams(sheetPosition || (citationPage ? {citation_page:citationPage} : {}));
+              const query = params.size ? '?' + params : '';
+              const workbook = await jsonRequest(`${path}/spreadsheet-preview${query}`, {signal});
+              if (signal.aborted) return;
+              state.workbook = workbook;
+              if (workbook.citation_range) state.citation = {sheet:workbook.sheet,range:workbook.citation_range};
+            } else {
+              const response = await request(`${path}/content`, {signal});
+              const bytes = await response.arrayBuffer();
+              if (signal.aborted) return;
+              state.text = decodePreviewText(bytes);
+            }
+          } catch (error) {
+            if (!signal.aborted && error.name !== 'AbortError') state.error = networkFailure(error).message;
+          } finally {
+            if (!signal.aborted) state.loading = false;
+          }
+          if (!signal.aborted && scroll && !state.url && state.hasContent) {
+            await nextTick();
+            if (!signal.aborted) canvas.value?.scrollTo(0, scroll);
+          }
+        }
+      }
+      function loadPreview(pageNumber = preview.page ?? 1, sheetPosition) {
+        const source = activeSource.value;
+        return preview.load(source, {pageNumber,sheetPosition,citationPage:chatPageNumber(source?.pageNumber)});
+      }
+      async function openPreview(source, event) {
+        if (activeSource.value?.key !== source.key) {
+          resetPreview();
+          activeSource.value = source;
+          loadPreview(chatPageNumber(source.pageNumber) ?? 1);
+        }
+        previewOpen.value = true;
+        if (event.detail === 0 || compactReader.value) {
+          await nextTick();
+          previewTitle.value?.focus({preventScroll:true});
+        }
+      }
+      async function toggleReadingSidebar() {
+        if (!compactReader.value && !sidebarHidden.value) {
+          sidebarHidden.value = true;
+          return;
+        }
+        if (compactReader.value) previewOpen.value = false;
+        sidebarHidden.value = false;
+        sidebarPane.value = 'results';
+        await nextTick();
+        const target = readingList.value?.querySelector('[aria-pressed="true"]') || searchInput.value;
+        target?.focus({preventScroll:true});
+      }
+      async function downloadSource() {
+        const source = activeSource.value, epoch = identityEpoch;
+        if (!source || downloadLoading.value) return;
+        downloadLoading.value = true;
+        try {
+          const response = await request(`${sourcePath(source)}/content`);
+          const blob = await response.blob();
+          if (epoch !== identityEpoch) return;
+          saveOriginal(blob, source.filename);
+        } catch (error) {report(error);}
+        finally {if (epoch === identityEpoch) downloadLoading.value = false;}
+      }
+      function saveOriginal(blob, filename) {
+        const url = URL.createObjectURL(blob), link = document.createElement('a');
+        link.href = url; link.download = filename;
+        document.body.append(link); link.click(); link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
       }
       async function createKnowledge() {
         if (!knowledgeName.value.trim() || knowledgeLoading.value) return;
@@ -231,8 +618,8 @@
         try {
           const data = await jsonRequest('/knowledges',jsonBody('POST',{name:knowledgeName.value.trim(),description:knowledgeDescription.value.trim()}));
           if (epoch !== identityEpoch) return;
-          knowledges.value.unshift(data); selectedKnowledgeId.value = data.id; createOpen.value = false; knowledgeName.value = ''; knowledgeDescription.value = '';
-          await loadDocuments(); ElMessage.success('知识库已创建');
+          knowledges.value.unshift(data); createOpen.value = false; knowledgeName.value = ''; knowledgeDescription.value = '';
+          clearSearchInput(); await selectKnowledge(data.id); ElMessage.success('知识库已创建');
         } catch (error) {report(error);} finally {if (epoch === identityEpoch) knowledgeLoading.value = false;}
       }
       function openKnowledgeEdit() {Object.assign(knowledgeEdit,{name:selectedKnowledge.value?.name || '',description:selectedKnowledge.value?.description || ''}); editOpen.value = true;}
@@ -246,7 +633,10 @@
       async function deleteKnowledge() {
         const id = selectedKnowledgeId.value, epoch = identityEpoch;
         if (!id || !await confirmAction(`删除“${selectedKnowledge.value.name}”及其文件、索引？此操作无法恢复。`,'删除知识库') || epoch !== identityEpoch) return;
-        try {await jsonRequest(`/knowledges/${encodeURIComponent(id)}`,{method:'DELETE'}); if (epoch !== identityEpoch) return; selectedKnowledgeIds.value = selectedKnowledgeIds.value.filter(value => value !== id); await loadKnowledges(); ElMessage.success('知识库已删除');} catch (error) {report(error);}
+        try {await jsonRequest(`/knowledges/${encodeURIComponent(id)}`,{method:'DELETE'}); if (epoch !== identityEpoch) return;
+          // Deleting a library is not a scope choice; an automatic scope keeps following readiness.
+          applyingDefaultScope = true; selectedKnowledgeIds.value = selectedKnowledgeIds.value.filter(value => value !== id); applyingDefaultScope = false;
+          clearSearchInput(); await loadKnowledges(); ElMessage.success('知识库已删除');} catch (error) {report(error);}
       }
       function validateFile(file) {
         const ext = '.' + (file.name.split('.').pop() || '').toLowerCase();
@@ -254,44 +644,69 @@
         if (knowledgeSettings.value.max_upload_bytes && file.size > knowledgeSettings.value.max_upload_bytes) return `文件不能超过 ${uploadLimitLabel.value}`;
         return '';
       }
+      function openUploadInput(id) {
+        uploadTargetId.value = id;
+        fileInput.value?.click();
+      }
+      function requestUpload() {
+        if (isUploading.value) return;
+        // "All documents" is a view, not an upload destination. A single
+        // knowledge base is unambiguous; several require an explicit choice.
+        if (selectedKnowledgeId.value) {openUploadInput(selectedKnowledgeId.value); return;}
+        if (knowledges.value.length === 1) {openUploadInput(knowledges.value[0].id); return;}
+        if (knowledges.value.length > 1) uploadTargetOpen.value = true;
+      }
+      function chooseUploadTarget(id) {
+        uploadTargetOpen.value = false;
+        if (knowledges.value.some(kb => kb.id === id)) openUploadInput(id);
+      }
+      function cancelUploadTarget() {
+        uploadTargetOpen.value = false;
+        uploadTargetId.value = '';
+      }
       async function uploadDocument(event) {
-        const file = event.target.files?.[0], id = selectedKnowledgeId.value, epoch = identityEpoch; event.target.value = '';
+        const file = event.target.files?.[0], id = uploadTargetId.value || selectedKnowledgeId.value, epoch = identityEpoch; event.target.value = '';
         if (!file || !id || isUploading.value) return;
         const validationError = validateFile(file); if (validationError) {ElMessage.warning(validationError); return;}
         isUploading.value = true;
-        try {const body = new FormData(); body.append('file',file); await jsonRequest(`/knowledges/${encodeURIComponent(id)}/documents`,{method:'POST',body}); if (epoch !== identityEpoch) return; if (id === selectedKnowledgeId.value) await loadDocuments(); ElMessage.success('已上传，处理状态将自动更新');}
+        try {const body = new FormData(); body.append('file',file); await jsonRequest(`/knowledges/${encodeURIComponent(id)}/documents`,{method:'POST',body}); if (epoch !== identityEpoch) return; if (!selectedKnowledgeId.value || id === selectedKnowledgeId.value) await loadDocuments(); const name = knowledges.value.find(kb => kb.id === id)?.name; ElMessage.success(name ? `已上传到“${name}”，处理状态将自动更新` : '已上传，处理状态将自动更新');}
         catch (error) {report(error);} finally {if (epoch === identityEpoch) isUploading.value = false;}
       }
-      function chooseReplacement(doc) {replacingDocumentId.value = doc.id; replaceInput.value?.click();}
+      function chooseReplacement(doc) {replacingDocumentId.value = {id:doc.id, knowledgeId:doc.knowledge_id}; replaceInput.value?.click();}
       async function replaceDocument(event) {
-        const file = event.target.files?.[0], id = selectedKnowledgeId.value, documentId = replacingDocumentId.value, epoch = identityEpoch; event.target.value = ''; replacingDocumentId.value = '';
-        if (!file || !documentId || !id) return;
+        const file = event.target.files?.[0], replacement = replacingDocumentId.value, epoch = identityEpoch; event.target.value = ''; replacingDocumentId.value = '';
+        if (!file || !replacement) return;
+        const {id:documentId, knowledgeId:id} = replacement;
         const validationError = validateFile(file); if (validationError) {ElMessage.warning(validationError); return;}
         if (!await confirmAction(`用“${file.name}”替换此文档？旧内容会立即退出检索。`,'替换文档') || epoch !== identityEpoch) return;
         documentBusyId.value = documentId;
-        try {const body = new FormData(); body.append('file',file); await jsonRequest(`/knowledges/${encodeURIComponent(id)}/documents/${encodeURIComponent(documentId)}/content`,{method:'PUT',body}); if (epoch === identityEpoch && id === selectedKnowledgeId.value) await loadDocuments();}
+        try {const body = new FormData(); body.append('file',file); await jsonRequest(`/knowledges/${encodeURIComponent(id)}/documents/${encodeURIComponent(documentId)}/content`,{method:'PUT',body}); if (epoch === identityEpoch) await refreshChangedDocument(id, documentId);}
         catch (error) {report(error);} finally {if (epoch === identityEpoch) documentBusyId.value = '';}
       }
       async function documentAction(doc, action) {
-        const id = selectedKnowledgeId.value, epoch = identityEpoch;
+        const id = doc.knowledge_id, epoch = identityEpoch;
         if (action === 'delete' && !await confirmAction(`删除“${doc.filename}”？此文件将退出检索。`,'删除文档')) return;
         if (epoch !== identityEpoch) return;
         documentBusyId.value = doc.id;
-        try {await jsonRequest(`/knowledges/${encodeURIComponent(id)}/documents/${encodeURIComponent(doc.id)}${action === 'delete' ? '' : '/' + action}`,{method:action === 'delete' ? 'DELETE' : 'POST'}); if (epoch === identityEpoch && id === selectedKnowledgeId.value) await loadDocuments();}
+        try {await jsonRequest(`/knowledges/${encodeURIComponent(id)}/documents/${encodeURIComponent(doc.id)}${action === 'delete' ? '' : '/' + action}`,{method:action === 'delete' ? 'DELETE' : 'POST'}); if (epoch === identityEpoch) await refreshChangedDocument(id, doc.id);}
         catch (error) {report(error);} finally {if (epoch === identityEpoch) documentBusyId.value = '';}
       }
+      async function refreshChangedDocument(knowledgeId, documentId) {
+        if (activeSource.value?.documentId === documentId) resetPreview();
+        if (searchResult.value?.results?.some(source => source.documentId === documentId)) runSearch(submittedQuery.value);
+        if (!selectedKnowledgeId.value || knowledgeId === selectedKnowledgeId.value) await loadDocuments();
+      }
       const statusLabel = status => ({pending:'等待处理',processing:'处理中',ready:'可检索',failed:'处理失败',replacing:'替换中',deleting:'删除中'}[status] || status);
-      const statusIcon = status => ({ready:'CircleCheck',failed:'CircleClose'}[status] || 'Loading');
       const documentPending = doc => ['pending','processing','replacing','deleting'].includes(doc.status);
       async function viewDocumentPage(doc, pageNumber) {
-        const id = selectedKnowledgeId.value, epoch = identityEpoch;
+        const id = doc.knowledge_id, epoch = identityEpoch;
         const review = reactive({filename:doc.filename,pageNumber,data:null,error:''});
         pageReview.value = review; pageReviewLoading.value = true;
         try {const data = await jsonRequest(`/knowledges/${encodeURIComponent(id)}/documents/${encodeURIComponent(doc.id)}/pages/${pageNumber}`); if (epoch === identityEpoch && pageReview.value === review) review.data = data;}
         catch (error) {if (epoch === identityEpoch && pageReview.value === review) review.error = error.message;}
         finally {if (epoch === identityEpoch && pageReview.value === review) pageReviewLoading.value = false;}
       }
-      function openTryWithKnowledge(id) {selectedKnowledgeIds.value = [id]; scopeInitialized = true; history.pushState({},'',`/try?knowledge=${encodeURIComponent(id)}`); page.value = '/try';}
+      function openTryWithKnowledge(id) {setExplicitScope([id]); scopeInitialized = true; history.pushState({},'',`/try?knowledge=${encodeURIComponent(id)}`); page.value = '/try';}
       function scopeNames(ids) {return ids == null ? '历史会话未记录范围' : !ids.length ? '空范围' : ids.map(id => knowledges.value.find(kb => kb.id === id)?.name || '已删除的知识库').join('、');}
       async function runTool() {
         if (!isAuthenticated.value) {openAuth(); return;}
@@ -304,7 +719,6 @@
         catch (error) {if (epoch === identityEpoch && call === resultEpoch && error.name !== 'AbortError') toolError.value = error.message;}
         finally {if (epoch === identityEpoch && call === resultEpoch) toolLoading.value = false;}
       }
-      function parseMarkdown(text) {return DOMPurify.sanitize(marked.parse(text || '',{breaks:true,gfm:true}),{USE_PROFILES:{html:true},FORBID_TAGS:['style','iframe'],FORBID_ATTR:['style']});}
       function traceFacts(trace) {
         if (!trace) return [];
         const fields = {
@@ -329,14 +743,76 @@
           {label:'重写后检索',items:trace.expanded_retrieved_chunks}
         ].filter(group => group.items?.length);
       }
+      async function toggleChatSources(messageId, event) {
+        if (chatSourcesOpen.value && chatSourceView.value?.messageId === messageId) return closeChatSources();
+        if (chatSourceView.value?.messageId !== messageId) {
+          resetChatSources();
+          chatSourceView.value = {messageId,sourceKey:null};
+        }
+        chatSourceTrigger = event?.currentTarget || null;
+        chatSourcesOpen.value = true;
+        loadChatPreview(chatPreview.page ?? chatSource.value?.pageNumber ?? 1, chatPreviewScroll);
+        await nextTick();
+        chatSourcesHeading.value?.focus({preventScroll:true});
+      }
+      function selectChatSource(source) {
+        if (source.key === chatSource.value?.key) return;
+        clearChatSourceContent(true);
+        chatSourceView.value = {...chatSourceView.value,sourceKey:source.key};
+        chatPreviewScroll = 0;
+        loadChatPreview(source.pageNumber ?? 1);
+      }
+      async function closeChatSources() {
+        chatPreviewScroll = chatSourcePreview.value?.scrollTop || 0;
+        clearChatSourceContent();
+        chatSourcesOpen.value = false;
+        const trigger = chatSourceTrigger;
+        chatSourceTrigger = null;
+        await nextTick();
+        if (!chatSourcesOpen.value) trigger?.focus({preventScroll:true});
+      }
+      function resetChatSources() {
+        clearChatSourceContent(true);
+        chatSourcesOpen.value = false; chatSourceView.value = null; chatSourceTrigger = null;
+        chatPreviewScroll = 0;
+      }
+      function clearChatSourceContent(resetPosition = false) {
+        if (resetPosition) chatPreview.reset();
+        else chatPreview.clear();
+        chatOriginalController?.abort(); chatOriginalController = null;
+        chatOriginalLoading.value = false;
+      }
+      function loadChatPreview(pageNumber = chatPreview.page ?? 1, scroll = 0, sheetPosition) {
+        if (!chatSourcesOpen.value || !chatPreviewFormat.value) return;
+        chatPreviewScroll = scroll;
+        const source = chatSource.value;
+        return chatPreview.load(source, {pageNumber,scroll,sheetPosition,citationPage:source.pageNumber});
+      }
+      async function downloadChatOriginal() {
+        if (!hasChatOriginal.value || chatOriginalLoading.value) return;
+        const source = chatSource.value, controller = new AbortController();
+        chatOriginalController = controller; chatOriginalLoading.value = true;
+        try {
+          const response = await request(`${sourcePath(source)}/content`, {signal:controller.signal});
+          const blob = await response.blob();
+          if (!controller.signal.aborted) saveOriginal(blob, source.filename);
+        } catch (error) {if (!controller.signal.aborted) report(error);}
+        finally {
+          if (!controller.signal.aborted) {
+            chatOriginalController = null; chatOriginalLoading.value = false;
+          }
+        }
+      }
       async function scrollChat() {await nextTick(); if (chatLog.value) chatLog.value.scrollTop = chatLog.value.scrollHeight;}
       async function sendChat() {
         const text = chatInput.value.trim(); if (!text || chatLoading.value || isComposing.value || !isAuthenticated.value) return;
         const epoch = identityEpoch, scope = [...selectedKnowledgeIds.value], id = sessionId;
-        messages.value.push({id:crypto.randomUUID(),author:'user',text,knowledgeIds:scope});
-        const bot = reactive({id:crypto.randomUUID(),author:'agent',text:'',thinking:true,steps:[],trace:null,error:'',knowledgeIds:scope}); messages.value.push(bot);
+        const user = {id:crypto.randomUUID(),author:'user',text,knowledgeIds:scope};
+        const bot = reactive({id:crypto.randomUUID(),author:'agent',text:'',thinking:true,steps:[],trace:null,error:'',knowledgeIds:scope});
+        messages.value.push(user, bot);
         chatInput.value = ''; chatLoading.value = true; scrollChat();
         const controller = new AbortController(); streamController = controller;
+        let completed = false, failure = null;
         const applyEvent = event => {
           if (event.type === 'content') {bot.thinking = false; bot.text += event.content || '';}
           else if (event.type === 'trace') bot.trace = event.rag_trace;
@@ -346,22 +822,51 @@
         let reader;
         try {
           const response = await request('/chat/stream',{...jsonBody('POST',{message:text,session_id:id,knowledge_ids:scope}),signal:controller.signal});
+          if (!response.body) throw new Error('对话服务没有返回内容，请重试');
           reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = '';
           const consume = final => {
             let match;
             while ((match = /\r?\n\r?\n/.exec(buffer))) {
               const raw = buffer.slice(0,match.index); buffer = buffer.slice(match.index + match[0].length);
               const data = raw.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n');
-              if (data && data !== '[DONE]') {try {applyEvent(JSON.parse(data));} catch {bot.error = '收到无法解析的响应，请重试';}}
+              if (data === '[DONE]') completed = true;
+              else if (data) {try {applyEvent(JSON.parse(data));} catch {bot.error = '收到无法解析的响应，请重试';}}
             }
             if (final && buffer.trim()) {buffer += '\n\n'; consume(false);}
           };
           while (true) {const {done,value} = await reader.read(); if (epoch !== identityEpoch) break; if (done) {buffer += decoder.decode(); consume(true); break;} buffer += decoder.decode(value,{stream:true}); consume(false); scrollChat();}
-        } catch (error) {if (epoch === identityEpoch) bot.error = error.name === 'AbortError' ? '已停止回答' : error.message;}
-        finally {reader?.releaseLock(); bot.thinking = false; if (streamController === controller) {chatLoading.value = false; streamController = null;} scrollChat();}
+        } catch (error) {failure = networkFailure(error);}
+        finally {
+          reader?.releaseLock(); bot.thinking = false;
+          if (streamController === controller) {chatLoading.value = false; streamController = null;}
+          // A session or account switch owns the transcript and input now.
+          if (epoch === identityEpoch && id === sessionId) {
+            if (controller.signal.aborted) {
+              if (!completed && !bot.error) bot.error = '已停止回答';
+            } else if (bot.error || !completed) {
+              // [DONE] completes the turn. A read error after it is ignored,
+              // but a server error event still wins over partial text.
+              const message = !completed && failure
+                ? (failure.name === 'AbortError' ? '回答已中断' : failure.message || NETWORK_ERROR)
+                : bot.error || (bot.text ? '连接提前结束，内容可能不完整' : '连接提前结束，请重试');
+              if (!bot.text && !chatInput.value.trim()) {
+                // The turn produced no answer. Remove the failed exchange
+                // instead of stacking a duplicate question, and hand the text
+                // back for editing. A draft typed while waiting wins.
+                const failedIds = new Set([user.id, bot.id]);
+                messages.value = messages.value.filter(item => !failedIds.has(item.id));
+                chatInput.value = text;
+                ElMessage.error(`${message}；问题已恢复到输入框，可修改后重新发送`);
+              } else {
+                bot.error = message;
+              }
+            }
+          }
+          scrollChat();
+        }
       }
       function handleChatKey(event) {if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && !isComposing.value) {event.preventDefault(); sendChat();}}
-      function newChat() {stopChat(); sessionEpoch++; messages.value = []; sessionId = newSessionId(); sessionsOpen.value = false;}
+      function newChat() {stopChat(); sessionEpoch++; resetChatSources(); messages.value = []; sessionId = newSessionId(); sessionsOpen.value = false;}
       async function loadSessions() {
         sessionsOpen.value = true; sessionsLoading.value = true; sessionsError.value = ''; const epoch = identityEpoch;
         try {const data = await jsonRequest('/sessions'); if (epoch === identityEpoch) sessions.value = data.sessions || [];}
@@ -370,7 +875,16 @@
       }
       async function loadSession(item) {
         stopChat(); const epoch = identityEpoch, call = ++sessionEpoch; sessionsLoading.value = true;
-        try {const data = await jsonRequest(`/sessions/${encodeURIComponent(item.session_id)}`); if (epoch !== identityEpoch || call !== sessionEpoch || page.value !== '/try') return; sessionId = item.session_id; messages.value = data.messages.map(msg => ({id:crypto.randomUUID(),author:msg.type === 'human' ? 'user' : 'agent',text:msg.content,trace:msg.rag_trace,knowledgeIds:msg.knowledge_ids})); if (Array.isArray(data.last_knowledge_ids)) selectedKnowledgeIds.value = data.last_knowledge_ids.filter(id => knowledges.value.some(kb => kb.id === id)).slice(0,20); sessionsOpen.value = false; scrollChat();}
+        try {
+          const data = await jsonRequest(`/sessions/${encodeURIComponent(item.session_id)}`);
+          if (epoch !== identityEpoch || call !== sessionEpoch || page.value !== '/try') return;
+          resetChatSources(); sessionId = item.session_id;
+          messages.value = data.messages.map(msg => ({id:crypto.randomUUID(),author:msg.type === 'human' ? 'user' : 'agent',text:msg.content,trace:msg.rag_trace,knowledgeIds:msg.knowledge_ids}));
+          // A restored session owns its scope, including an explicitly empty one.
+          if (Array.isArray(data.last_knowledge_ids)) setExplicitScope(data.last_knowledge_ids.filter(id => knowledges.value.some(kb => kb.id === id)).slice(0,20));
+          else if (data.legacy_scope_unknown) setExplicitScope([]);
+          sessionsOpen.value = false; scrollChat();
+        }
         catch (error) {if (epoch === identityEpoch && call === sessionEpoch && error.name !== 'AbortError') sessionsError.value = error.message;}
         finally {if (epoch === identityEpoch && call === sessionEpoch) sessionsLoading.value = false;}
       }
@@ -431,16 +945,24 @@
         catch (error) {if (epoch === identityEpoch && error.name !== 'AbortError') operationsError.value = error.message;}
         finally {if (epoch === identityEpoch) operationsLoading.value = false;}
       }
+      // Element Plus writes v-model changes straight to the ref. Anything that
+      // does not come from applyDefaultScope is a deliberate scope choice.
+      watch(selectedKnowledgeIds, () => {if (!applyingDefaultScope) scopeExplicit = true;}, {deep:true, flush:'sync'});
       watch(selectedKnowledgeIds, () => {clearToolResults();}, {deep:true});
       watch(toolName, clearToolResults);
       watch(page, async () => {
-        newKey.value = ''; newInvite.value = ''; stopDocumentPolling(); documentEpoch++; clearToolResults(); sessionEpoch++; stopChat();
-        createOpen.value = false; editOpen.value = false; sessionsOpen.value = false; helpTopic.value = ''; qualityReview.value = null;
-        document.title = pageTitle.value + ' · MeowConnectPlatform'; playBrand(); await loadPageData(); await nextTick();
+        newKey.value = ''; newInvite.value = ''; stopDocumentPolling(); clearToolResults(); sessionEpoch++; stopChat();
+        resetChatSources();
+        createOpen.value = false; editOpen.value = false; sessionsOpen.value = false; uploadTargetOpen.value = false; uploadTargetId.value = ''; helpTopic.value = ''; qualityReview.value = null; pageReview.value = null;
+        // The library keeps its query, results and open document in memory while
+        // the user visits other pages. In-flight requests are left to finish so
+        // returning neither repeats them nor hides their result. The lists are
+        // revalidated below, and account changes clear this state in logout().
+        document.title = pageTitle.value + ' · MeowConnectPlatform'; await loadPageData(); await nextTick();
         document.getElementById('main')?.focus({preventScroll:true});
       });
       onMounted(async () => {
-        document.title = pageTitle.value + ' · MeowConnectPlatform'; playBrand(); window.addEventListener('popstate',onPopState);
+        document.title = pageTitle.value + ' · MeowConnectPlatform'; window.addEventListener('popstate',onPopState);
         try {githubEnabled.value = (await jsonRequest('/auth/providers',{},false)).github === true;} catch {}
         const githubRestored = await restoreGitHubLogin();
         if (token.value && !githubRestored) {
@@ -449,14 +971,20 @@
         }
         await loadPageData();
       });
-      onBeforeUnmount(() => {identityEpoch++; stopChat(); stopDocumentPolling(); clearTimeout(brandTimer); window.removeEventListener('popstate',onPopState); systemTheme.removeEventListener('change',onSystemTheme); motionQuery.removeEventListener('change',onMotion);});
+      onBeforeUnmount(() => {identityEpoch++; stopChat(); stopDocumentPolling(); clearSearch(); resetChatSources(); window.removeEventListener('popstate',onPopState); systemTheme.removeEventListener('change',onSystemTheme); readerMedia.removeEventListener('change',onReaderWidth);});
       return {
-        locale:ElementPlusLocaleZhCn,page,mobileNav,currentUser,authChecking,role,isAuthenticated,isAdmin,displayName,pageTitle,workspaceLinks,isExplore,isWorkspace,isDark,brandAnimating,brandWords,toggleTheme,go,accountCommand,
+        locale,page,mobileNav,currentUser,authChecking,isAuthenticated,isAdmin,displayName,pageTitle,isLibrary,isDark,toggleTheme,go,accountCommand,
         connectionClient,servicePanels,connectionEndpoint,connectionExamples,helpTopic,helpTitle,qualityReview,
         authOpen,authMode,authView,authTitle,authLoading,authError,authForm,authFormRef,authRules,usernameInput,githubLoginButton,resetAuth,openAuth,switchAuth,focusAuth,choosePasswordLogin,showAuthMethods,submitAuth,logout,githubEnabled,githubLoading,startGitHubLogin,
         knowledges,selectedKnowledgeId,selectedKnowledgeIds,selectedKnowledge,knowledgeLoading,knowledgeError,loadKnowledges,selectKnowledge,createOpen,editOpen,knowledgeName,knowledgeDescription,knowledgeEdit,createKnowledge,openKnowledgeEdit,updateKnowledge,deleteKnowledge,
-        documents,documentsLoading,documentsError,documentBusyId,loadDocuments,fileInput,replaceInput,isUploading,acceptedExtensions,uploadLimitLabel,uploadDocument,chooseReplacement,replaceDocument,documentAction,statusLabel,statusIcon,documentPending,openTryWithKnowledge,pageReview,pageReviewLoading,viewDocumentPage,
-        scopeLabel,scopeNames,toolName,toolQuery,topK,knowledgeSettings,toolLoading,toolResult,toolError,runTool,messages,chatInput,chatLoading,chatLog,isComposing,sendChat,stopChat,handleChatKey,parseMarkdown,traceFacts,traceGroups,newChat,sessions,sessionsOpen,sessionsLoading,sessionsError,loadSessions,loadSession,deleteSession,
+        documents,documentsLoading,documentsError,documentBusyId,loadDocuments,fileInput,replaceInput,isUploading,acceptedExtensions,uploadLimitLabel,requestUpload,chooseUploadTarget,cancelUploadTarget,uploadTargetOpen,uploadTargetId,uploadDocument,chooseReplacement,replaceDocument,documentAction,statusLabel,documentPending,openTryWithKnowledge,pageReview,pageReviewLoading,viewDocumentPage,
+        searchQuery,submittedQuery,searchResult,searchLoading,searchError,readingRows,resultSummary,searchInput,readingList,rememberReadingListScroll,runSearch,clearSearchInput,clearSearchOnEscape,guardSearchComposition,
+        compactReader,sidebarPane,sidebarHidden,browseKnowledge,toggleReadingSidebar,
+        activeSource,activeDocument,previewOpen,preview,previewFormat,previewTitle,previewCanvas,previewZoom,openPreview,loadPreview,downloadSource,downloadLoading,
+        scopeNames,toolName,toolQuery,topK,knowledgeSettings,toolLoading,toolResult,toolError,runTool,messages,chatInput,chatLoading,chatLog,isComposing,sendChat,stopChat,handleChatKey,parseMarkdown,traceFacts,traceGroups,newChat,sessions,sessionsOpen,sessionsLoading,sessionsError,loadSessions,loadSession,deleteSession,
+        chatSourcesOpen,chatSourceView,chatSourcesHeading,chatSourcesByMessage,chatSources,chatSource,toggleChatSources,selectChatSource,closeChatSources,
+        chatPageNumber,chatSourcePreview,chatPreview,
+        hasChatOriginal,chatPreviewFormat,chatOriginalLoading,loadChatPreview,downloadChatOriginal,
         keys,keyName,newKey,keysLoading,keyBusy,keyError,loadKeys,createKey,revokeKey,invites,newInvite,invitesLoading,inviteBusy,inviteError,invitationForm,loadInvites,createInvite,revokeInvite,invitationStatus,formatDate,operations,operationsLoading,operationsError,loadOperations,copyText
       };
     }
@@ -467,6 +995,36 @@
     emits:['update:modelValue','copy','help'],
     template:'#connection-example-template'
   });
-  app.component('mcp-icon',{props:{name:{type:String,required:true},size:{type:Number,default:20}},setup(props) {return () => Vue.h(ElementPlus.ElIcon,{size:props.size,'aria-hidden':'true'},() => Vue.h(ElementPlusIconsVue[props.name] || ElementPlusIconsVue.Document));}});
+  app.component('mcp-document-preview',{
+    props:{preview:Object,filename:String,query:String,zoom:{type:Number,default:100},compact:Boolean},
+    emits:['sheet-navigation'],
+    setup(props, {emit}) {
+      const isMarkdown = computed(() => previewFormat(props.filename) === 'md');
+      const markdown = computed(() => parseMarkdown(props.preview.text, true));
+      const textParts = computed(() => highlightParts(props.preview.text || '', props.query));
+      const workbook = computed(() => props.preview.workbook);
+      const sheetGrid = ref(null);
+      const citation = computed(() => {
+        const reference = props.preview.citation;
+        if (!reference || reference.sheet !== workbook.value?.sheet) return null;
+        const range = /^([A-Z]+)([0-9]+)(?::([A-Z]+)([0-9]+))?$/.exec(reference.range);
+        if (!range) return null;
+        const [,startColumn,startRow,endColumn = startColumn,endRow = startRow] = range;
+        const columnNumber = letters => [...letters].reduce((number, letter) => number * 26 + letter.charCodeAt(0) - 64, 0);
+        return {firstRow:Number(startRow),lastRow:Number(endRow),firstColumn:columnNumber(startColumn),lastColumn:columnNumber(endColumn)};
+      });
+      function isCitationCell(row, column) {
+        const bounds = citation.value;
+        return bounds && row >= bounds.firstRow && row <= bounds.lastRow && column >= bounds.firstColumn && column <= bounds.lastColumn;
+      }
+      function navigateSheet(sheet, row, column) {
+        if (!props.preview.loading) emit('sheet-navigation', {sheet,row,column});
+      }
+      watch(workbook, () => sheetGrid.value?.scrollTo(0, 0), {flush:'post'});
+      return {isMarkdown,markdown,textParts,workbook,sheetGrid,citation,isCitationCell,navigateSheet};
+    },
+    template:'#document-preview-template'
+  });
+  app.component('mcp-icon',{props:{name:{type:String,required:true},size:{type:Number,default:20}},setup(props) {return () => Vue.h(ElIcon,{size:props.size,'aria-hidden':'true'},() => Vue.h(icons[props.name] || icons.Document));}});
   app.mount('#app');
 })();

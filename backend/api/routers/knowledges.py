@@ -1,12 +1,20 @@
 from datetime import datetime
+from pathlib import Path
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from backend.api.schemas.knowledge import KnowledgeInput
+from backend.api.schemas.knowledge import KnowledgeInput, PreviewInput
+from backend.api.schemas.tools import DocumentSearchInput
 from backend.api.dependencies import get_current_user, get_db
 from backend.core.config import settings
+from backend.documents.cleaning import ProcessingError
+from backend.documents.spreadsheet import (MAX_COLUMN, MAX_INDEX_CELLS, MAX_ROW, SPREADSHEET_SUFFIXES,
+                                           SpreadsheetPreviewBusy, UnknownSheet, preview_spreadsheet)
+from backend.infrastructure import storage
 from backend.infrastructure.database.models import KnowledgeBase, KnowledgeDocument, KnowledgeDocumentPage, User
 from backend.services.knowledge import (
     create_knowledge, delete_document, delete_knowledge, get_owned_document,
@@ -14,6 +22,7 @@ from backend.services.knowledge import (
     ALLOWED_EXTENSIONS, queue_reprocessing,
 )
 from backend.services.platform.rate_limits import enforce_rate_limits
+from backend.services.knowledge.tools import retrieve
 
 router = APIRouter()
 
@@ -104,10 +113,104 @@ def list_documents(knowledge_id: str, user: User = Depends(get_current_user), db
     return {"documents": [document_payload(i) for i in items]}
 
 
+@router.get("/documents")
+def list_all_documents(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    items = db.query(KnowledgeDocument).join(KnowledgeBase).filter(
+        KnowledgeBase.owner_id == user.id, KnowledgeBase.status == "active",
+        KnowledgeDocument.status != "deleting",
+    ).order_by(KnowledgeDocument.created_at.desc()).all()
+    return {"documents": [document_payload(i) for i in items]}
+
+
+@router.post("/documents/search")
+def search_documents(data: DocumentSearchInput, user: User = Depends(get_current_user),
+                     db: Session = Depends(get_db)):
+    enforce_rate_limits((f"retrieve:user:{user.id}", settings.retrieval_rate_per_minute))
+    scope = [data.knowledge_id] if data.knowledge_id is not None else None
+    return retrieve(db, user.id, data.query, scope, data.top_k)
+
+
 @router.get("/knowledges/{knowledge_id}/documents/{document_id}")
 def get_document(knowledge_id: str, document_id: str, user: User = Depends(get_current_user),
                  db: Session = Depends(get_db)):
     return document_payload(get_owned_document(db, user.id, knowledge_id, document_id))
+
+
+def original_path(item: KnowledgeDocument) -> Path:
+    root = storage.KNOWLEDGE_DOCUMENTS_DIR.resolve()
+    path = (root / item.storage_key).resolve()
+    if not path.is_relative_to(root) or not path.is_file():
+        raise HTTPException(status_code=404, detail="原文件不存在")
+    return path
+
+
+@router.get("/knowledges/{knowledge_id}/documents/{document_id}/content")
+def get_document_content(knowledge_id: str, document_id: str, user: User = Depends(get_current_user),
+                         db: Session = Depends(get_db)):
+    item = get_owned_document(db, user.id, knowledge_id, document_id)
+    path = original_path(item)
+    return FileResponse(path, filename=item.filename,
+                        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
+
+
+@router.post("/knowledges/{knowledge_id}/documents/{document_id}/preview/{page_number}")
+def preview_document_page(knowledge_id: str, document_id: str, page_number: int, data: PreviewInput,
+                          user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from pypdfium2 import PdfiumError
+    from backend.documents.pdf import render_preview
+    from backend.documents.word import WORD_SUFFIXES, WordConversionBusy, word_pdf
+
+    item = get_owned_document(db, user.id, knowledge_id, document_id)
+    path = original_path(item)
+    suffix = path.suffix.lower()
+    if suffix != ".pdf" and suffix not in WORD_SUFFIXES:
+        raise HTTPException(status_code=415, detail="此格式不支持页面预览")
+    try:
+        if suffix in WORD_SUFFIXES:
+            path = word_pdf(path, wait=False)
+        image, count = render_preview(str(path), page_number, data.query.replace("\x00", "").strip())
+    except WordConversionBusy as exc:
+        raise HTTPException(status_code=503, detail=str(exc), headers={"Retry-After": "1"}) from exc
+    except IndexError as exc:
+        raise HTTPException(status_code=404, detail="页面不存在") from exc
+    except (PdfiumError, ProcessingError, OSError) as exc:
+        detail = "无法预览此 PDF" if suffix == ".pdf" else "无法预览此 Word 文件"
+        if suffix in WORD_SUFFIXES and isinstance(exc, ProcessingError):
+            detail = str(exc)
+        raise HTTPException(status_code=422, detail=detail) from exc
+    return Response(image, media_type="image/png",
+                    headers={"X-PDF-Page-Count": str(count), "Cache-Control": "private, no-store"})
+
+
+@router.get("/knowledges/{knowledge_id}/documents/{document_id}/spreadsheet-preview")
+def preview_document_spreadsheet(
+    knowledge_id: str, document_id: str,
+    sheet: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
+    row: Annotated[int | None, Query(ge=1, le=MAX_ROW)] = None,
+    column: Annotated[int | None, Query(ge=1, le=MAX_COLUMN)] = None,
+    citation_page: Annotated[int | None, Query(ge=1, le=MAX_INDEX_CELLS)] = None,
+    user: User = Depends(get_current_user), db: Session = Depends(get_db),
+):
+    item = get_owned_document(db, user.id, knowledge_id, document_id)
+    path = original_path(item)
+    if path.suffix.lower() not in SPREADSHEET_SUFFIXES:
+        raise HTTPException(status_code=415, detail="此格式不支持表格预览")
+    location = {}
+    if citation_page is not None and sheet is None:
+        page = db.get(KnowledgeDocumentPage, (document_id, citation_page - 1))
+        if page is not None:
+            location = page.extraction_data.get("spreadsheet", {})
+    try:
+        payload = preview_spreadsheet(path, sheet or location.get("sheet"),
+                                      row or location.get("row", 1), column or location.get("column", 1))
+    except UnknownSheet as exc:
+        raise HTTPException(status_code=404, detail="工作表不存在") from exc
+    except SpreadsheetPreviewBusy as exc:
+        raise HTTPException(status_code=503, detail=str(exc), headers={"Retry-After": "1"}) from exc
+    except ProcessingError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return JSONResponse({**payload, "citation_range": location.get("range")},
+                        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
 
 
 @router.put("/knowledges/{knowledge_id}/documents/{document_id}/content", status_code=202)

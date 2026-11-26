@@ -22,7 +22,6 @@ class BackendArchitectureTests(unittest.TestCase):
     def test_backend_imports_resolve_in_application_migrations_and_scripts(self):
         paths = [path for directory in ("backend", "migrations", "tests")
                  for path in (ROOT / directory).rglob("*.py")]
-        paths.append(ROOT / "test_langsmith_eval.py")
         for path in paths:
             for module, line in backend_imports(path):
                 target = ROOT.joinpath(*module.split("."))

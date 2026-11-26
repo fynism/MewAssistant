@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fastapi import HTTPException, UploadFile
+from openpyxl import Workbook
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -135,6 +136,45 @@ class DocumentIngestionTests(unittest.TestCase):
         service.delete_document(self.db, doc)
         self.assertEqual(self.db.query(KnowledgeDocumentPage).count(), 0)
         self.assertEqual(self.embeddings.count, 0)
+
+    def test_markdown_upload_indexes_the_same_decoded_text_and_rejects_invalid_files(self):
+        text = "# 会议纪要\n\n- 项目进展\n- 2026 年发布计划"
+        doc = self.upload("notes.MD", text.encode("utf-16"))
+        service.process_document(doc.id)
+        self.db.expire_all()
+        self.assertIn(".md", routes.knowledge_settings()["allowed_extensions"])
+        self.assertEqual((doc.status, doc.file_type), ("ready", ".md"))
+        self.assertEqual(doc.processing_report["indexed_pages"], 1)
+        self.assertEqual(self.milvus.rows[0]["file_type"], "Markdown")
+        self.assertEqual(self.milvus.rows[0]["text"], text)
+        data = routes.page_details("a", doc.id, 1, self.db.get(User, 1), self.db)
+        self.assertEqual(data["raw_text"], text)
+        for invalid_data in (b"binary\x00data", b"\r\n\t "):
+            with self.assertRaises(HTTPException) as invalid:
+                self.upload("invalid.md", invalid_data)
+            self.assertEqual(invalid.exception.status_code, 400)
+            self.assertIn("Markdown", invalid.exception.detail)
+
+    def test_xlsx_ingestion_preserves_sheet_and_cell_range_for_citations(self):
+        book = Workbook()
+        book.active["A1"] = "summary"
+        book.create_sheet("Expenses")["AA81"] = "searchable invoice amount"
+        source = self.root / "report.xlsx"
+        book.save(source)
+        doc = self.upload(source.name, source.read_bytes())
+        service.process_document(doc.id)
+        self.db.expire_all()
+        self.assertEqual(doc.status, "ready", doc.error_summary)
+        hit = next(row for row in self.milvus.rows if "invoice" in row["text"])
+        self.assertEqual(hit["page_number"], 1)
+        page = self.db.get(KnowledgeDocumentPage, (doc.id, hit["page_number"]))
+        self.assertEqual(page.extraction_data["spreadsheet"], {"sheet": "Expenses", "range": "AA81", "row": 81, "column": 27})
+        user = self.db.get(User, 1)
+        payload = json.loads(routes.preview_document_spreadsheet("a", doc.id, citation_page=2, user=user, db=self.db).body)
+        self.assertEqual((payload["sheet"], payload["citation_range"]), ("Expenses", "AA81"))
+        self.assertEqual(payload["rows"], [["searchable invoice amount"]])
+        payload = json.loads(routes.preview_document_spreadsheet("a", doc.id, citation_page=10, user=user, db=self.db).body)
+        self.assertEqual((payload["sheet"], payload["citation_range"]), ("Sheet", None))
 
     def test_all_failed_pages_keep_report_and_never_become_searchable(self):
         doc = self.upload("bad.pdf", b"%PDF-test")

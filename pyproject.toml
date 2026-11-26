@@ -22,12 +22,10 @@ dependencies = [
     "sentence-transformers>=3.0.0",
     "torch>=2.10.0",
     "langgraph>=0.2.31",
+    "langfuse>=5.2,<6",
     "pypdf>=4.3.1",
-    "docx2txt>=0.8",
-    "unstructured",
-    "openpyxl",
-    "tabulate",
-    "msoffcrypto-tool",
+    "openpyxl==3.1.5",
+    "defusedxml>=0.7.1",
     "sqlalchemy>=2.0.36",
     "psycopg2-binary>=2.9.10",
     "redis>=5.2.1",
@@ -38,6 +36,7 @@ dependencies = [
     "rapidocr==3.10.0",
     "onnxruntime>=1.20,<2",
     "pypdfium2>=4.30,<6",
+    "pillow>=10.0",
 ]
 
 [project.optional-dependencies]
@@ -46,6 +45,9 @@ study = [
     "chromadb>=0.5.5",
     "bilibili-api-python>=17.0.0",
 ]
+
+[dependency-groups]
+eval = ["ragas>=0.4.4,<0.5"]
 
 # The embedding model runs on CPU in the ECS deployment. Pin the transitive
 # PyTorch dependency to its CPU wheel so Linux images do not pull CUDA/Triton.

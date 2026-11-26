@@ -9,9 +9,16 @@ class ListKnowledgesInput(BaseModel):
     cursor: str | None = None
 
 
-class RetrieveInput(BaseModel):
+class RetrievalQuery(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
     query: str = Field(min_length=1, max_length=500)
-    knowledge_ids: list[str] = Field(min_length=1, max_length=20, alias="knowledgeIds")
     top_k: int = Field(default=min(5, settings.max_retrieval_results), ge=1,
                        le=settings.max_retrieval_results, alias="topK")
+
+
+class RetrieveInput(RetrievalQuery):
+    knowledge_ids: list[str] = Field(min_length=1, max_length=20, alias="knowledgeIds")
+
+
+class DocumentSearchInput(RetrievalQuery):
+    knowledge_id: str | None = Field(default=None, min_length=1, max_length=36, alias="knowledgeId")

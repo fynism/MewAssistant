@@ -41,6 +41,14 @@ class Settings:
     mcp_allowed_origins: str = os.getenv("MCP_ALLOWED_ORIGINS", "")
     mcp_external_enabled: bool = os.getenv("MCP_EXTERNAL_ENABLED", "false").lower() == "true"
 
+    langfuse_tracing_enabled: bool = os.getenv("LANGFUSE_TRACING_ENABLED", "false").lower() == "true"
+    langfuse_capture_retrieval_content: bool = (
+        os.getenv("LANGFUSE_CAPTURE_RETRIEVAL_CONTENT", "false").lower() == "true"
+    )
+    langfuse_public_key: str = os.getenv("LANGFUSE_PUBLIC_KEY", "").strip()
+    langfuse_secret_key: str = os.getenv("LANGFUSE_SECRET_KEY", "").strip()
+    langfuse_base_url: str = os.getenv("LANGFUSE_BASE_URL", "https://cloud.langfuse.com").strip()
+
     ark_api_key: str | None = os.getenv("ARK_API_KEY")
     model: str | None = os.getenv("MODEL")
     base_url: str | None = os.getenv("BASE_URL")

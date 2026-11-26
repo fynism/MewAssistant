@@ -6,33 +6,53 @@ const path = require('node:path');
 const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 const tick = () => new Promise(setImmediate);
+const markdownFixture = '# 中文标题\n\n![远程图片](https://example.test/test.png)\n\n<img src="https://example.test/raw.png">';
 const requests = [], notices = [], classes = new Set(), stored = new Map();
 const location = {pathname:'/',search:'',origin:'https://platform.example'};
 const knowledgeId = '11111111-1111-1111-1111-111111111111';
-let app, mounted, unmount, userRole = 'user', confirmAllowed = true, responder;
+let app, mounted, unmount, userRole = 'user', confirmAllowed = true, responder, popState;
 const context = vm.createContext({console,setTimeout,clearTimeout,TextDecoder,TextEncoder,Headers,FormData,Blob,AbortController,DOMException,URL,URLSearchParams,crypto:require('node:crypto').webcrypto});
 vm.runInContext(fs.readFileSync(path.join(root,'frontend/vendor/vue/vue.global.prod.js'),'utf8'),context);
 const vue = context.Vue;
 Object.assign(context, {
   Vue:{...vue,onMounted(fn) {mounted = fn;},onBeforeUnmount(fn) {unmount = fn;},createApp(definition) {return {use() {},component() {},mount() {app = vue.proxyRefs(definition.setup());}};}},
-  ElementPlus:{ElMessage:{success:message=>notices.push(message),warning:message=>notices.push(message),error:message=>notices.push(message)},ElMessageBox:{confirm:async()=>{if(!confirmAllowed) throw new Error('cancel');}}},
-  ElementPlusLocaleZhCn:{},
+  ElementPlus:{ElMessage:{success:message=>notices.push(message),warning:message=>notices.push(message),error:message=>notices.push(message)},ElMessageBox:{confirm:async()=>{if(!confirmAllowed) throw new Error('cancel');}},locale:{}},
   location,history:{pushState(_,__,url) {const next = new URL(url,location.origin); location.pathname = next.pathname; location.search = next.search;}},
-  window:{addEventListener() {},removeEventListener() {},scrollTo() {}},
+  window:{addEventListener(name,handler) {if (name === 'popstate') popState = handler;},removeEventListener() {},scrollTo() {}},
   document:{documentElement:{classList:{contains:name=>classes.has(name),toggle:(name,on)=>on?classes.add(name):classes.delete(name)}},getElementById:()=>null},
   matchMedia:()=>({matches:false,addEventListener() {},removeEventListener() {}}),
   localStorage:{getItem:key=>stored.get(key),setItem:(key,value)=>stored.set(key,value),removeItem:key=>stored.delete(key)},
   sessionStorage:{getItem:()=>null,setItem() {}},navigator:{clipboard:{writeText:async()=>{}}},
-  marked:{parse:text=>text},DOMPurify:{sanitize:text=>text},
+  marked:require(path.join(root,'frontend/vendor/marked/marked.umd.js')),DOMPurify:{sanitize:text=>text},
   fetch:async(url,options={})=>{requests.push({url,method:options.method || 'GET',body:options.body,headers:options.headers});return responder(url,options);}
 });
 const json = (data,status=200) => ({ok:status>=200&&status<300,status,headers:new Headers(),json:async()=>data});
 responder = async (url,options={}) => {
   if(url === '/platform/services/knowledge') return json({externalAvailable:true,endpoint:'https://mcp.example/mcp/knowledge'});
   if(url === '/auth/login' || url === '/auth/register') return json({access_token:'fixture-token',username:'alice',role:userRole});
-  if(url === '/knowledge-settings') return json({allowed_extensions:['.pdf','.txt'],max_upload_bytes:1000000,max_retrieval_results:20});
+  if(url === '/knowledge-settings') return json({allowed_extensions:['.pdf','.txt','.md','.doc','.docx','.xls','.xlsx'],max_upload_bytes:1000000,max_retrieval_results:20});
   if(url === '/knowledges') return json(options.method === 'POST' ? {id:knowledgeId,name:'Private',has_ready_documents:true} : {knowledges:[{id:knowledgeId,name:'Private',has_ready_documents:true}]});
-  if(url.endsWith('/documents') && options.method !== 'POST') return json({documents:[{id:'doc',filename:'same.pdf',status:'ready'}]});
+  if(url === '/documents/search') return json({status:'ok',results:[{
+    sourceId:'hit',documentId:'doc',knowledgeId,knowledgeName:'Private',filename:'same.pdf',pageNumber:7,
+    text:'这是匹配词之前的一段长文本，用来验证侧栏的命中标记可见。接下来是测试检索相关内容。'
+  }]});
+  if(url.endsWith('/documents') && options.method !== 'POST') return json({documents:[{id:'doc',knowledge_id:knowledgeId,filename:'same.pdf',status:'ready'}]});
+  if(url.includes('/preview/')) return {ok:true,headers:new Headers({'X-PDF-Page-Count':'12'}),blob:async()=>new Blob(['fixture page'])};
+  if(url.endsWith('/text/content')) return {ok:true,arrayBuffer:async()=>Uint8Array.from([0xd6,0xd0,0xce,0xc4]).buffer};
+  if(url.endsWith('/utf16/content')) return {ok:true,arrayBuffer:async()=>Uint8Array.from([0xfe,0xff,0x4e,0x2d,0x65,0x87]).buffer};
+  if(url.endsWith('/utf32le/content')) return {ok:true,arrayBuffer:async()=>Uint8Array.from([0xff,0xfe,0,0,0x2d,0x4e,0,0,0x00,0xf6,1,0]).buffer};
+  if(url.endsWith('/utf32be/content')) return {ok:true,arrayBuffer:async()=>Uint8Array.from([0,0,0xfe,0xff,0,0,0x4e,0x2d,0,1,0xf6,0x00]).buffer};
+  if(url.endsWith('/markdown/content')) return {ok:true,arrayBuffer:async()=>new TextEncoder().encode('\uFEFF' + markdownFixture).buffer};
+  if(url.includes('/spreadsheet-preview')) {
+    const params = new URL(url,location.origin).searchParams;
+    const cited = params.has('citation_page');
+    return json({
+      sheets:['库存 & 采购','用途 # 数据'], sheet:params.get('sheet') || (cited ? '用途 # 数据' : '库存 & 采购'),
+      row_start:Number(params.get('row')) || (cited ? 41 : 1), column_start:Number(params.get('column')) || (cited ? 21 : 1),
+      total_rows:80,total_columns:40,row_limit:40,column_limit:20,columns:cited ? ['U','V'] : ['A','B'],
+      rows:[['42',null]],citation_range:cited ? 'U41:V41' : null
+    });
+  }
   if(url.includes('/documents')) return json({id:'doc',status:'pending'});
   if(url === '/tools/debug/retrieve') return json({status:'no_match',results:[]});
   if(url === '/tools/debug/listKnowledges') return json({items:[],nextCursor:null});
@@ -44,7 +64,18 @@ responder = async (url,options={}) => {
   if(url === '/sessions') return json({sessions:[{session_id:'existing',title:'Earlier'}]});
   if(url.startsWith('/sessions/')) return json(options.method === 'DELETE' ? {deleted:true} : {messages:[{type:'human',content:'Earlier question',knowledge_ids:[knowledgeId]}],last_knowledge_ids:[knowledgeId]});
   if(url === '/chat/stream') {
-    const bytes = new TextEncoder().encode('data: {"type":"rag_step","step":{"label":"检索"}}\r\n\r\ndata: {"type":"content","content":"真实协议"}\r\n\r\ndata: {"type":"trace","rag_trace":{"retrieved_chunks":[{"filename":"same.pdf","text":"来源"}]}}\r\n\r\ndata: [DONE]\r\n\r\n');
+    const source = {filename:'same.pdf',knowledge_id:knowledgeId,document_id:'doc',page_number:'7'};
+    const trace = {type:'trace',rag_trace:{retrieved_chunks:[
+      {...source,text:'来源'}, {...source,text:'同一页的另一段'},
+      {filename:'legacy.pdf',page_number:'未知',text:'旧会话片段'},
+      {filename:'note.TXT',knowledge_id:knowledgeId,document_id:'text',text:'中文'},
+      {filename:'guide.MD',knowledge_id:knowledgeId,document_id:'markdown',text:'文档'},
+      {filename:'old.DOC',knowledge_id:knowledgeId,document_id:'old-word',text:'旧 Word 来源'},
+      {filename:'new.docx',knowledge_id:knowledgeId,document_id:'new-word',page_number:3,text:'Word 新引用'},
+      {filename:'old-reference.pdf',knowledge_id:knowledgeId,document_id:'old-pdf',text:'旧 PDF 来源'},
+      {filename:'inventory.XLS',knowledge_id:knowledgeId,document_id:'old-sheet',page_number:4,text:'表格来源'}
+    ]}};
+    const bytes = new TextEncoder().encode('data: {"type":"rag_step","step":{"label":"检索"}}\r\n\r\ndata: {"type":"content","content":"真实协议"}\r\n\r\ndata: ' + JSON.stringify(trace) + '\r\n\r\ndata: [DONE]\r\n\r\n');
     let cursor = 0;
     return {...json({}),body:{getReader:()=>({read:async()=>cursor<bytes.length ? {done:false,value:bytes.slice(cursor,cursor+=7)} : {done:true},releaseLock() {}})}};
   }
@@ -66,23 +97,50 @@ vm.runInContext(fs.readFileSync(path.join(root,'frontend/app.js'),'utf8'),contex
   await app.submitAuth(); await tick();
   assert.equal(app.page,'/workspace/knowledges');
   assert.equal(app.documents[0].filename,'same.pdf');
+  assert.ok(requests.some(item=>item.url==='/documents'&&item.method==='GET'));
+  app.searchQuery = '测试检索'; await app.runSearch();
+  assert.equal(JSON.parse(requests.find(item=>item.url==='/documents/search').body).knowledgeId ?? null,null);
+  const [prefix, match] = app.readingRows[0].snippet;
+  assert.equal(prefix.text, '…记可见。接下来是');
+  assert.equal(match.text, '测试检索');
+  assert.equal(match.match, true);
+  for (const [documentId, filename, expected] of [
+    ['text','note.TXT','中文'], ['utf16','unicode.txt','中文'],
+    ['utf32le','unicode-le.txt','中😀'], ['utf32be','unicode-be.txt','中😀'], ['markdown','guide.MD',markdownFixture]
+  ]) {
+    await app.openPreview({key:documentId,documentId,knowledgeId,filename},{detail:1}); await tick();
+    assert.equal(app.preview.text,expected);
+    assert.equal(app.preview.hasContent,true);
+    assert.equal(app.preview.pageCount,0);
+    assert.equal(requests.at(-1).headers.get('Authorization'),'Bearer fixture-token');
+  }
+  assert.equal(app.previewFormat('guide.MD'),'md');
+  const markdown = app.parseMarkdown(app.preview.text, true);
+  assert.match(markdown, /<h1>中文标题<\/h1>/);
+  assert.doesNotMatch(markdown, /<img|example\.test/);
+  await app.selectKnowledge(knowledgeId); await tick();
+  assert.equal(JSON.parse(requests.filter(item=>item.url==='/documents/search').at(-1).body).knowledgeId,knowledgeId);
+  app.clearSearchInput();
   const file = new Blob(['test']); file.name = 'same.pdf';
   await app.uploadDocument({target:{files:[file],value:'selected'}});
   assert.ok(requests.some(item=>item.url===`/knowledges/${knowledgeId}/documents`&&item.method==='POST'));
-  await app.documentAction({id:'doc',filename:'same.pdf'},'retry');
-  await app.documentAction({id:'doc',filename:'same.pdf'},'delete');
+  await app.documentAction(app.documents[0],'retry');
+  await app.documentAction(app.documents[0],'delete');
   assert.ok(requests.some(item=>item.url.endsWith('/doc/retry')&&item.method==='POST'));
   const textFile = new Blob(['2025 v2.0']); textFile.name = 'new.txt';
   const uploadCount = requests.filter(item=>item.method==='POST'&&item.url.endsWith('/documents')).length;
   await app.uploadDocument({target:{files:[textFile],value:'selected'}});
   assert.equal(requests.filter(item=>item.method==='POST'&&item.url.endsWith('/documents')).length,uploadCount+1);
-  await app.documentAction({id:'doc',filename:'same.pdf'},'reprocess');
+  assert.ok(app.acceptedExtensions.includes('.md'));
+  const markdownFile = new Blob([markdownFixture]); markdownFile.name = 'guide.MD';
+  await app.uploadDocument({target:{files:[markdownFile],value:'selected'}});
+  assert.equal(requests.filter(item=>item.method==='POST'&&item.url.endsWith('/documents')).length,uploadCount+2);
+  await app.documentAction(app.documents[0],'reprocess');
   assert.ok(requests.some(item=>item.url.endsWith('/doc/reprocess')&&item.method==='POST'));
-  await app.viewDocumentPage({id:'doc',filename:'same.pdf'},2);
+  await app.viewDocumentPage(app.documents[0],2);
   assert.ok(requests.some(item=>item.url.endsWith('/doc/pages/2')));
   assert.ok(app.pageReview.data);
   assert.ok(requests.some(item=>item.url.endsWith('/doc')&&item.method==='DELETE'));
-  assert.ok(!requests.some(item=>/^\/documents(?:\/|$)/.test(item.url)));
   app.openTryWithKnowledge(knowledgeId); await tick();
   app.chatInput = '测试问题'; await app.sendChat();
   const chatRequest = requests.find(item=>item.url==='/chat/stream');
@@ -90,9 +148,69 @@ vm.runInContext(fs.readFileSync(path.join(root,'frontend/app.js'),'utf8'),contex
   assert.equal(app.messages[1].text,'真实协议');
   assert.equal(app.messages[1].steps[0].label,'检索');
   assert.equal(app.messages[1].trace.retrieved_chunks[0].filename,'same.pdf');
+  const previewPaths = () => requests.filter(item=>item.url.includes('/preview/'));
+  const messageId = app.messages[1].id;
+  assert.equal(previewPaths().length,0);
+  app.chatInput = '草稿';
+  await app.toggleChatSources(messageId); await tick();
+  assert.equal(app.chatSources.length,8);
+  assert.equal(app.chatSource.passages.join('|'),'来源|同一页的另一段');
+  assert.equal(app.chatPreview.page,8);
+  assert.equal(app.chatPreview.pageCount,12);
+  assert.equal(previewPaths()[0].url,`/knowledges/${knowledgeId}/documents/doc/preview/8`);
+  assert.equal(previewPaths()[0].headers.get('Authorization'),'Bearer fixture-token');
+  assert.deepEqual(JSON.parse(previewPaths()[0].body),{query:''});
+  await app.loadChatPreview(9);
+  await app.closeChatSources();
+  assert.equal(app.chatPreview.url,'');
+  assert.equal(app.chatInput,'草稿');
+  await app.toggleChatSources(messageId); await tick();
+  assert.equal(app.chatPreview.page,9);
+  app.selectChatSource(app.chatSources[1]); await tick();
+  assert.equal(app.chatSource.pageNumber,null);
+  assert.equal(app.chatSource.passages[0],'旧会话片段');
+  assert.equal(app.hasChatOriginal,false);
+  assert.equal(previewPaths().length,3);
+  app.selectChatSource(app.chatSources[2]); await tick();
+  assert.equal(app.chatPreview.text,'中文');
+  app.selectChatSource(app.chatSources[3]); await tick();
+  assert.equal(app.chatPreview.text,markdownFixture);
+  assert.equal(app.hasChatOriginal,true);
+  assert.equal(app.chatPreviewFormat,'md');
+  assert.match(app.parseMarkdown(app.chatPreview.text, true), /<h1>中文标题<\/h1>/);
+  assert.equal(app.chatPreview.hasContent,true);
+  app.selectChatSource(app.chatSources[4]); await tick();
+  assert.equal(app.chatPreview.page,1);
+  assert.equal(previewPaths().at(-1).url, `/knowledges/${knowledgeId}/documents/old-word/preview/1`);
+  app.selectChatSource(app.chatSources[5]); await tick();
+  assert.equal(app.chatPreview.page,4);
+  assert.equal(previewPaths().at(-1).url, `/knowledges/${knowledgeId}/documents/new-word/preview/4`);
+  app.selectChatSource(app.chatSources[6]); await tick();
+  assert.equal(app.hasChatOriginal,true);
+  assert.equal(app.chatPreview.hasContent,false);
+  assert.equal(previewPaths().length,5);
+  app.selectChatSource(app.chatSources[7]); await tick();
+  assert.ok(requests.at(-1).url.endsWith('/old-sheet/spreadsheet-preview?citation_page=5'));
+  assert.equal(app.chatPreview.workbook.row_start,41);
+  assert.equal(app.chatPreview.workbook.column_start,21);
+  assert.equal(app.chatPreview.citation.range,'U41:V41');
+  const selectedSheet = {sheet:'用途 # 数据',row:1,column:21};
+  await app.loadChatPreview(app.chatPreview.page, 0, selectedSheet);
+  assert.deepEqual(Object.fromEntries(new URL(requests.at(-1).url,location.origin).searchParams),{
+    sheet:selectedSheet.sheet,row:'1',column:'21'
+  });
+  assert.equal(app.chatPreview.workbook.sheet,selectedSheet.sheet);
+  assert.equal(app.chatPreview.citation.range,'U41:V41');
+  await app.closeChatSources();
+  assert.equal(app.chatPreview.hasContent,false);
+  await app.toggleChatSources(messageId); await tick();
+  assert.equal(app.chatPreview.workbook.column_start,21);
+  assert.ok(requests.at(-1).url.endsWith('row=1&column=21'));
+  await app.closeChatSources();
   const chatPageRequests = requests.length;
   await app.runTool(); assert.equal(requests.length,chatPageRequests);
   app.go('/services/knowledge'); await tick();
+  assert.equal(app.chatSourcesOpen,false);
   assert.equal(app.knowledges[0].id,knowledgeId);
   app.toolQuery = '测试检索'; await app.runTool();
   assert.equal(app.toolResult.status,'no_match');
@@ -121,8 +239,309 @@ vm.runInContext(fs.readFileSync(path.join(root,'frontend/app.js'),'utf8'),contex
   app.keyName = 'Slow'; const pending = app.createKey(); await tick(); app.go('/'); await tick(); finish(json({key:'late-secret'})); await pending; assert.equal(app.newKey,'');
   responder = normalResponder;
   app.go('/workspace/knowledges'); await tick();
+  const wordSource = {key:'new-word',documentId:'new-word',knowledgeId,filename:'new.docx',pageNumber:3,query:'查询'};
+  await app.openPreview(wordSource,{detail:1}); await tick();
+  assert.equal(app.preview.page,4);
+  assert.equal(app.preview.pageCount,12);
+  assert.equal(previewPaths().at(-1).url, `/knowledges/${knowledgeId}/documents/new-word/preview/4`);
+  assert.deepEqual(JSON.parse(previewPaths().at(-1).body),{query:'查询'});
+  await app.loadPreview(5);
+  assert.equal(app.preview.page,5);
+  const sheetSource = {key:'new-sheet',documentId:'new-sheet',knowledgeId,filename:'inventory.xlsx'};
+  await app.openPreview(sheetSource,{detail:1}); await tick();
+  assert.ok(requests.at(-1).url.endsWith('/new-sheet/spreadsheet-preview'));
+  assert.equal(app.preview.workbook.sheet,'库存 & 采购');
+  assert.equal(app.preview.workbook.rows[0][0],'42');
+  assert.equal(app.preview.citation,null);
+  // The library query, results and open document survive ordinary navigation,
+  // and returning revalidates the lists without repeating retrieval or preview.
+  await app.selectKnowledge(knowledgeId); await tick();
+  app.searchQuery = '借阅期'; await app.runSearch();
+  const markdownSource = {key:'md',documentId:'markdown',knowledgeId,filename:'guide.MD',query:'借阅期'};
+  await app.openPreview(markdownSource,{detail:1}); await tick();
+  assert.equal(app.preview.text,markdownFixture);
+  app.searchQuery = '未提交草稿';
+  const searchCalls = () => requests.filter(item=>item.url === '/documents/search').length;
+  const markdownCalls = () => requests.filter(item=>item.url.endsWith('/markdown/content')).length;
+  const documentCalls = () => requests.filter(item=>item.url.endsWith('/documents') && item.method === 'GET').length;
+  const beforeNavigation = {search:searchCalls(),markdown:markdownCalls(),documents:documentCalls()};
+  app.go('/try'); await tick(); app.go('/account'); await tick(); app.go('/workspace/knowledges'); await tick();
+  assert.equal(app.submittedQuery,'借阅期');
+  assert.equal(app.searchQuery,'未提交草稿');
+  assert.equal(app.searchResult.results[0].sourceId,'hit');
+  assert.equal(app.selectedKnowledgeId,knowledgeId);
+  assert.equal(app.activeSource.key,'md');
+  assert.equal(app.preview.text,markdownFixture);
+  assert.equal(app.previewOpen,true);
+  assert.equal(searchCalls(),beforeNavigation.search);
+  assert.equal(markdownCalls(),beforeNavigation.markdown);
+  assert.ok(documentCalls() > beforeNavigation.documents);
+  location.pathname = '/try'; popState(); await tick();
+  assert.equal(app.page,'/try');
+  location.pathname = '/workspace/knowledges'; popState(); await tick();
+  assert.equal(app.page,'/workspace/knowledges');
+  assert.equal(app.submittedQuery,'借阅期');
+  assert.equal(app.preview.text,markdownFixture);
+  // A route rebuild recreates the reading canvas. Its position comes from the
+  // retained view state, and nothing is persisted to the browser.
+  const readingCanvas = {scrollTop:0,scrollLeft:0,scrollTo(left,top) {this.scrollLeft = left; this.scrollTop = top;}};
+  app.previewCanvas = readingCanvas; await tick();
+  readingCanvas.scrollTop = 560; readingCanvas.scrollLeft = 40;
+  app.preview.rememberScroll({target:readingCanvas});
+  app.previewCanvas = null; await tick();
+  readingCanvas.scrollTop = 0; readingCanvas.scrollLeft = 0;
+  app.previewCanvas = readingCanvas; await tick();
+  // Text has its final height at mount, so both axes restore directly.
+  assert.equal(readingCanvas.scrollTop,560);
+  assert.equal(readingCanvas.scrollLeft,40);
+  // A PDF page regains its height asynchronously, so the image load is the
+  // authority and re-applies the position after the clamped mount restore.
+  const pdfSource = {key:'scroll-pdf',documentId:'scroll-pdf',knowledgeId,filename:'scroll.pdf'};
+  await app.openPreview(pdfSource,{detail:1}); await tick();
+  readingCanvas.scrollTop = 420; readingCanvas.scrollLeft = 30;
+  app.preview.rememberScroll({target:readingCanvas});
+  app.previewCanvas = null; await tick();
+  readingCanvas.scrollTop = 0; readingCanvas.scrollLeft = 0;
+  app.previewCanvas = readingCanvas; await tick();
+  assert.equal(readingCanvas.scrollTop,0);
+  app.preview.restoreImageScroll({target:{src:app.preview.url}});
+  assert.equal(readingCanvas.scrollTop,420);
+  assert.equal(readingCanvas.scrollLeft,30);
+  // Changing the page or the document starts at the top rather than reusing it.
+  await app.loadPreview(2); await tick();
+  app.preview.restoreImageScroll({target:{src:app.preview.url}});
+  assert.equal(readingCanvas.scrollTop,0);
+  assert.equal(readingCanvas.scrollLeft,0);
+  await app.openPreview({key:'scroll-pdf-2',documentId:'scroll-pdf-2',knowledgeId,filename:'other.pdf'},{detail:1}); await tick();
+  app.preview.restoreImageScroll({target:{src:app.preview.url}});
+  assert.equal(readingCanvas.scrollTop,0);
+  assert.equal(readingCanvas.scrollLeft,0);
+  // The results list keeps its position across the same rebuild.
+  const readingListElement = {scrollTop:0,scrollLeft:0,scrollTo(left,top) {this.scrollLeft = left; this.scrollTop = top;}};
+  app.readingList = readingListElement; await tick();
+  readingListElement.scrollTop = 180;
+  app.rememberReadingListScroll({target:readingListElement});
+  app.readingList = null; await tick();
+  readingListElement.scrollTop = 0;
+  app.readingList = readingListElement; await tick();
+  assert.equal(readingListElement.scrollTop,180);
+  // A search finishing after the user leaves still belongs to the library view.
+  let finishSearch;
+  responder = async(url,options)=>url === '/documents/search' ? new Promise(resolve=>{finishSearch = resolve;}) : normalResponder(url,options);
+  app.searchQuery = '借阅期'; const pendingSearch = app.runSearch(); await tick();
+  app.go('/account'); await tick();
+  finishSearch(json({status:'ok',results:[{sourceId:'late',documentId:'doc',knowledgeId,knowledgeName:'Private',filename:'same.pdf',pageNumber:1,text:'借阅期'}]}));
+  await pendingSearch; await tick();
+  app.go('/workspace/knowledges'); await tick();
+  assert.equal(app.searchResult.results[0].sourceId,'late');
+  // An empty submit is inert: it must not close the open document or clear
+  // the committed search.
+  const preservedSource = {key:'md',documentId:'markdown',knowledgeId,filename:'guide.MD',query:'借阅期'};
+  await app.openPreview(preservedSource,{detail:1}); await tick();
+  const submittedBeforeEmpty = app.submittedQuery, searchCountBeforeEmpty = searchCalls();
+  app.searchQuery = '';
+  await app.runSearch(); await tick();
+  assert.equal(app.submittedQuery,submittedBeforeEmpty);
+  assert.equal(searchCalls(),searchCountBeforeEmpty);
+  assert.equal(app.activeSource.key,'md');
+  assert.equal(app.previewOpen,true);
+  // Escape matches the clear button, but an IME composition owns Escape.
+  app.searchQuery = '未提交草稿';
+  let prevented = false;
+  app.clearSearchOnEscape({isComposing:true,keyCode:0,preventDefault(){prevented = true;}});
+  assert.equal(prevented,false);
+  assert.equal(app.searchQuery,'未提交草稿');
+  assert.equal(app.submittedQuery,'借阅期');
+  app.clearSearchOnEscape({isComposing:false,keyCode:0,preventDefault(){prevented = true;}});
+  assert.equal(prevented,true);
+  assert.equal(app.searchQuery,'');
+  assert.equal(app.submittedQuery,'');
+  assert.equal(app.searchResult,null);
+  assert.equal(app.activeSource,null);
+  // An empty box with no committed search has nothing to clear, so Escape
+  // must leave the document being read open.
+  await app.openPreview(preservedSource,{detail:1}); await tick();
+  let emptyEscapePrevented = false;
+  app.clearSearchOnEscape({isComposing:false,keyCode:0,preventDefault(){emptyEscapePrevented = true;}});
+  assert.equal(emptyEscapePrevented,false);
+  assert.equal(app.activeSource.key,'md');
+  assert.equal(app.previewOpen,true);
+  assert.equal(app.searchQuery,'');
+  assert.equal(app.submittedQuery,'');
+  // Submitting the same scope while it is still loading is one request; a new
+  // scope replaces it, and the stale response cannot win the race.
+  const secondKnowledgeId = '22222222-2222-2222-2222-222222222222';
+  let searchResolvers = [];
+  responder = (url,options={}) => url === '/documents/search'
+    ? new Promise(resolve=>searchResolvers.push({resolve,body:options.body}))
+    : normalResponder(url,options);
+  app.searchQuery = '在途检索';
+  const firstInFlight = app.runSearch(); await tick();
+  await app.runSearch(); await app.runSearch(); await tick();
+  assert.equal(searchResolvers.length,1);
+  app.selectedKnowledgeId = secondKnowledgeId;
+  const scopedSearch = app.runSearch(); await tick();
+  assert.equal(searchResolvers.length,2);
+  assert.equal(JSON.parse(searchResolvers[1].body).knowledgeId,secondKnowledgeId);
+  const resultFor = (sourceId,text) => ({status:'ok',results:[{sourceId,documentId:'doc',knowledgeId,knowledgeName:'Private',filename:'same.pdf',pageNumber:1,text}]});
+  searchResolvers[0].resolve(json(resultFor('stale','在途检索')));
+  searchResolvers[1].resolve(json(resultFor('current','在途检索')));
+  await Promise.all([firstInFlight,scopedSearch]); await tick();
+  assert.equal(app.searchResult.results[0].sourceId,'current');
+  assert.equal(app.searchLoading,false);
+  // A failed search can be retried once the request is no longer in flight.
+  app.selectedKnowledgeId = knowledgeId;
+  let failedSearches = 0;
+  responder = (url,options={}) => {
+    if (url !== '/documents/search') return normalResponder(url,options);
+    failedSearches += 1;
+    return json({detail:'检索暂不可用'},503);
+  };
+  app.searchQuery = '重试检索';
+  await app.runSearch(); await tick();
+  assert.equal(failedSearches,1);
+  assert.equal(app.searchError,'检索暂不可用');
+  assert.equal(app.resultSummary,'检索失败');
+  responder = normalResponder;
+  await app.runSearch('重试检索');
+  assert.equal(app.searchError,'');
+  assert.equal(app.searchResult.results[0].sourceId,'hit');
+  // "All documents" is not an upload destination. One library goes direct,
+  // several require an explicit destination, and cancelling changes nothing.
+  app.clearSearchInput(); await app.selectKnowledge(''); await tick();
+  const privateKb = {id:knowledgeId,name:'Private',has_ready_documents:true};
+  const secondKb = {id:secondKnowledgeId,name:'第二知识库',has_ready_documents:false};
+  app.knowledges = [privateKb];
+  app.uploadTargetId = '';
+  app.requestUpload();
+  assert.equal(app.uploadTargetOpen,false);
+  assert.equal(app.uploadTargetId,knowledgeId);
+  app.knowledges = [privateKb,secondKb];
+  app.uploadTargetId = '';
+  app.requestUpload();
+  assert.equal(app.uploadTargetOpen,true);
+  assert.equal(app.uploadTargetId,'');
+  const postsBeforeCancel = requests.filter(item=>item.method==='POST'&&item.url.endsWith('/documents')).length;
+  app.cancelUploadTarget();
+  assert.equal(app.uploadTargetOpen,false);
+  assert.equal(app.uploadTargetId,'');
+  assert.equal(app.selectedKnowledgeId,'');
+  assert.equal(requests.filter(item=>item.method==='POST'&&item.url.endsWith('/documents')).length,postsBeforeCancel);
+  app.requestUpload();
+  app.chooseUploadTarget(secondKb.id);
+  assert.equal(app.uploadTargetOpen,false);
+  assert.equal(app.uploadTargetId,secondKb.id);
+  const scopeBeforeUpload = app.selectedKnowledgeId, documentReadsBeforeUpload = documentCalls();
+  const uploadFile = new Blob(['upload']); uploadFile.name = 'new.pdf';
+  await app.uploadDocument({target:{files:[uploadFile],value:'selected'}});
+  assert.equal(requests.filter(item=>item.url.endsWith('/documents')&&item.method==='POST').at(-1).url,`/knowledges/${secondKb.id}/documents`);
+  assert.equal(app.selectedKnowledgeId,scopeBeforeUpload);
+  assert.ok(documentCalls() > documentReadsBeforeUpload);
+  app.knowledges = []; app.selectedKnowledgeId = ''; app.uploadTargetId = '';
+  app.requestUpload();
+  assert.equal(app.uploadTargetOpen,false);
+  assert.equal(app.uploadTargetId,'');
+  // The default scope follows readiness only until the user makes it explicit.
+  // A new account uploads its first PDF and asks without reloading the page.
+  const firstKbId = '33333333-3333-3333-3333-333333333333';
+  const laterKbId = '44444444-4444-4444-4444-444444444444';
+  const deepKbId = '55555555-5555-5555-5555-555555555555';
+  const firstKb = {id:firstKbId,name:'首批资料',has_ready_documents:false};
+  const laterKb = {id:laterKbId,name:'后续资料',has_ready_documents:true};
+  const deepKb = {id:deepKbId,name:'深链资料',has_ready_documents:true};
+  const scopedIds = () => [...app.selectedKnowledgeIds];
+  let scopeStage = 'first', firstKbCreated = false, firstDocStatus = 'none';
+  const firstDocument = () => ({id:'first-doc',knowledge_id:firstKbId,filename:'first.pdf',status:firstDocStatus});
+  responder = async (url, options={}) => {
+    if (url === '/knowledges') {
+      if (options.method === 'POST') {firstKbCreated = true; return json(firstKb);}
+      if (scopeStage === 'first') return json({knowledges:firstKbCreated
+        ? [{...firstKb,ready_document_count:firstDocStatus === 'ready' ? 1 : 0,has_ready_documents:firstDocStatus === 'ready'}]
+        : []});
+      if (scopeStage === 'later') return json({knowledges:[laterKb]});
+      return json({knowledges:[laterKb,deepKb]});
+    }
+    if (url === `/knowledges/${firstKbId}/documents`) {
+      if (options.method === 'POST') {firstDocStatus = 'pending'; return json(firstDocument());}
+      return json({documents:firstDocStatus === 'none' ? [] : [firstDocument()]});
+    }
+    if (url === '/documents' && options.method === 'GET') return json({documents:firstDocStatus === 'none' ? [] : [firstDocument()]});
+    if (url === '/sessions/empty-scope') return json({messages:[{type:'human',content:'空范围历史'}],last_knowledge_ids:[]});
+    if (url === '/sessions/first-scope') return json({messages:[{type:'human',content:'首份历史'}],last_knowledge_ids:[firstKbId]});
+    return normalResponder(url, options);
+  };
+  app.logout(false);
+  scopeStage = 'first'; firstKbCreated = false; firstDocStatus = 'none';
+  Object.assign(app.authForm,{username:'new-user',password:'password'});
+  app.authMode = 'login';
+  await app.submitAuth(); await tick();
+  assert.equal(app.selectedKnowledgeIds.length,0);
+  app.knowledgeName = '首批资料';
+  await app.createKnowledge(); await tick();
+  assert.equal(app.selectedKnowledgeId,firstKbId);
+  assert.deepEqual(scopedIds(),[]);
+  const firstPdf = new Blob(['first']); firstPdf.name = 'first.pdf';
+  await app.uploadDocument({target:{files:[firstPdf],value:'selected'}});
+  assert.equal(firstDocStatus,'pending');
+  assert.deepEqual(scopedIds(),[]);
+  // The next library poll reports the document ready; no reload happens.
+  firstDocStatus = 'ready';
+  await app.loadDocuments(); await tick();
+  assert.deepEqual(scopedIds(),[firstKbId]);
+  app.go('/try'); await tick();
+  assert.deepEqual(scopedIds(),[firstKbId]);
+  app.chatInput = '第一份资料讲了什么'; await app.sendChat();
+  assert.deepEqual(JSON.parse(requests.filter(item=>item.url === '/chat/stream').at(-1).body).knowledge_ids,[firstKbId]);
+  app.newChat();
+  // Clearing is an explicit empty scope. Background refreshes must not refill
+  // it, and the product still sends the empty scope instead of blocking.
+  app.selectedKnowledgeIds = [];
+  await tick();
+  await app.loadKnowledges(); await tick();
+  assert.deepEqual(scopedIds(),[]);
+  app.chatInput = '没有选择范围'; await app.sendChat();
+  assert.deepEqual(JSON.parse(requests.filter(item=>item.url === '/chat/stream').at(-1).body).knowledge_ids,[]);
+  app.newChat();
+  // Restored conversations own their scope, including an empty one.
+  await app.loadSession({session_id:'empty-scope'}); await tick();
+  assert.deepEqual(scopedIds(),[]);
+  await app.loadKnowledges(); await tick();
+  assert.deepEqual(scopedIds(),[]);
+  await app.loadSession({session_id:'first-scope'}); await tick();
+  assert.deepEqual(scopedIds(),[firstKbId]);
+  // Switching accounts starts a new automatic scope for the new account.
+  app.logout(false);
+  scopeStage = 'later';
+  Object.assign(app.authForm,{username:'another-user',password:'password'});
+  await app.submitAuth(); await tick();
+  assert.deepEqual(scopedIds(),[laterKbId]);
+  // A deep link outranks the ready default and survives later refreshes.
+  app.logout(false);
+  scopeStage = 'deep';
+  location.search = `?knowledge=${deepKbId}`;
+  Object.assign(app.authForm,{username:'linked-user',password:'password'});
+  await app.submitAuth(); await tick();
+  assert.deepEqual(scopedIds(),[deepKbId]);
+  await app.loadKnowledges(); await tick();
+  assert.deepEqual(scopedIds(),[deepKbId]);
+  responder = normalResponder;
+  location.search = '';
+  // Remembered scroll positions belong to the signed-in session.
+  readingCanvas.scrollTop = 99; readingCanvas.scrollLeft = 9;
+  app.preview.rememberScroll({target:readingCanvas});
+  readingListElement.scrollTop = 77;
+  app.rememberReadingListScroll({target:readingListElement});
   responder = async()=>json({detail:'expired'},401); await app.loadKnowledges();
   assert.equal(app.isAuthenticated,false); assert.equal(app.knowledges.length,0); assert.equal(app.authOpen,true);
+  assert.equal(app.searchQuery,''); assert.equal(app.submittedQuery,''); assert.equal(app.searchResult,null);
+  assert.equal(app.activeSource,null); assert.equal(app.preview.hasContent,false);
+  readingCanvas.scrollTop = 99; readingCanvas.scrollLeft = 9;
+  app.previewCanvas = null; await tick(); app.previewCanvas = readingCanvas; await tick();
+  assert.equal(readingCanvas.scrollTop,0);
+  assert.equal(readingCanvas.scrollLeft,0);
+  readingListElement.scrollTop = 77;
+  app.readingList = null; await tick(); app.readingList = readingListElement; await tick();
+  assert.equal(readingListElement.scrollTop,0);
   unmount();
-  console.log('PASS: frontend API contracts, login continuity, files, scope, chunked SSE, sources, tools, history, credentials, admin, theme, stale responses, 401 cleanup.');
+  console.log('PASS: frontend API contracts, login continuity, files, search dedupe/retry/escape, upload destinations, scope, chunked SSE, sources, tools, history, credentials, admin, theme, stale responses, 401 cleanup.');
 })().catch(error=>{unmount?.();console.error(error);process.exitCode=1;});

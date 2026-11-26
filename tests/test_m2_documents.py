@@ -128,6 +128,18 @@ class M2DocumentTests(unittest.TestCase):
         document = self.db.query(KnowledgeDocument).one()
         self.assertIn("updated_at", routes.document_payload(document))
 
+    def test_long_document_names_keep_the_original_extension(self):
+        stem = "项目资料" * 70
+        filename = f"{stem}.MD"
+        expected = f"{stem[:252]}.MD"
+        item = asyncio.run(service.save_upload(self.db, 1, "alice-kb", UploadFile(
+            file=io.BytesIO(b"# New notes"), filename=filename)))
+        self.assertEqual((item.filename, item.file_type), (expected, ".md"))
+
+        replacement = asyncio.run(service.replace_document(self.db, 1, "alice-kb", "alice-doc", UploadFile(
+            file=io.BytesIO(b"# Replacement notes"), filename=filename)))
+        self.assertEqual((replacement.replacement_filename, replacement.replacement_file_type), (expected, ".md"))
+
     def test_user_document_and_storage_quotas_cover_upload_and_replacement(self):
         with patch.object(uploads, "settings", replace(uploads.settings, max_user_documents=1)):
             with self.assertRaises(HTTPException) as full:
